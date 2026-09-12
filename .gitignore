@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+
+# Ambientes virtuais
+.env
+.venv
+env/
+venv/
+ENV/
+
+# Testes e cobertura
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Editores e IDEs
+.vscode/
+.idea/
+
+# Logs e auditoria local
+logs/
+*.jsonl
+*.log
+
+# OpenCode / sessão temporária
+Handoff/
+.agents/
+Therion.code-workspace
+
