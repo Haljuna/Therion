@@ -19,7 +19,7 @@ class IntentRecognizer:
     """Reconhecedor determinístico de intenções para a V0."""
 
     _OPEN_APP_PATTERN = re.compile(
-        r"^(?:therion[,\s]+)?(?:abra|abrir)\s+(?:o\s+)?([a-zA-Z0-9_\-\.]+)\s*$",
+        r"^(?:therion[,\s]+)?(?:abra|abrir)\s+(?:o\s+)?([a-zA-Z0-9_\-\.\sàáâãéêíóôõúç]+)\s*$",
         re.IGNORECASE,
     )
 

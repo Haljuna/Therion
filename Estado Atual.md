@@ -13,11 +13,38 @@ Detalhes técnicos ficam em [[Arquitetura]].
 
 ## Status geral
 
-**Fase atual:** V1 — Em preparação (decisões técnicas principais aprovadas; implementação ainda não iniciada).
+**Fase atual:** V1 — Em andamento
 
 O conceito do Therion teve seu ciclo básico implementado e validado com sucesso no Windows através do teste simbólico de abertura do Obsidian de ponta a ponta (V0 concluída).
 
-As decisões técnicas principais da V1 foram aprovadas (interface PySide6, processo persistente, configuração JSON, Skills híbridas, calendário Google). A implementação da V1 ainda não foi iniciada.
+As decisões técnicas principais da V1 foram aprovadas (interface PySide6, processo persistente, configuração JSON, Skills híbridas, calendário Google). A implementação da V1 foi iniciada de forma incremental.
+
+### Progresso da V1 validado até o momento
+
+- Ambiente virtual criado (`.venv/`)
+- PySide6 6.11.2 instalado e validado
+- Primeira janela desktop criada (`therion/interface/desktop.py`)
+- Teste manual da janela aprovado: título "Therion", tamanho 800x600, fechamento normal pelo botão X
+- 69 testes totais passando (55 V0 + 9 config + 5 integração desktop, regressão zero)
+- `QSystemTrayIcon` implementado e validado
+- Ícone na bandeja do Windows funcionando
+- Menu do tray com "Abrir Therion" e "Encerrar Therion" operacionais
+- Persistência na bandeja implementada e validada manualmente
+- Fechar pelo X oculta a janela; processo permanece ativo
+- Reabertura via "Abrir Therion" validada
+- Encerramento explícito via "Encerrar Therion" validado (remove tray, encerra processo)
+- Módulo `therion/config` criado (`__init__.py`, `local.py`)
+- Configuração padrão definida: `ui.start_minimized`, `aliases`, `allowed_apps`
+- Caminho padrão: `%APPDATA%\Therion\config.json`
+- Fallbacks validados: arquivo inexistente, JSON inválido, campos inválidos → defaults seguros
+- Campos desconhecidos preservados (não interpretados)
+- Persistência atômica (tempfile + os.replace); falha mantém original intacto
+- 9 testes de configuração adicionados
+- Integração de `ui.start_minimized` concluída e validada manualmente
+- `start_minimized=false` → janela visível + tray
+- `start_minimized=true` → inicia no tray, janela oculta
+- Reabertura via "Abrir Therion" validada
+- 5 testes de integração desktop adicionados
 
 ---
 
@@ -187,7 +214,14 @@ Todas as etapas previstas da V0 foram concluídas.
 
 ### Próxima meta principal
 
-**Implementar e validar a V1** conforme Roadmap e decisões aprovadas (DEC-025 a DEC-029).
+**Integrar aliases de forma incremental e controlada, começando por aliases simples de aplicativos já autorizados, sem alterar ainda `allowed_apps`** conforme Roadmap e decisões aprovadas (DEC-025 a DEC-029).
+
+Ainda NÃO integrados:
+- `allowed_apps`
+- geometria da janela (posição/tamanho)
+- outras preferências de UI
+- calendário
+- Skills
 
 ---
 

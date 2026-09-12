@@ -5,6 +5,7 @@ from typing import Optional
 
 from therion.actions.executor import ActionExecutor
 from therion.actions.verifier import ActionVerifier
+from therion.config import AliasManager
 from therion.context.second_brain import ReadResult, SecondBrainReader
 from therion.core.intent import Intent, IntentRecognizer
 from therion.core.planner import Plan, Planner
@@ -43,6 +44,7 @@ class Orchestrator:
         self.memory = WorkingMemory()
         self.second_brain = SecondBrainReader(vault_root=vault_root)
         self.audit_logger = AuditLogger(log_dir=log_dir)
+        self.alias_manager = AliasManager()
 
     def _complete_task(self) -> None:
         """Conclui a tarefa na memória de trabalho e audita o registro."""
@@ -79,19 +81,30 @@ class Orchestrator:
                 message=msg,
             )
 
+        # Registra o alvo original para auditoria
         self.memory.record_intent(intent.action, intent.target)
 
-        if not self.permission_manager.is_allowed(intent):
-            msg = f"Ação '{intent.action}' para o alvo '{intent.target}' não está autorizada pela governança da V0."
+        # Resolve alias antes da verificação de permissão
+        resolved_target = self.alias_manager.resolve(intent.target)
+        # Cria nova Intent com alvo resolvido (não muta a original)
+        resolved_intent = Intent(
+            action=intent.action,
+            target=resolved_target,
+            raw_command=intent.raw_command,
+            requires_confirmation=intent.requires_confirmation,
+        )
+
+        if not self.permission_manager.is_allowed(resolved_intent):
+            msg = f"Ação '{resolved_intent.action}' para o alvo '{resolved_intent.target}' não está autorizada pela governança da V0."
             self.memory.record_error(msg)
             self._complete_task()
             return OrchestrationResult(
                 status="forbidden",
-                intent=intent,
+                intent=intent,  # Registra intent original na resposta
                 message=msg,
             )
 
-        plan = self.planner.create_plan(intent)
+        plan = self.planner.create_plan(resolved_intent)
         self.memory.record_plan(plan.steps)
 
         if self.permission_manager.requires_confirmation(intent):
