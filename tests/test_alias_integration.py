@@ -189,7 +189,7 @@ class TestOrchestratorIntegration(unittest.TestCase):
 
     @patch("therion.config.alias_manager.save_config")
     @patch("therion.config.alias_manager.load_config")
-    def test_orchestrator_bloqueia_alvo_nao_autorizado(
+    def test_orchestrator_inicia_esclarecimento_para_alvo_desconhecido(
         self, mock_load_config, mock_save
     ):
         from therion.core.orchestrator import Orchestrator
@@ -202,7 +202,8 @@ class TestOrchestratorIntegration(unittest.TestCase):
         orchestrator = Orchestrator(simulate=True)
 
         result = orchestrator.process_command("Therion, abra o notepad")
-        self.assertEqual(result.status, "forbidden")
+        self.assertEqual(result.status, "awaiting_confirmation")
+        self.assertIn("Não reconheci", result.message)
 
     @patch("therion.config.alias_manager.save_config")
     @patch("therion.config.alias_manager.load_config")

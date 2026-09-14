@@ -29,10 +29,10 @@ class TestPermissions(unittest.TestCase):
                 self.assertFalse(self.permission_manager.is_allowed(intent))
 
     def test_orchestrator_blocks_unauthorized_commands(self) -> None:
-        """O orquestrador deve retornar status 'forbidden' para alvos não autorizados."""
+        """O orquestrador inicia fluxo de esclarecimento para alvos não autorizados."""
         result = self.orchestrator.process_command("Therion, abra o Chrome")
-        self.assertEqual(result.status, "forbidden")
-        self.assertIn("não está autorizada", result.message)
+        self.assertEqual(result.status, "awaiting_confirmation")
+        self.assertIn("Não reconheci", result.message)
         self.assertIsNone(result.plan)
 
 

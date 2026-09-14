@@ -16,6 +16,14 @@ class ReadResult:
     error: Optional[str] = None
 
 
+@dataclass
+class SearchResult:
+    """Resultado de uma busca textual no Segundo Cérebro."""
+
+    path: str
+    snippet: str
+
+
 class SecondBrainReader:
     """Leitor controlado e seletivo do Segundo Cérebro."""
 
@@ -134,3 +142,102 @@ class SecondBrainReader:
                 canonical_path=canonical_path,
                 error=f"Erro ao ler arquivo: {err}",
             )
+
+    def search_notes(
+        self,
+        term: str,
+        max_results: int = 5,
+        snippet_length: int = 200,
+    ) -> List[SearchResult]:
+        """Busca termo em nomes e conteúdo de arquivos .md dentro das raízes autorizadas.
+
+        Busca literal e case-insensitive. Retorna no máximo max_results resultados.
+        Interrrompe varredura assim que max_results são encontrados.
+        """
+        cleaned = term.strip()
+        if not cleaned:
+            return []
+
+        term_lower = cleaned.lower()
+        results: List[SearchResult] = []
+
+        for root in self.allowed_roots:
+            if len(results) >= max_results:
+                break
+            for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
+                if len(results) >= max_results:
+                    break
+                for filename in filenames:
+                    if len(results) >= max_results:
+                        break
+                    if not filename.lower().endswith(".md"):
+                        continue
+
+                    file_path = os.path.join(dirpath, filename)
+
+                    if not self._is_subpath(file_path, root):
+                        continue
+
+                    relative_path = os.path.relpath(file_path, self.vault_root).replace("\\", "/")
+
+                    # Ler conteudo do arquivo
+                    try:
+                        with open(file_path, "r", encoding="utf-8") as f:
+                            content = f.read()
+                    except Exception:
+                        continue
+
+                    content_lower = content.lower()
+                    content_idx = content_lower.find(term_lower)
+
+                    # Match no conteudo (prioridade)
+                    if content_idx != -1:
+                        snippet = self._build_snippet(content, content_idx, len(cleaned))
+                        results.append(
+                            SearchResult(path=relative_path, snippet=snippet)
+                        )
+                        continue
+
+                    # Match somente no nome do arquivo (fallback)
+                    if term_lower in filename.lower():
+                        results.append(
+                            SearchResult(
+                                path=relative_path,
+                                snippet="[Correspondencia no nome do arquivo]",
+                            )
+                        )
+
+        return results
+
+    def _build_snippet(
+        self,
+        content: str,
+        idx: int,
+        term_length: int,
+        snippet_length: int = 200,
+    ) -> str:
+        """Constroi um snippet legivel ao redor da ocorrencia encontrada."""
+        start = max(0, idx - snippet_length // 2)
+        end = min(len(content), idx + term_length + snippet_length // 2)
+
+        # Ajustar start para nao comecar no meio de uma palavra
+        if start > 0:
+            space_pos = content.find(" ", start, start + 20)
+            if space_pos != -1:
+                start = space_pos + 1
+
+        # Ajustar end para nao terminar no meio de uma palavra
+        if end < len(content):
+            space_pos = content.rfind(" ", end - 20, end)
+            if space_pos != -1:
+                end = space_pos
+
+        snippet = content[start:end]
+        snippet = " ".join(snippet.split())
+
+        if start > 0:
+            snippet = "..." + snippet
+        if end < len(content):
+            snippet = snippet + "..."
+
+        return snippet

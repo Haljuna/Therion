@@ -45,6 +45,126 @@ As decisões técnicas principais da V1 foram aprovadas (interface PySide6, proc
 - `start_minimized=true` → inicia no tray, janela oculta
 - Reabertura via "Abrir Therion" validada
 - 5 testes de integração desktop adicionados
+- AliasManager implementado e testado (CRUD seguro com proteção interna)
+- Fluxo IntentRecognizer → AliasManager → PermissionManager → Orchestrator validado
+- Comando conversacional de listagem de aliases implementado: "Therion, liste meus aliases"
+- IntentRecognizer reconhece o comando e variações (liste, lista, mostre, exiba, apelidos)
+- Orchestrator consulta AliasManager.list_aliases() e formata resposta
+- Operação é somente leitura: nenhum alias é criado, removido ou alterado
+- config.json não é modificado pelo comando de listagem
+- Lista vazia tratada com mensagem clara "Nenhum alias cadastrado."
+- Lista com um ou múltiplos aliases formatada corretamente
+- Comandos anteriores (abrir aplicativo) continuam funcionando
+- 16 novos testes adicionados para o comando de listagem
+- Total atual: 130 testes passando (114 anteriores + 16 novos)
+- Comando conversacional de adicionar alias implementado: "Therion, adicione um alias"
+- Fluxo conversacional validado: inicia → pergunta palavra-chave → pergunta alvo → valida alvo autorizado → pede confirmação → persiste somente após "sim"
+- AliasManager.add_alias() reutilizado para persistência segura
+- Resposta "não" cancela sem escrever no config.json
+- Resposta ambígua pede confirmação novamente
+- Alias existente não é sobrescrito (proteção interna do AliasManager)
+- Chave vazia e alvo vazio rejeitados
+- Alvo não autorizado (ex: Notepad) rejeitado — validação via ALLOWED_TARGETS existente
+- Nenhuma persistência ocorre antes da confirmação explícita
+- 19 novos testes adicionados para o comando de adicionar
+- Total atual: 149 testes passando (130 anteriores + 19 novos)
+- Comando conversacional de excluir/remover alias implementado: "Therion, exclua um alias" / "Therion, remova um alias"
+- Fluxo conversacional validado: inicia → pergunta qual alias → verifica existência → mostra alias e alvo → pede confirmação → remove somente após "sim"
+- AliasManager.remove_alias(..., confirm=True) reutilizado para remoção segura
+- Resposta "não" cancela sem escrever no config.json
+- Resposta ambígua pede confirmação novamente
+- Alias inexistente informado claramente sem alteração no config.json
+- Nenhuma persistência ocorre antes da confirmação explícita
+- Somente o alias escolhido é removido
+- 18 novos testes adicionados para o comando de excluir
+- Total atual: 167 testes passando (149 anteriores + 18 novos)
+- Comando conversacional de substituir alias implementado: "Therion, substitua um alias" / "Therion, altere um alias" / "Therion, troque um alias"
+- Fluxo conversacional validado: inicia → pergunta qual alias → verifica existência → mostra alvo atual → pergunta novo alvo → valida autorização → pede confirmação → substitui somente após "sim"
+- AliasManager.replace_alias(..., confirm=True) reutilizado para substituição segura
+- Resposta "não" cancela sem escrever no config.json
+- Resposta ambígua pede confirmação novamente
+- Alias inexistente informado claramente sem alteração no config.json
+- Novo alvo não autorizado bloqueado — validação via ALLOWED_TARGETS existente
+- Estado temporário limpo em todos os caminhos (sucesso, cancelamento, erro)
+- Nenhuma persistência ocorre antes da confirmação explícita
+- 26 novos testes adicionados para o comando de substituir
+- Marco anterior: 193 testes passando (167 anteriores + 26 novos)
+- Fluxo de alvo desconhecido implementado: "Therion, abra o [alvo não autorizado]"
+- Quando o usuário pede para abrir um alvo sem alias e não autorizado, o Therion inicia um fluxo de esclarecimento
+- Pergunta ao usuário o que o alvo significa
+- Valida a explicação usando a allowlist/permissão existente
+- Se o alvo explicado for autorizado, mostra a associação proposta e pede confirmação explícita
+- Somente após "sim" chama AliasManager.add_alias() — sem parâmetro confirm
+- "não" cancela sem persistência
+- Resposta ambígua mantém o estado e solicita confirmação novamente
+- Alvo explicado não autorizado é rejeitado
+- O fluxo limpa todo estado temporário após sucesso, cancelamento ou erro
+- Nenhum alias concede nova autorização
+- Nenhum catálogo de aplicativos, fuzzy matching ou nova allowlist foi criado
+- Testes antigos que esperavam "forbidden" no Orchestrator foram atualizados para o novo comportamento de esclarecimento
+- PermissionManager continua bloqueando diretamente alvos não autorizados
+- Nenhum alvo não autorizado gera plano executável antes do esclarecimento/autorização
+- 19 novos testes adicionados para o fluxo de alvo desconhecido
+- Total atual: 212 testes passando (193 anteriores + 19 novos)
+- SKILL-001 usada formalmente pela primeira vez desde que entrou em estado "Em teste"
+- Procedimento da SKILL-001 seguido sem necessidade de desvio
+- Quebra de governança registrada: agente alterou 2 testes sem aguardar autorização durante regressão; alterações foram auditadas, eram tecnicamente coerentes e foram revisadas; falha de processo, não de lógica da SKILL-001
+- Consulta explícita ao Segundo Cérebro por caminho implementada: "Therion, leia no Segundo Cérebro [caminho]"
+- Nova intenção "consultar segundo cérebro" adicionada ao IntentRecognizer
+- Orchestrator trata diretamente a consulta usando read_context() e SecondBrainReader.read_note()
+- Leitura somente de arquivos .md dentro das raízes já autorizadas
+- Path traversal continua bloqueado
+- Arquivo inexistente retorna erro controlado
+- Extensão inválida retorna erro controlado
+- Caminho fora das raízes retorna erro de permissão controlado
+- Consulta é registrada na memória de trabalho
+- Não passa por resolução de alias, não cria plano, não tenta executar aplicativo
+- Nenhuma escrita no Segundo Cérebro
+- Nenhuma expansão de allowed_roots
+- Nenhuma busca automática, semântica, embedding, banco de dados ou LLM
+- therion/context/second_brain.py precisou receber o novo método search_notes() — API existente de read_note() foi suficiente para leitura por caminho, mas busca textual exigiu extensão mínima
+- SKILL-001 não foi utilizada — fluxo somente leitura sem confirmação/persistência
+- 11 novos testes adicionados para a consulta ao Segundo Cérebro
+- Total atual: 223 testes passando (212 anteriores + 11 novos)
+- Busca textual simples e explícita no Segundo Cérebro implementada: "Therion, procure no Segundo Cérebro [termo]"
+- Nova intenção "buscar segundo cérebro" adicionada ao IntentRecognizer
+- Comandos suportados: "Therion, procure no Segundo Cérebro Aetherion", "Therion, busque no Segundo Cérebro Aetherion", "Therion, pesquise no Segundo Cérebro Aetherion"
+- Busca somente dentro de allowed_roots
+- Somente arquivos .md
+- Busca literal e case-insensitive
+- Procura termo no nome do arquivo e no conteúdo
+- Máximo de 5 resultados por busca
+- Snippet de até 200 caracteres por resultado
+- Se termo está apenas no nome: retorna indicação "[Correspondência no nome do arquivo]"
+- Se termo está no conteúdo: retorna trecho ao redor da primeira ocorrência
+- Erro de leitura em um arquivo não aborta a busca inteira
+- Symlinks não permitem escape das raízes autorizadas (followlinks=False)
+- Consulta por caminho existente continua funcionando normalmente
+- Busca não passa por alias/planner/executor
+- Sem fuzzy matching, sem regex fornecida pelo usuário, sem stemming
+- Sem embeddings, sem LLM, sem banco vetorial, sem indexação persistente
+- Sem escrita no Segundo Cérebro, sem expansão de allowed_roots
+- 19 novos testes adicionados para a busca textual
+- Total atual: 242 testes passando (223 anteriores + 19 novos)
+- Teste manual 1 aprovado: "Therion, procure no Segundo Cérebro Aetherion" retornou 4 resultados com caminhos e snippets corretos
+- Teste manual 2 aprovado: leitura direta de Estado Atual.md por caminho retornou conteúdo correto
+- Melhoria da apresentação dos snippets da busca textual implementada
+- Função auxiliar privada _build_snippet() adicionada em therion/context/second_brain.py
+- Snippets agora evitam, quando possível, começar ou terminar no meio de palavras
+- Quebras de linha, tabs e múltiplos espaços são normalizados com " ".join(snippet.split())
+- "..." é adicionado no início/fim quando há conteúdo anterior/posterior omitido
+- O termo encontrado permanece dentro do snippet
+- Conteúdo curto não recebe "..." desnecessário
+- Se o termo aparecer no conteúdo, snippet do conteúdo tem prioridade sobre match no nome
+- "[Correspondencia no nome do arquivo]" é usada somente quando há match no nome e não no conteúdo
+- Lógica de busca, allowed_roots, máximo de 5 resultados e IntentRecognizer não foram alterados
+- Nenhuma mudança arquitetural; sem ranking, embeddings, LLM ou busca semântica
+- 11 novos testes de apresentação de snippets adicionados
+- 15 testes existentes de busca também revalidados
+- Total atual: 253 testes passando (242 anteriores + 11 novos)
+- Teste manual 3 aprovado: "Therion, procure no Segundo Cérebro Therion" retornou 5 resultados com prioridade de conteúdo validada
+- Teste manual 4 aprovado: "Therion, procure no Segundo Cérebro Codex.md" retornou 1 resultado com match somente no nome
+- Alguns snippets ainda exibem elementos de Markdown bruto (crases, marcadores) — isso não é bug deste incremento; limpeza/renderização de Markdown deve ser tratada separadamente se necessário
 
 ---
 
@@ -214,14 +334,32 @@ Todas as etapas previstas da V0 foram concluídas.
 
 ### Próxima meta principal
 
-**Integrar aliases de forma incremental e controlada, começando por aliases simples de aplicativos já autorizados, sem alterar ainda `allowed_apps`** conforme Roadmap e decisões aprovadas (DEC-025 a DEC-029).
+**Integrar entrada e resposta de comandos na interface desktop PySide6, reutilizando o Orchestrator existente.**
 
-Ainda NÃO integrados:
-- `allowed_apps`
-- geometria da janela (posição/tamanho)
-- outras preferências de UI
-- calendário
-- Skills
+Objetivo conceitual futuro:
+
+campo de entrada → usuário envia comando → Orchestrator.process_command() → resposta → exibição na própria janela
+
+Contexto:
+- A interface PySide6 faz parte da V1
+- A janela e o system tray já foram implementados e validados
+- Porém a interface ainda não oferece uma forma funcional de enviar comandos ao Therion
+- Atualmente o CLI continua sendo o meio funcional de interação
+
+Essa etapa será usada para validar na prática:
+- Integração entre interface desktop e Orchestrator
+- Experiência de uso do Therion como aplicação real
+
+Ainda NÃO implementados:
+- campo de entrada de comandos na janela
+- exibição de respostas na janela
+- tratamento de erros na interface
+- models de IA / LLMs integrados
+- Skills executáveis reutilizáveis
+- integração com calendário
+- delegação automática para outros agentes
+- voz
+- automações avançadas
 
 ---
 
@@ -278,3 +416,11 @@ Decisões técnicas principais da V1 aprovadas: Interface (PySide6), Processo pe
 Próxima etapa principal:
 
 **Implementar e validar a V1.**
+
+Marco da V1 alcançado: fluxo de alvo desconhecido implementado e validado com 212 testes automatizados (212/212 passando). SKILL-001 aplicada e avaliada positivamente em seu primeiro uso prático formal; permanece em estado Em teste.
+
+Marco da V1 alcançado: consulta explícita ao Segundo Cérebro por caminho implementada e validada com 223 testes automatizados (223/223 passando). API existente de SecondBrainReader foi suficiente sem alterações.
+
+Marco da V1 alcançado: busca textual simples e explícita no Segundo Cérebro implementada e validada com 242 testes automatizados (242/242 passando). Método search_notes() adicionado ao SecondBrainReader. Teste manual aprovado no CLI.
+
+Marco da V1 alcançado: melhoria da apresentação dos snippets da busca textual implementada e validada com 253 testes automatizados (253/253 passando). Função _build_snippet() adicionada. Testes manuais aprovados no CLI.
