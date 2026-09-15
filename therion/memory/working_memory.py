@@ -1,8 +1,9 @@
-"""Memória de trabalho volátil da sessão e da tarefa (V0)."""
+"""Memória de trabalho volátil da sessão e da tarefa (V0/V1)."""
 
 import uuid
+from collections import deque
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 
 @dataclass
@@ -40,12 +41,26 @@ class TaskContext:
         }
 
 
+@dataclass
+class Turn:
+    """Um turno de conversa na sessão."""
+
+    role: Literal["user", "therion"]
+    text: str
+
+
 class WorkingMemory:
     """Gerenciador de memória de trabalho estritamente volátil (sem persistência em disco)."""
 
     def __init__(self) -> None:
         self.current_task: Optional[TaskContext] = None
         self.history: List[TaskContext] = []
+        # Memória de sessão (V1)
+        self.turns: deque = deque(maxlen=50)
+        self.last_intent: Optional[str] = None
+        self.last_target: Optional[str] = None
+        self.last_result: Optional[str] = None
+        self.last_status: Optional[str] = None
 
     def start_task(
         self,
@@ -133,3 +148,22 @@ class WorkingMemory:
         """Limpa toda a memória da sessão atual."""
         self.current_task = None
         self.history.clear()
+
+    def add_turn(self, role: Literal["user", "therion"], text: str) -> None:
+        """Adiciona um turno de conversa à sessão."""
+        self.turns.append(Turn(role=role, text=text))
+
+    def recent_turns(self, n: int = 10) -> List[Turn]:
+        """Retorna os N turnos mais recentes."""
+        if n <= 0:
+            return []
+        turns_list = list(self.turns)
+        return turns_list[-n:]
+
+    def clear_session(self) -> None:
+        """Limpa turnos e contexto operacional, preservando history e current_task."""
+        self.turns.clear()
+        self.last_intent = None
+        self.last_target = None
+        self.last_result = None
+        self.last_status = None

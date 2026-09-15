@@ -106,6 +106,15 @@ class Orchestrator:
         self._pending_unknown_original = None
         self._pending_unknown_explained = None
 
+    def _finalize_session_result(self, result: OrchestrationResult) -> None:
+        """Registra turno do Therion e atualiza contexto operacional na sessão."""
+        self.memory.add_turn("therion", result.message)
+        self.memory.last_result = result.message
+        self.memory.last_status = result.status
+        if result.intent is not None:
+            self.memory.last_intent = result.intent.action
+            self.memory.last_target = result.intent.target
+
     def _handle_replace_alias_flow(self, command: str) -> Optional[OrchestrationResult]:
         """Processa o fluxo conversacional de substituir alias.
         
@@ -516,29 +525,34 @@ class Orchestrator:
         """Processa um comando textual registrando todas as etapas na memória de trabalho."""
         mode = "simulado" if self.simulate else "real"
         self.memory.start_task(command=command, execution_mode=mode)
+        self.memory.add_turn("user", command)
 
         # Primeiro verifica se está no fluxo conversacional de substituir alias
         replace_alias_flow_result = self._handle_replace_alias_flow(command)
         if replace_alias_flow_result is not None:
             self._complete_task()
+            self._finalize_session_result(replace_alias_flow_result)
             return replace_alias_flow_result
 
         # Primeiro verifica se está no fluxo conversacional de excluir alias
         delete_alias_flow_result = self._handle_delete_alias_flow(command)
         if delete_alias_flow_result is not None:
             self._complete_task()
+            self._finalize_session_result(delete_alias_flow_result)
             return delete_alias_flow_result
 
         # Primeiro verifica se está no fluxo conversacional de adicionar alias
         alias_flow_result = self._handle_alias_flow(command)
         if alias_flow_result is not None:
             self._complete_task()
+            self._finalize_session_result(alias_flow_result)
             return alias_flow_result
 
         # Verifica se está no fluxo de alvo desconhecido
         unknown_target_flow_result = self._handle_unknown_target_flow(command)
         if unknown_target_flow_result is not None:
             self._complete_task()
+            self._finalize_session_result(unknown_target_flow_result)
             return unknown_target_flow_result
 
         intent = self.intent_recognizer.parse(command)
@@ -546,10 +560,12 @@ class Orchestrator:
             msg = "Não consegui identificar a intenção no comando recebido."
             self.memory.record_error(msg)
             self._complete_task()
-            return OrchestrationResult(
+            result = OrchestrationResult(
                 status="unknown_intent",
                 message=msg,
             )
+            self._finalize_session_result(result)
+            return result
 
         # Registra o alvo original para auditoria
         self.memory.record_intent(intent.action, intent.target)
@@ -564,83 +580,96 @@ class Orchestrator:
                 message = "Nenhum alias cadastrado."
             self.memory.record_context_query(path="aliases", success=True)
             self._complete_task()
-            return OrchestrationResult(
+            result = OrchestrationResult(
                 status="success",
                 intent=intent,
                 message=message,
             )
+            self._finalize_session_result(result)
+            return result
 
         # Tratamento especial para iniciar fluxo de excluir alias
         if intent.action == "excluir alias":
             self._delete_alias_flow_step = "awaiting_alias"
             self._complete_task()
-            return OrchestrationResult(
+            result = OrchestrationResult(
                 status="awaiting_confirmation",
                 intent=intent,
                 message="Qual alias você quer excluir?",
             )
+            self._finalize_session_result(result)
+            return result
 
         # Tratamento especial para iniciar fluxo de substituir alias
         if intent.action == "substituir alias":
             self._replace_alias_flow_step = "awaiting_alias"
             self._complete_task()
-            return OrchestrationResult(
+            result = OrchestrationResult(
                 status="awaiting_confirmation",
                 intent=intent,
                 message="Qual alias você quer substituir?",
             )
+            self._finalize_session_result(result)
+            return result
 
         # Tratamento especial para iniciar fluxo de adicionar alias
         if intent.action == "adicionar alias":
             self._alias_flow_step = "awaiting_keyword"
             self._complete_task()
-            return OrchestrationResult(
+            result = OrchestrationResult(
                 status="awaiting_confirmation",
                 intent=intent,
                 message="Qual palavra ou expressão você quer usar como alias?",
             )
+            self._finalize_session_result(result)
+            return result
 
         # Tratamento especial para consulta ao Segundo Cérebro (somente leitura)
         if intent.action == "consultar segundo cérebro":
             result = self.read_context(intent.target)
             self._complete_task()
             if result.success:
-                return OrchestrationResult(
+                orchestration_result = OrchestrationResult(
                     status="success",
                     intent=intent,
                     message=result.content,
                 )
             else:
-                return OrchestrationResult(
+                orchestration_result = OrchestrationResult(
                     status="execution_failed",
                     intent=intent,
                     message=result.error,
                 )
+            self._finalize_session_result(orchestration_result)
+            return orchestration_result
 
         # Tratamento especial para busca no Segundo Cérebro (somente leitura)
         if intent.action == "buscar segundo cérebro":
             results = self.second_brain.search_notes(intent.target)
             self._complete_task()
             if not results:
-                return OrchestrationResult(
+                orchestration_result = OrchestrationResult(
                     status="success",
                     intent=intent,
                     message=f"Nenhum resultado encontrado para '{intent.target}'.",
                 )
-            lines = [
-                f"{i + 1}. {r.path}\n   {r.snippet}"
-                for i, r in enumerate(results)
-            ]
-            message = (
-                f"Resultados da busca por '{intent.target}':\n"
-                + "\n".join(lines)
-                + f"\n\n{len(results)} resultado(s) encontrado(s)."
-            )
-            return OrchestrationResult(
-                status="success",
-                intent=intent,
-                message=message,
-            )
+            else:
+                lines = [
+                    f"{i + 1}. {r.path}\n   {r.snippet}"
+                    for i, r in enumerate(results)
+                ]
+                message = (
+                    f"Resultados da busca por '{intent.target}':\n"
+                    + "\n".join(lines)
+                    + f"\n\n{len(results)} resultado(s) encontrado(s)."
+                )
+                orchestration_result = OrchestrationResult(
+                    status="success",
+                    intent=intent,
+                    message=message,
+                )
+            self._finalize_session_result(orchestration_result)
+            return orchestration_result
 
         # Resolve alias antes da verificação de permissão
         resolved_target = self.alias_manager.resolve(intent.target)
@@ -662,19 +691,23 @@ class Orchestrator:
                 self._pending_unknown_explained = None
                 self.memory.record_awaiting_confirmation()
                 self._complete_task()
-                return OrchestrationResult(
+                result = OrchestrationResult(
                     status="awaiting_confirmation",
                     intent=intent,
                     message=f"Não reconheci '{intent.target}'. O que isso significa?",
                 )
+                self._finalize_session_result(result)
+                return result
             msg = f"Ação '{resolved_intent.action}' para o alvo '{resolved_intent.target}' não está autorizada pela governança da V0."
             self.memory.record_error(msg)
             self._complete_task()
-            return OrchestrationResult(
+            result = OrchestrationResult(
                 status="forbidden",
                 intent=intent,  # Registra intent original na resposta
                 message=msg,
             )
+            self._finalize_session_result(result)
+            return result
 
         plan = self.planner.create_plan(resolved_intent)
         self.memory.record_plan(plan.steps)
@@ -691,14 +724,18 @@ class Orchestrator:
                 "Esta ação exige confirmação.\n"
                 "Continuar? [s/n]"
             )
-            return OrchestrationResult(
+            result = OrchestrationResult(
                 status="awaiting_confirmation",
                 intent=intent,
                 plan=plan,
                 message=message,
             )
+            self._finalize_session_result(result)
+            return result
 
-        return self.confirm_and_execute(plan, confirmed=True)
+        result = self.confirm_and_execute(plan, confirmed=True)
+        self._finalize_session_result(result)
+        return result
 
     def confirm_and_execute(
         self, plan: Plan, confirmed: bool, simulate: Optional[bool] = None
@@ -709,12 +746,14 @@ class Orchestrator:
         if not confirmed:
             msg = "Operação cancelada pelo usuário."
             self._complete_task()
-            return OrchestrationResult(
+            result = OrchestrationResult(
                 status="cancelled",
                 intent=plan.intent,
                 plan=plan,
                 message=msg,
             )
+            self._finalize_session_result(result)
+            return result
 
         is_simulated = self.simulate if simulate is None else simulate
 
@@ -724,12 +763,14 @@ class Orchestrator:
             self.memory.record_execution_result(exec_msg, success=True)
             self.memory.record_verification_result(verif_msg, success=True)
             self._complete_task()
-            return OrchestrationResult(
+            result = OrchestrationResult(
                 status="executed_simulated",
                 intent=plan.intent,
                 plan=plan,
                 message=f"{exec_msg}\n{verif_msg}",
             )
+            self._finalize_session_result(result)
+            return result
 
         # Execução Real no Windows
         exec_result = self.executor.execute_real(plan.intent)
@@ -737,12 +778,14 @@ class Orchestrator:
             self.memory.record_execution_result(exec_result.message, success=False)
             self.memory.record_error(exec_result.message)
             self._complete_task()
-            return OrchestrationResult(
+            result = OrchestrationResult(
                 status="execution_failed",
                 intent=plan.intent,
                 plan=plan,
                 message=f"Falha na execução: {exec_result.message}",
             )
+            self._finalize_session_result(result)
+            return result
 
         self.memory.record_execution_result(exec_result.message, success=True)
 
@@ -751,18 +794,22 @@ class Orchestrator:
             self.memory.record_verification_result(verif_result.message, success=False)
             self.memory.record_error(verif_result.message)
             self._complete_task()
-            return OrchestrationResult(
+            result = OrchestrationResult(
                 status="verification_failed",
                 intent=plan.intent,
                 plan=plan,
                 message=f"{exec_result.message}\nAlerta de verificação: {verif_result.message}",
             )
+            self._finalize_session_result(result)
+            return result
 
         self.memory.record_verification_result(verif_result.message, success=True)
         self._complete_task()
-        return OrchestrationResult(
+        result = OrchestrationResult(
             status="success",
             intent=plan.intent,
             plan=plan,
             message=f"{exec_result.message}\n{verif_result.message}",
         )
+        self._finalize_session_result(result)
+        return result

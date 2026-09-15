@@ -1,10 +1,10 @@
-"""Testes unitários da memória de trabalho volátil da V0."""
+"""Testes unitários da memória de trabalho volátil da V0/V1."""
 
 import unittest
 from unittest.mock import MagicMock, patch
 
 from therion.core.orchestrator import Orchestrator
-from therion.memory.working_memory import TaskContext, WorkingMemory
+from therion.memory.working_memory import TaskContext, Turn, WorkingMemory
 
 
 class TestWorkingMemory(unittest.TestCase):
@@ -132,6 +132,88 @@ class TestWorkingMemory(unittest.TestCase):
         self.assertEqual(len(orchestrator.memory.history), 2)
         self.assertEqual(orchestrator.memory.history[0].command, "Therion, abra o Obsidian")
         self.assertEqual(orchestrator.memory.history[1].command, "Therion, comando invalido")
+
+
+class TestWorkingMemorySession(unittest.TestCase):
+    """Testes da memória de sessão (V1): turnos e contexto operacional."""
+
+    def setUp(self) -> None:
+        self.memory = WorkingMemory()
+
+    def test_add_turn_stores_role_and_text(self) -> None:
+        """12. Turn armazena role e text corretamente."""
+        self.memory.add_turn("user", "Therion, abra o Obsidian")
+        turns = self.memory.recent_turns()
+        self.assertEqual(len(turns), 1)
+        self.assertEqual(turns[0].role, "user")
+        self.assertEqual(turns[0].text, "Therion, abra o Obsidian")
+
+    def test_recent_turns_returns_last_n(self) -> None:
+        """13. recent_turns retorna os N turnos mais recentes."""
+        self.memory.add_turn("user", "cmd1")
+        self.memory.add_turn("therion", "res1")
+        self.memory.add_turn("user", "cmd2")
+        self.memory.add_turn("therion", "res2")
+        recent = self.memory.recent_turns(n=2)
+        self.assertEqual(len(recent), 2)
+        self.assertEqual(recent[0].text, "cmd2")
+        self.assertEqual(recent[1].text, "res2")
+
+    def test_recent_turns_empty(self) -> None:
+        """14. recent_turns retorna lista vazia quando não há turnos."""
+        self.assertEqual(self.memory.recent_turns(), [])
+
+    def test_recent_turns_n_zero_or_negative(self) -> None:
+        """15. recent_turns com n <= 0 retorna lista vazia."""
+        self.memory.add_turn("user", "test")
+        self.assertEqual(self.memory.recent_turns(n=0), [])
+        self.assertEqual(self.memory.recent_turns(n=-1), [])
+
+    def test_turns_fifo_limit(self) -> None:
+        """16. deque(maxlen=50) descarta turnos mais antigos."""
+        for i in range(55):
+            self.memory.add_turn("user", f"cmd{i}")
+        turns = list(self.memory.turns)
+        self.assertEqual(len(turns), 50)
+        self.assertEqual(turns[0].text, "cmd5")
+        self.assertEqual(turns[-1].text, "cmd54")
+
+    def test_last_fields_start_none(self) -> None:
+        """17. Campos last_* começam None."""
+        self.assertIsNone(self.memory.last_intent)
+        self.assertIsNone(self.memory.last_target)
+        self.assertIsNone(self.memory.last_result)
+        self.assertIsNone(self.memory.last_status)
+
+    def test_clear_session_resets_turns_and_context(self) -> None:
+        """18. clear_session limpa turns e last_*, preserva history."""
+        self.memory.add_turn("user", "test")
+        self.memory.last_intent = "abrir"
+        self.memory.last_target = "Obsidian"
+        self.memory.last_result = "ok"
+        self.memory.last_status = "success"
+        self.memory.start_task("tarefa")
+        self.memory.complete_task()
+
+        self.memory.clear_session()
+
+        self.assertEqual(len(self.memory.turns), 0)
+        self.assertIsNone(self.memory.last_intent)
+        self.assertIsNone(self.memory.last_target)
+        self.assertIsNone(self.memory.last_result)
+        self.assertIsNone(self.memory.last_status)
+        self.assertEqual(len(self.memory.history), 1)
+
+    def test_clear_session_preserves_current_task(self) -> None:
+        """19. clear_session preserva current_task se existir."""
+        self.memory.start_task("comando")
+        self.memory.add_turn("user", "comando")
+        self.memory.last_intent = "test"
+
+        self.memory.clear_session()
+
+        self.assertIsNotNone(self.memory.current_task)
+        self.assertEqual(self.memory.current_task.command, "comando")
 
 
 if __name__ == "__main__":
