@@ -165,6 +165,35 @@ As decisões técnicas principais da V1 foram aprovadas (interface PySide6, proc
 - Teste manual 3 aprovado: "Therion, procure no Segundo Cérebro Therion" retornou 5 resultados com prioridade de conteúdo validada
 - Teste manual 4 aprovado: "Therion, procure no Segundo Cérebro Codex.md" retornou 1 resultado com match somente no nome
 - Alguns snippets ainda exibem elementos de Markdown bruto (crases, marcadores) — isso não é bug deste incremento; limpeza/renderização de Markdown deve ser tratada separadamente se necessário
+- Integração da interface desktop PySide6 com o Orchestrator implementada
+- Interface agora possui: área de histórico/respostas, campo de entrada de comandos, botão "Enviar", Enter envia comando
+- Comandos são enviados para Orchestrator.process_command() e respostas aparecem na própria janela
+- Histórico permanece visível durante a sessão; campo de entrada é limpo após envio
+- Interface continua com system tray e comportamento existente de ocultar/reabrir
+- Confirmação externa da UI implementada com estado temporário _pending_plan
+- ConfirmationHandler.evaluate_response() reutilizado para interpretação de "sim"/"não"
+- Resposta ambígua mantém a confirmação pendente e pede "sim" ou "não"
+- Enquanto houver _pending_plan, nova entrada não é interpretada como novo comando
+- Confirmação ou cancelamento limpa _pending_plan; exceção durante confirm_and_execute() também limpa
+- SKILL-001 aplicada ao fluxo de _pending_plan da interface desktop (estado, confirmação, execução/cancelamento, limpeza)
+- Fluxos conversacionais internos do Orchestrator não foram duplicados pela UI
+- Interface usa Orchestrator(simulate=True); nenhuma aplicação real é aberta pela UI nesta etapa
+- Execução real pela UI ainda NÃO foi habilitada
+- Threading/workers ainda NÃO foram implementados (limitação conhecida)
+- Testes de desktop ampliados; suíte completa: 274 testes
+- 274/274 passando; 0 falhas; nenhuma regressão
+- Warning conhecido/controlado: teste que simula falha no log de auditoria ("Disk full")
+- Testes manuais da interface aprovados:
+  - Teste 1: "Therion, liste meus aliases" → "Nenhum alias cadastrado." (comando normal)
+  - Teste 2: "Therion, procure no Segundo Cérebro Aetherion" → busca retornou 4 resultados
+  - Teste 3: "Therion, abra o Obsidian" → confirmação → "s" → execução simulada concluída
+  - Teste 4: "Therion, abra o Obsidian" → "talvez" → confirmação permaneceu pendente
+  - Teste 5: após "talvez", "não" → operação cancelada corretamente
+  - Teste 6: após cancelamento, "liste meus aliases" → voltou ao fluxo normal
+  - Mensagens permaneceram no histórico; campo de entrada foi limpo corretamente
+- Governança: Regra 13 "Transição entre análise e execução" criada e auditada cruzadamente
+- Princípios: aprovação de plano ≠ autorização; AGUARDANDO AUTORIZAÇÃO é estado bloqueado; respostas vagas não autorizam; ausência de proibição não é autorização; autorização vale somente para o escopo
+- Regra 13 classificada como CONSISTENTE — nenhuma correção necessária
 
 ---
 
@@ -334,26 +363,21 @@ Todas as etapas previstas da V0 foram concluídas.
 
 ### Próxima meta principal
 
-**Integrar entrada e resposta de comandos na interface desktop PySide6, reutilizando o Orchestrator existente.**
+**Validar e habilitar de forma controlada a execução real de ações pela interface desktop, substituindo simulate=True somente após auditoria específica.**
 
-Objetivo conceitual futuro:
+Antes de mudar para execução real será necessário auditar:
 
-campo de entrada → usuário envia comando → Orchestrator.process_command() → resposta → exibição na própria janela
-
-Contexto:
-- A interface PySide6 faz parte da V1
-- A janela e o system tray já foram implementados e validados
-- Porém a interface ainda não oferece uma forma funcional de enviar comandos ao Therion
-- Atualmente o CLI continua sendo o meio funcional de interação
-
-Essa etapa será usada para validar na prática:
-- Integração entre interface desktop e Orchestrator
-- Experiência de uso do Therion como aplicação real
+- como simulate=False afeta a UI;
+- confirmação obrigatória;
+- comportamento do Executor;
+- verificação da ação;
+- tratamento de erro;
+- risco de bloqueio da thread da interface;
+- necessidade ou não de worker/thread.
 
 Ainda NÃO implementados:
-- campo de entrada de comandos na janela
-- exibição de respostas na janela
-- tratamento de erros na interface
+
+- execução real de ações pela interface
 - models de IA / LLMs integrados
 - Skills executáveis reutilizáveis
 - integração com calendário
@@ -424,3 +448,7 @@ Marco da V1 alcançado: consulta explícita ao Segundo Cérebro por caminho impl
 Marco da V1 alcançado: busca textual simples e explícita no Segundo Cérebro implementada e validada com 242 testes automatizados (242/242 passando). Método search_notes() adicionado ao SecondBrainReader. Teste manual aprovado no CLI.
 
 Marco da V1 alcançado: melhoria da apresentação dos snippets da busca textual implementada e validada com 253 testes automatizados (253/253 passando). Função _build_snippet() adicionada. Testes manuais aprovados no CLI.
+
+Marco da V1 alcançado: integração da interface desktop PySide6 com o Orchestrator implementada e validada com 274 testes automatizados (274/274 passando). Interface funcional para entrada e resposta de comandos. Testes manuais aprovados. Execução ainda simulada (simulate=True).
+
+Governança reforçada: Regra 13 "Transição entre análise e execução" formalizada, auditada cruzadamente e classificada como CONSISTENTE.

@@ -96,6 +96,21 @@ Antes de alterações relevantes:
 - executar testes apropriados;
 - revisar o diff antes de concluir.
 
+### Transição entre análise e execução
+
+**Aprovação de plano NÃO é autorização de execução.**
+
+Quando o agente indicar que está "aguardando autorização" ou expressão equivalente,
+deve encerrar sua ação naquele turno. É proibido avançar para execução sem uma nova
+mensagem clara e afirmativa do usuário.
+
+Consultar:
+
+- `90 - Sistema da IA/Regras/Regras Gerais da IA.md` (Regra 13);
+- `90 - Sistema da IA/Protocolo de Confirmação.md`.
+
+Nenhuma sessão ou modelo pode presumir autorização implícita.
+
 ## 8. Escrita no Segundo Cérebro
 
 Alterações permanentes no Segundo Cérebro continuam sujeitas às regras de Autonomia e Permissões e ao Protocolo de Confirmação.
