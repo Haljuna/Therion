@@ -29,6 +29,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "aliases": {},
     "allowed_apps": [],
     "runtime": {"real_actions_enabled": False},
+    "calendar": {"enabled": False, "time_zone": "America/Sao_Paulo"},
 }
 
 _CONFIG_PATH: Path | None = None
@@ -87,6 +88,19 @@ def _validate_config(data: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(rae, bool):
             runtime["real_actions_enabled"] = DEFAULT_CONFIG["runtime"]["real_actions_enabled"]
         validated["runtime"] = runtime
+
+    # calendar.enabled -> bool, calendar.time_zone -> str
+    calendar = validated.get("calendar")
+    if not isinstance(calendar, dict):
+        validated["calendar"] = DEFAULT_CONFIG["calendar"].copy()
+    else:
+        cal_enabled = calendar.get("enabled")
+        if not isinstance(cal_enabled, bool):
+            calendar["enabled"] = DEFAULT_CONFIG["calendar"]["enabled"]
+        cal_tz = calendar.get("time_zone")
+        if not isinstance(cal_tz, str):
+            calendar["time_zone"] = DEFAULT_CONFIG["calendar"]["time_zone"]
+        validated["calendar"] = calendar
 
     return validated
 
