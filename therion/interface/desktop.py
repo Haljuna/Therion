@@ -26,14 +26,16 @@ from therion.governance.confirmation import ConfirmationHandler
 class MainWindow(QMainWindow):
     """Janela principal mínima do Therion."""
 
-    def __init__(self, app: QApplication) -> None:
+    def __init__(self, app: QApplication, config: dict | None = None) -> None:
         super().__init__()
         self.setWindowTitle("Therion")
         self.resize(800, 600)
         self._app = app
+        self._config = config or {}
         self._tray_icon: QSystemTrayIcon | None = None
         self._closing = False
-        self._orchestrator = Orchestrator(simulate=True)
+        real_actions_enabled = self._config.get("runtime", {}).get("real_actions_enabled", False)
+        self._orchestrator = Orchestrator(simulate=not real_actions_enabled)
         self._confirmation_handler = ConfirmationHandler()
         self._pending_plan: Optional[Plan] = None
         self._setup_ui()
@@ -185,7 +187,7 @@ def main() -> int:
     """Ponto de entrada da aplicação desktop."""
     app = QApplication(sys.argv)
     config = load_config()
-    window = MainWindow(app)
+    window = MainWindow(app, config)
     if not config.get("ui", {}).get("start_minimized", False):
         window.show()
     return app.exec()

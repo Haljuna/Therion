@@ -108,6 +108,64 @@ class TestConfig(unittest.TestCase):
         result = load_config(self.config_path)
         self.assertTrue(result["ui"]["start_minimized"])
 
+    def test_default_real_actions_enabled_false(self) -> None:
+        """Default de real_actions_enabled deve ser False."""
+        self.assertEqual(DEFAULT_CONFIG["runtime"]["real_actions_enabled"], False)
+
+    def test_runtime_ausente_retorna_false(self) -> None:
+        """Quando runtime ausente, real_actions_enabled deve ser False."""
+        data = {"ui": {"start_minimized": False}, "aliases": {}, "allowed_apps": []}
+        result = _validate_config(data)
+        self.assertEqual(result["runtime"]["real_actions_enabled"], False)
+
+    def test_runtime_invalido_retorna_default(self) -> None:
+        """Quando runtime é tipo inválido, deve receber default seguro."""
+        data = {"runtime": "not_a_dict"}
+        result = _validate_config(data)
+        self.assertIsInstance(result["runtime"], dict)
+        self.assertEqual(result["runtime"]["real_actions_enabled"], False)
+
+    def test_real_actions_enabled_ausente_retorna_false(self) -> None:
+        """Quando real_actions_enabled ausente, deve receber False."""
+        data = {"runtime": {}}
+        result = _validate_config(data)
+        self.assertEqual(result["runtime"]["real_actions_enabled"], False)
+
+    def test_real_actions_enabled_tipo_invalido_retorna_false(self) -> None:
+        """Quando real_actions_enabled não é bool, deve receber False."""
+        data = {"runtime": {"real_actions_enabled": "sim"}}
+        result = _validate_config(data)
+        self.assertEqual(result["runtime"]["real_actions_enabled"], False)
+
+        data2 = {"runtime": {"real_actions_enabled": 1}}
+        result2 = _validate_config(data2)
+        self.assertEqual(result2["runtime"]["real_actions_enabled"], False)
+
+    def test_real_actions_enabled_true_valido(self) -> None:
+        """Boolean True explícito deve ser preservado."""
+        data = {"runtime": {"real_actions_enabled": True}}
+        result = _validate_config(data)
+        self.assertTrue(result["runtime"]["real_actions_enabled"])
+
+    def test_real_actions_enabled_false_valido(self) -> None:
+        """Boolean False explícito deve ser preservado."""
+        data = {"runtime": {"real_actions_enabled": False}}
+        result = _validate_config(data)
+        self.assertFalse(result["runtime"]["real_actions_enabled"])
+
+    def test_campos_desconhecidos_preservados_com_runtime(self) -> None:
+        """Campos desconhecidos continuam preservados mesmo com runtime."""
+        data = {
+            "ui": {"start_minimized": False},
+            "aliases": {},
+            "allowed_apps": [],
+            "runtime": {"real_actions_enabled": False},
+            "campo_desconhecido": "valor",
+        }
+        result = _validate_config(data)
+        self.assertEqual(result["campo_desconhecido"], "valor")
+        self.assertEqual(result["runtime"]["real_actions_enabled"], False)
+
 
 if __name__ == "__main__":
     unittest.main()

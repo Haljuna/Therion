@@ -1,5 +1,6 @@
 """Testes da lógica de execução e verificação real (com chamadas de SO mockadas)."""
 
+import subprocess
 import unittest
 from unittest.mock import MagicMock, patch
 
@@ -101,6 +102,61 @@ class TestRealActionsMocked(unittest.TestCase):
         cancel_result = orchestrator.confirm_and_execute(plan, confirmed=False)
         self.assertEqual(cancel_result.status, "cancelled")
         self.assertIn("cancelada pelo usuário", cancel_result.message)
+
+    @patch("therion.actions.verifier.subprocess.run")
+    def test_verifier_real_uses_timeout_5(self, mock_run: MagicMock) -> None:
+        """Verifica que subprocess.run é chamado com timeout=5."""
+        mock_run.return_value = MagicMock(
+            stdout="Obsidian.exe   14396 Console   1   97.560 K\n",
+            returncode=0,
+        )
+        self.verifier.verify_real(self.obsidian_intent, max_attempts=1)
+        mock_run.assert_called_once()
+        _, kwargs = mock_run.call_args
+        self.assertEqual(kwargs.get("timeout"), 5)
+
+    @patch("therion.actions.verifier.subprocess.run")
+    def test_verifier_real_timeout_expired_returns_failure(self, mock_run: MagicMock) -> None:
+        """TimeoutExpired deve retornar VerificationResult(success=False)."""
+        mock_run.side_effect = subprocess.TimeoutExpired(
+            cmd=["tasklist"], timeout=5
+        )
+        result = self.verifier.verify_real(self.obsidian_intent, max_attempts=1)
+        self.assertFalse(result.success)
+        self.assertIn("expirou", result.message.lower())
+
+    @patch("therion.actions.verifier.subprocess.run")
+    def test_verifier_real_timeout_expired_does_not_raise(self, mock_run: MagicMock) -> None:
+        """TimeoutExpired NÃO deve escapar para o chamador."""
+        mock_run.side_effect = subprocess.TimeoutExpired(
+            cmd=["tasklist"], timeout=5
+        )
+        try:
+            result = self.verifier.verify_real(self.obsidian_intent, max_attempts=2, interval=0.01)
+        except subprocess.TimeoutExpired:
+            self.fail("TimeoutExpired escapou do ActionVerifier")
+        self.assertFalse(result.success)
+
+    @patch("therion.actions.verifier.subprocess.run")
+    def test_verifier_real_timeout_stops_after_first_failure(self, mock_run: MagicMock) -> None:
+        """TimeoutExpired na primeira tentativa deve retornar imediatamente (sem retry)."""
+        mock_run.side_effect = subprocess.TimeoutExpired(
+            cmd=["tasklist"], timeout=5
+        )
+        result = self.verifier.verify_real(self.obsidian_intent, max_attempts=3, interval=0.01)
+        self.assertFalse(result.success)
+        self.assertEqual(mock_run.call_count, 1)
+
+    @patch("therion.actions.verifier.subprocess.run")
+    def test_verifier_real_preserves_shell_false(self, mock_run: MagicMock) -> None:
+        """shell=False deve ser preservado mesmo com timeout=5."""
+        mock_run.return_value = MagicMock(
+            stdout="Obsidian.exe   14396 Console   1   97.560 K\n",
+            returncode=0,
+        )
+        self.verifier.verify_real(self.obsidian_intent, max_attempts=1)
+        _, kwargs = mock_run.call_args
+        self.assertFalse(kwargs.get("shell", True))
 
 
 if __name__ == "__main__":

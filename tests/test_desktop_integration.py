@@ -105,6 +105,41 @@ class TestDesktopOrchestratorIntegration(unittest.TestCase):
                     window = MainWindow(mock_app)
                     mock_orch.assert_called_once_with(simulate=True)
 
+    def test_orchestrator_default_simulate_true(self) -> None:
+        """Config padrão (sem runtime) deve resultar em simulate=True."""
+        from therion.interface.desktop import MainWindow
+
+        mock_app = MagicMock()
+        with patch('therion.interface.desktop.Orchestrator') as mock_orch:
+            with patch.object(MainWindow, '_setup_ui'):
+                with patch.object(MainWindow, '_setup_tray'):
+                    window = MainWindow(mock_app, config={})
+                    mock_orch.assert_called_once_with(simulate=True)
+
+    def test_orchestrator_real_actions_disabled_simulate_true(self) -> None:
+        """real_actions_enabled=False deve resultar em simulate=True."""
+        from therion.interface.desktop import MainWindow
+
+        mock_app = MagicMock()
+        config = {"runtime": {"real_actions_enabled": False}}
+        with patch('therion.interface.desktop.Orchestrator') as mock_orch:
+            with patch.object(MainWindow, '_setup_ui'):
+                with patch.object(MainWindow, '_setup_tray'):
+                    window = MainWindow(mock_app, config=config)
+                    mock_orch.assert_called_once_with(simulate=True)
+
+    def test_orchestrator_real_actions_enabled_simulate_false(self) -> None:
+        """real_actions_enabled=True deve resultar em simulate=False."""
+        from therion.interface.desktop import MainWindow
+
+        mock_app = MagicMock()
+        config = {"runtime": {"real_actions_enabled": True}}
+        with patch('therion.interface.desktop.Orchestrator') as mock_orch:
+            with patch.object(MainWindow, '_setup_ui'):
+                with patch.object(MainWindow, '_setup_tray'):
+                    window = MainWindow(mock_app, config=config)
+                    mock_orch.assert_called_once_with(simulate=False)
+
     def test_widgets_exist(self) -> None:
         from therion.interface.desktop import MainWindow
 

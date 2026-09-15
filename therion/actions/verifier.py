@@ -54,12 +54,18 @@ class ActionVerifier:
                     text=True,
                     check=False,
                     shell=False,
+                    timeout=5,
                 )
                 if process_name.lower() in res.stdout.lower():
                     return VerificationResult(
                         success=True,
                         message=f"Processo '{process_name}' verificado e ativo no Windows.",
                     )
+            except subprocess.TimeoutExpired:
+                return VerificationResult(
+                    success=False,
+                    message=f"Verificação do processo '{process_name}' expirou (timeout).",
+                )
             except Exception as err:
                 return VerificationResult(
                     success=False,

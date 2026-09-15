@@ -28,6 +28,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "ui": {"start_minimized": False},
     "aliases": {},
     "allowed_apps": [],
+    "runtime": {"real_actions_enabled": False},
 }
 
 _CONFIG_PATH: Path | None = None
@@ -76,6 +77,16 @@ def _validate_config(data: dict[str, Any]) -> dict[str, Any]:
         validated["allowed_apps"] = DEFAULT_CONFIG["allowed_apps"].copy()
     else:
         validated["allowed_apps"] = allowed
+
+    # runtime.real_actions_enabled -> bool
+    runtime = validated.get("runtime")
+    if not isinstance(runtime, dict):
+        validated["runtime"] = DEFAULT_CONFIG["runtime"].copy()
+    else:
+        rae = runtime.get("real_actions_enabled")
+        if not isinstance(rae, bool):
+            runtime["real_actions_enabled"] = DEFAULT_CONFIG["runtime"]["real_actions_enabled"]
+        validated["runtime"] = runtime
 
     return validated
 
