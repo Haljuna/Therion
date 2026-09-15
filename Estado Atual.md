@@ -243,6 +243,25 @@ As decisões técnicas principais da V1 foram aprovadas (interface PySide6, proc
   - Depende da .venv existente nesse caminho
   - Se o projeto ou .venv forem movidos, o atalho precisará ser atualizado
   - Empacotamento em executável próprio ainda não foi feito e não é necessário nesta etapa
+- Memória de sessão + contexto operacional implementada e validada:
+  - `Turn` dataclass com `role: Literal["user", "therion"]` e `text: str`
+  - Memória de turnos em RAM via `deque(maxlen=50)`
+  - Campos `last_intent`, `last_target`, `last_result`, `last_status` na `WorkingMemory`
+  - API: `add_turn()`, `recent_turns(n)`, `clear_session()`
+  - Orchestrator é a fonte de verdade: registra turnos em `process_command()` e `confirm_and_execute()`
+  - UI não escreve diretamente na WorkingMemory
+  - CLI e desktop compartilham a mesma memória via Orchestrator
+  - Memória de sessão não substitui `_pending_plan`, alias flows ou unknown target flow
+  - Nenhum `SessionContext` dataclass; nenhum `build_context_prompt()`
+  - Memória permanece somente em RAM; sem persistência em disco; sem cloud; sem LLM
+  - Nenhum novo logging de Turn/last_* adicionado
+  - 326 testes passando (326/326); 0 failures; 0 errors; warning controlado de "Disk full" continua esperado
+  - Testes específicos de WorkingMemory (8 testes), integração Orchestrator ↔ memória (10 testes), ordem/quantidade de turns, prevenção de duplicação, preservação de contexto
+  - Testes manuais aprovados:
+    - Teste 1: primeira interação atualiza turns e last_* corretamente
+    - Teste 2: segunda interação acumula contexto na mesma sessão
+    - Teste 3: clear_session limpa turns + last_* e preserva history/current_task
+    - Teste 4: novo processo começa com memória vazia (volatilidade confirmada)
 
 ---
 
@@ -374,7 +393,8 @@ Componentes já validados na V0 e V1:
 - `runtime.real_actions_enabled` com default False;
 - inicialização independente do terminal via `pythonw.exe`;
 - inicialização prática via atalho do Windows (`Therion.lnk`);
-- política fail-closed de permissões via `opencode.json`.
+- política fail-closed de permissões via `opencode.json`;
+- memória de sessão + contexto operacional (Turn, last_*, recent_turns, clear_session).
 
 Até que exista evidência técnica adicional, considerar como não implementado:
 
@@ -424,6 +444,7 @@ Todas as etapas previstas da V0 foram concluídas.
 - [x] validar inicialização independente do terminal via `pythonw.exe`
 - [x] adicionar `opencode.json` com política fail-closed de permissões
 - [x] criar forma prática de iniciar o Therion no Windows sem terminal
+- [x] implementar memória de sessão + contexto operacional (Turn, last_*, recent_turns, clear_session)
 
 ---
 
@@ -433,9 +454,7 @@ Todas as etapas previstas da V0 foram concluídas.
 
 Funcionalidades da V1 ainda não implementadas (conforme Roadmap):
 
-- interface expandida para conversas;
-- memória de trabalho persistente durante sessões;
-- integração básica com calendário;
+- integração básica com calendário (começar por consulta/leitura de eventos antes de criação);
 - consulta de eventos;
 - criação de eventos mediante confirmação.
 
@@ -525,5 +544,6 @@ Próxima etapa principal:
 
 ## Checkpoints recentes
 
+- `1c5696c` — `feat(v1): add session memory and operational context`
 - `b9b9783` — `chore(security): add OpenCode permission guardrails`
 - `1a817bb` — `feat(v1): add controlled real action configuration`
