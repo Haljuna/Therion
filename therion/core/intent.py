@@ -57,6 +57,17 @@ class IntentRecognizer:
         re.IGNORECASE,
     )
 
+    _CALENDAR_TODAY_PATTERN = re.compile(
+        r"^(?:therion[,\s]+)?(?:"
+        r"(?:o\s+)?(?:que|qual|quais)\s+(?:tenho|ha|existe|está)\s+(?:hoje|neste\s+dia)"
+        r"|(?:minha|a)\s+agenda(?:\s+de\s+hoje)?"
+        r"|agenda\s+de\s+hoje"
+        r"|compromissos?\s+(?:de\s+)?hoje"
+        r"|eventos?\s+(?:de\s+)?hoje"
+        r")\s*[!.?]?\s*$",
+        re.IGNORECASE,
+    )
+
     def parse(self, command: str) -> Optional[Intent]:
         """Extrai ação e alvo de um comando textual simples."""
         cleaned = command.strip()
@@ -117,6 +128,16 @@ class IntentRecognizer:
             return Intent(
                 action="consultar segundo cérebro",
                 target=consult_match.group(1).strip(),
+                raw_command=command,
+                requires_confirmation=False,
+            )
+
+        # Verificar padrão de consulta de calendário (hoje)
+        calendar_match = self._CALENDAR_TODAY_PATTERN.match(cleaned)
+        if calendar_match:
+            return Intent(
+                action="calendário hoje",
+                target="",
                 raw_command=command,
                 requires_confirmation=False,
             )

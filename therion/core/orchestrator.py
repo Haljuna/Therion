@@ -1,10 +1,12 @@
 """Módulo central de orquestração da V0 com integração à memória de trabalho."""
 
 from dataclasses import dataclass
+from datetime import date, datetime
 from typing import Optional
 
 from therion.actions.executor import ActionExecutor
 from therion.actions.verifier import ActionVerifier
+from therion.calendar.adapter import CalendarAdapter, CalendarError
 from therion.config import AliasManager
 from therion.context.second_brain import ReadResult, SecondBrainReader
 from therion.core.intent import Intent, IntentRecognizer
@@ -33,6 +35,7 @@ class Orchestrator:
         simulate: bool = False,
         log_dir: Optional[str] = None,
         vault_root: Optional[str] = None,
+        calendar_adapter: Optional[CalendarAdapter] = None,
     ) -> None:
         self.simulate = simulate
         self.intent_recognizer = IntentRecognizer()
@@ -45,6 +48,7 @@ class Orchestrator:
         self.second_brain = SecondBrainReader(vault_root=vault_root)
         self.audit_logger = AuditLogger(log_dir=log_dir)
         self.alias_manager = AliasManager()
+        self.calendar_adapter = calendar_adapter
         # Estado do fluxo conversacional de substituir alias
         self._replace_alias_flow_step: Optional[str] = None
         self._pending_replace_alias: Optional[str] = None
@@ -105,6 +109,55 @@ class Orchestrator:
         self._unknown_target_flow_step = None
         self._pending_unknown_original = None
         self._pending_unknown_explained = None
+
+    def _format_calendar_event(self, event, index: int) -> str:
+        """Formata um evento de calendário para exibição."""
+        if event.all_day:
+            time_str = "Dia inteiro"
+        else:
+            start = event.start
+            time_str = f"{start.hour:02d}:{start.minute:02d}"
+        return f"{index}. {event.summary} — {time_str}"
+
+    def _handle_calendar_today(self, intent: Intent) -> OrchestrationResult:
+        """Processa consulta de eventos de hoje (somente leitura, sem confirmação)."""
+        if self.calendar_adapter is None:
+            return OrchestrationResult(
+                status="success",
+                intent=intent,
+                message="Calendário não disponível.",
+            )
+        try:
+            today = date.today()
+            events = self.calendar_adapter.list_events_for_day(today)
+        except CalendarError as err:
+            return OrchestrationResult(
+                status="execution_failed",
+                intent=intent,
+                message=f"Erro ao acessar calendário: {err}",
+            )
+        if not events:
+            return OrchestrationResult(
+                status="success",
+                intent=intent,
+                message="Nenhum evento para hoje.",
+            )
+
+        def _sort_key(e):
+            if isinstance(e.start, datetime):
+                return e.start
+            return datetime.combine(e.start, datetime.min.time())
+
+        events.sort(key=_sort_key)
+        lines = [
+            self._format_calendar_event(evt, i + 1)
+            for i, evt in enumerate(events)
+        ]
+        return OrchestrationResult(
+            status="success",
+            intent=intent,
+            message="Eventos de hoje:\n" + "\n".join(lines),
+        )
 
     def _finalize_session_result(self, result: OrchestrationResult) -> None:
         """Registra turno do Therion e atualiza contexto operacional na sessão."""
@@ -670,6 +723,14 @@ class Orchestrator:
                 )
             self._finalize_session_result(orchestration_result)
             return orchestration_result
+
+        # Tratamento especial para consulta de calendário (somente leitura)
+        if intent.action == "calendário hoje":
+            calendar_result = self._handle_calendar_today(intent)
+            self.memory.record_context_query(path="calendario_hoje", success=True)
+            self._complete_task()
+            self._finalize_session_result(calendar_result)
+            return calendar_result
 
         # Resolve alias antes da verificação de permissão
         resolved_target = self.alias_manager.resolve(intent.target)
