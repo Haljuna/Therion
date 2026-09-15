@@ -1,5 +1,6 @@
 """Interface desktop mínima para Therion V1."""
 
+import html
 import sys
 from typing import Optional
 
@@ -12,15 +13,35 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QHBoxLayout,
     QTextEdit,
-    QLineEdit,
+    QPlainTextEdit,
     QPushButton,
 )
-from PySide6.QtGui import QAction, QIcon
-from PySide6.QtCore import Qt
+from PySide6.QtGui import QAction, QKeyEvent
+from PySide6.QtCore import Qt, Signal
 
 from therion.config import load_config
 from therion.core.orchestrator import Orchestrator, Plan
 from therion.governance.confirmation import ConfirmationHandler
+
+
+class ConversationInput(QPlainTextEdit):
+    """Campo de entrada multilinha: Enter envia, Shift+Enter insere quebra."""
+
+    submit = Signal()
+
+    def __init__(self, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self.setPlaceholderText("Digite seu comando aqui...")
+        self.setFixedHeight(60)
+
+    def keyPressEvent(self, event: QKeyEvent) -> None:
+        if event.key() in (Qt.Key_Return, Qt.Key_Enter):
+            if event.modifiers() & Qt.ShiftModifier:
+                super().keyPressEvent(event)
+            else:
+                self.submit.emit()
+        else:
+            super().keyPressEvent(event)
 
 
 class MainWindow(QMainWindow):
@@ -52,16 +73,21 @@ class MainWindow(QMainWindow):
         layout.addWidget(self._history)
 
         input_layout = QHBoxLayout()
-        self._input = QLineEdit()
-        self._input.setPlaceholderText("Digite seu comando aqui...")
-        self._input.returnPressed.connect(self._send_command)
+        self._input = ConversationInput()
+        self._input.submit.connect(self._send_command)
         input_layout.addWidget(self._input)
 
         self._send_button = QPushButton("Enviar")
         self._send_button.clicked.connect(self._send_command)
         input_layout.addWidget(self._send_button)
 
+        self._clear_button = QPushButton("Limpar conversa")
+        self._clear_button.clicked.connect(self._clear_conversation)
+        input_layout.addWidget(self._clear_button)
+
         layout.addLayout(input_layout)
+
+        self._update_clear_button_state()
 
     def _setup_tray(self) -> None:
         """Configura o System Tray se disponível."""
@@ -89,6 +115,7 @@ class MainWindow(QMainWindow):
 
         self._tray_icon.setContextMenu(tray_menu)
         self._tray_icon.setToolTip("Therion")
+        self._tray_icon.activated.connect(self._on_tray_activated)
         self._tray_icon.show()
 
     def _show_window(self) -> None:
@@ -97,9 +124,14 @@ class MainWindow(QMainWindow):
         self.raise_()
         self.activateWindow()
 
+    def _on_tray_activated(self, reason: int) -> None:
+        """Trata ativações do ícone da bandeja."""
+        if reason == QSystemTrayIcon.DoubleClick:
+            self._show_window()
+
     def _send_command(self) -> None:
         """Envia o comando digitado para o Orchestrator."""
-        command = self._input.text().strip()
+        command = self._input.toPlainText().strip()
         if not command:
             return
 
@@ -123,6 +155,8 @@ class MainWindow(QMainWindow):
         else:
             self._pending_plan = None
 
+        self._update_clear_button_state()
+
     def _handle_confirmation(self, response: str) -> None:
         """Processa resposta de confirmação."""
         self._input.clear()
@@ -141,23 +175,27 @@ class MainWindow(QMainWindow):
         except Exception:
             self._pending_plan = None
             self._append("Therion", "Ocorreu um erro inesperado ao processar a confirmação.")
+            self._update_clear_button_state()
             return
 
         self._pending_plan = None
         self._append("Therion", final_result.message)
+        self._update_clear_button_state()
 
     def _append(self, sender: str, text: str) -> None:
         """Adiciona mensagem ao histórico."""
-        prefix = "Você:" if sender == "Você" else "Therion:"
-        current = self._history.toPlainText()
-        if current:
-            new_text = f"{current}\n\n{prefix}\n{text}"
-        else:
-            new_text = f"{prefix}\n{text}"
-        self._history.setPlainText(new_text)
-        self._history.verticalScrollBar().setValue(
-            self._history.verticalScrollBar().maximum()
-        )
+        prefix = "<b>Você:</b>" if sender == "Você" else "<b>Therion:</b>"
+        safe_text = html.escape(text).replace("\n", "<br>")
+        block = f"{prefix}<br>{safe_text}"
+        self._history.append(block)
+
+    def _clear_conversation(self) -> None:
+        """Limpa apenas o histórico visual da conversa."""
+        self._history.clear()
+
+    def _update_clear_button_state(self) -> None:
+        """Habilita/desabilita o botão Limpar conforme _pending_plan."""
+        self._clear_button.setEnabled(self._pending_plan is None)
 
     def _quit_application(self) -> None:
         """Encerra a aplicação de forma limpa (ação explícita do menu)."""
