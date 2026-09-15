@@ -225,6 +225,24 @@ As decisões técnicas principais da V1 foram aprovadas (interface PySide6, proc
 - Edição e comandos protegidos exigem autorização técnica
 - `git push` é bloqueado pela política
 - Isso complementa a Regra 13 com uma barreira técnica adicional
+- Atalho do Windows `Therion.lnk` criado e validado na Área de Trabalho visível:
+  - Local: `C:\Users\marcu\OneDrive\Área de Trabalho\Therion.lnk`
+  - Target: `C:\Users\marcu\Downloads\Segundo-Cerebro\10 - Projetos\Therion\.venv\Scripts\pythonw.exe`
+  - Arguments: `-m therion.interface.desktop`
+  - WorkingDirectory: `C:\Users\marcu\Downloads\Segundo-Cerebro\10 - Projetos\Therion`
+- Teste manual do atalho concluído com sucesso:
+  - Therion abre pelo atalho
+  - Nenhum CMD/terminal fica visível
+  - Therion permanece ativo na bandeja
+  - Janela pode ser restaurada pelo ícone da bandeja
+  - Fechar a janela não encerra o Therion
+  - "Encerrar Therion" encerra corretamente
+  - Não é mais necessário usar terminal para iniciar o Therion no uso normal
+- Limitações conhecidas do atalho:
+  - Depende do caminho atual do projeto
+  - Depende da .venv existente nesse caminho
+  - Se o projeto ou .venv forem movidos, o atalho precisará ser atualizado
+  - Empacotamento em executável próprio ainda não foi feito e não é necessário nesta etapa
 
 ---
 
@@ -355,14 +373,16 @@ Componentes já validados na V0 e V1:
 - configuração local JSON com validação robusta;
 - `runtime.real_actions_enabled` com default False;
 - inicialização independente do terminal via `pythonw.exe`;
+- inicialização prática via atalho do Windows (`Therion.lnk`);
 - política fail-closed de permissões via `opencode.json`.
 
 Até que exista evidência técnica adicional, considerar como não implementado:
 
-- inicialização automática no Windows (atalho, pasta de inicialização, etc.);
 - modelos de IA / LLMs integrados;
 - Skills executáveis reutilizáveis;
 - integração com calendário;
+- consulta de eventos;
+- criação de eventos mediante confirmação;
 - delegação automática para outros agentes;
 - voz;
 - automações avançadas;
@@ -403,20 +423,26 @@ Todas as etapas previstas da V0 foram concluídas.
 - [x] validar execução real controlada via interface desktop
 - [x] validar inicialização independente do terminal via `pythonw.exe`
 - [x] adicionar `opencode.json` com política fail-closed de permissões
-- [ ] criar forma prática de iniciar o Therion no Windows sem terminal
+- [x] criar forma prática de iniciar o Therion no Windows sem terminal
 
 ---
 
 ### Próxima meta principal
 
-**Criar uma forma prática de iniciar o Therion no Windows sem terminal, aproveitando a inicialização já validada via pythonw.exe.**
+**Concluir e validar as funcionalidades restantes da V1.**
+
+Funcionalidades da V1 ainda não implementadas (conforme Roadmap):
+
+- interface expandida para conversas;
+- memória de trabalho persistente durante sessões;
+- integração básica com calendário;
+- consulta de eventos;
+- criação de eventos mediante confirmação.
 
 Ainda NÃO implementados:
 
-- inicialização automática no Windows (atalho, pasta de inicialização, etc.)
 - modelos de IA / LLMs integrados
 - Skills executáveis reutilizáveis
-- integração com calendário
 - delegação automática para outros agentes
 - voz
 - automações avançadas
@@ -489,9 +515,11 @@ Marco da V1 alcançado: integração da interface desktop PySide6 com o Orchestr
 
 Marco da V1 alcançado: configuração `runtime.real_actions_enabled` implementada e validada com 290 testes automatizados (290/290 passando). Execução real controlada validada via teste manual. Verifier com `timeout=5` e tratamento de `TimeoutExpired`. Inicialização via `pythonw.exe` validada. `opencode.json` com política fail-closed adicionado.
 
+Marco da V1 alcançado: atalho do Windows `Therion.lnk` criado e validado na Área de Trabalho visível. Therion inicia sem terminal, permanece na bandeja, pode ser restaurado e encerrado corretamente. Não é mais necessário usar terminal para iniciar o Therion no uso normal.
+
 Próxima etapa principal:
 
-**Criar uma forma prática de iniciar o Therion no Windows sem terminal.**
+**Concluir e validar as funcionalidades restantes da V1.**
 
 ---
 
