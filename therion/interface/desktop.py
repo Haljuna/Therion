@@ -19,6 +19,8 @@ from PySide6.QtWidgets import (
 from PySide6.QtGui import QAction, QKeyEvent
 from PySide6.QtCore import Qt, Signal
 
+from therion.calendar.adapter import CalendarError
+from therion.calendar.google_adapter import GoogleCalendarAdapter
 from therion.config import load_config
 from therion.core.orchestrator import Orchestrator, Plan
 from therion.governance.confirmation import ConfirmationHandler
@@ -56,11 +58,37 @@ class MainWindow(QMainWindow):
         self._tray_icon: QSystemTrayIcon | None = None
         self._closing = False
         real_actions_enabled = self._config.get("runtime", {}).get("real_actions_enabled", False)
-        self._orchestrator = Orchestrator(simulate=not real_actions_enabled)
+        calendar_adapter = self._build_calendar_adapter()
+        if calendar_adapter is not None:
+            self._orchestrator = Orchestrator(
+                simulate=not real_actions_enabled,
+                calendar_adapter=calendar_adapter,
+            )
+        else:
+            self._orchestrator = Orchestrator(simulate=not real_actions_enabled)
         self._confirmation_handler = ConfirmationHandler()
         self._pending_plan: Optional[Plan] = None
         self._setup_ui()
         self._setup_tray()
+
+    def _build_calendar_adapter(self) -> "GoogleCalendarAdapter | None":
+        """Instancia GoogleCalendarAdapter se calendar.enabled=true; None caso contrário.
+
+        Falhas de autenticação são isoladas: aviso no terminal, app continua sem adapter.
+        """
+        cal_config = self._config.get("calendar", {})
+        if not cal_config.get("enabled", False):
+            return None
+
+        time_zone = cal_config.get("time_zone", "America/Sao_Paulo")
+        try:
+            return GoogleCalendarAdapter(time_zone=time_zone)
+        except CalendarError as e:
+            print(f"[Therion] Aviso: calendário desativado por falha de autenticação: {e}")
+            return None
+        except Exception as e:
+            print(f"[Therion] Aviso: erro inesperado ao inicializar calendário: {e}")
+            return None
 
     def _setup_ui(self) -> None:
         """Configura os widgets da interface."""

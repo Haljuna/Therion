@@ -139,3 +139,39 @@ def get_valid_credentials() -> Credentials:
     """
     creds = load_credentials()
     return ensure_valid_credentials(creds)
+
+
+def run_initial_auth() -> None:
+    """Executa o fluxo OAuth inicial e persiste o token resultante.
+
+    Deve ser executado manualmente uma única vez para gerar token.json.
+    Não apaga token existente automaticamente.
+
+    Requer credentials.json em %APPDATA%\\Therion\\ (gerado no Google Cloud Console).
+
+    Raises:
+        CalendarError: Se credentials.json ausente ou se o fluxo OAuth falhar.
+    """
+    from google_auth_oauthlib.flow import InstalledAppFlow  # importação local: dep. opcional
+
+    credentials_path = _get_credentials_path()
+
+    if not credentials_path.exists():
+        raise CalendarError(
+            f"credentials.json não encontrado em: {credentials_path}\n"
+            "Faça o download do credentials.json no Google Cloud Console e "
+            "coloque-o em %APPDATA%\\Therion\\ antes de executar a autenticação."
+        )
+
+    try:
+        flow = InstalledAppFlow.from_client_secrets_file(
+            str(credentials_path), scopes=[SCOPE]
+        )
+        creds = flow.run_local_server(port=0)
+    except Exception as e:
+        raise CalendarError(
+            f"Falha durante o fluxo OAuth: {e}\n"
+            "Verifique se o credentials.json é válido e tente novamente."
+        ) from e
+
+    _persist_token(creds)
