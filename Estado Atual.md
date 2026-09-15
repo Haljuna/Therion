@@ -194,6 +194,37 @@ As decisões técnicas principais da V1 foram aprovadas (interface PySide6, proc
 - Governança: Regra 13 "Transição entre análise e execução" criada e auditada cruzadamente
 - Princípios: aprovação de plano ≠ autorização; AGUARDANDO AUTORIZAÇÃO é estado bloqueado; respostas vagas não autorizam; ausência de proibição não é autorização; autorização vale somente para o escopo
 - Regra 13 classificada como CONSISTENTE — nenhuma correção necessária
+- Configuração `runtime.real_actions_enabled` implementada em `therion/config/local.py`
+- Default continua `False`; ações reais não ficam habilitadas automaticamente
+- Validação robusta: config inexistente, runtime ausente, tipo inválido → False seguro
+- Somente boolean `True` explícito preserva `True`
+- Interface desktop (`therion/interface/desktop.py`) agora usa `real_actions_enabled` para configurar `Orchestrator(simulate=not real_actions_enabled)`
+- Verifier (`therion/actions/verifier.py`) agora usa `timeout=5` em `subprocess.run` para `tasklist`
+- `subprocess.TimeoutExpired` tratado como falha controlada; exceção não escapa; `VerificationResult(success=False, ...)` retornado
+- `shell=False` preservado em todas as chamadas de subprocess
+- 290 testes passando (274 anteriores + 16 novos); 0 failures; 0 errors
+- Testes específicos para `timeout=5` e `TimeoutExpired` adicionados em `tests/test_real_actions.py`
+- Testes de config cobrem `runtime.real_actions_enabled` (default, ausente, inválido, True/False)
+- Testes de desktop cobrem `simulate` baseado na config
+- Teste manual controlado realizado com `real_actions_enabled=true`:
+  - Therion apresentou o plano de abrir Obsidian
+  - Exigiu confirmação
+  - Após confirmação "sim", abriu Obsidian de verdade
+  - ActionVerifier confirmou `Obsidian.exe` ativo via `tasklist`
+  - Teste real concluído com sucesso
+  - Após o teste, `real_actions_enabled` foi devolvido para `False`
+- Inicialização desktop independente do terminal validada manualmente:
+  - `.venv\Scripts\pythonw.exe -m therion.interface.desktop` inicia sem CMD/terminal visível
+  - Pode iniciar diretamente na bandeja quando `start_minimized=true`
+  - Fechar a janela mantém Therion ativo na bandeja
+  - Ícone da bandeja restaura a janela
+  - "Encerrar Therion" encerra o aplicativo
+  - Não é necessário manter CMD aberto
+- `opencode.json` adicionado e versionado com política fail-closed de permissões
+- Leitura e `git status`/`diff`/`log` permanecem fluidos sem prompt
+- Edição e comandos protegidos exigem autorização técnica
+- `git push` é bloqueado pela política
+- Isso complementa a Regra 13 com uma barreira técnica adicional
 
 ---
 
@@ -312,19 +343,23 @@ O teste simbólico principal foi executado e aprovado com evidências reais no W
 
 ## Ainda não implementado ou não validado
 
-Componentes básicos já validados no teste simbólico da V0:
+Componentes já validados na V0 e V1:
 
 - núcleo/orquestrador básico de fluxo;
 - executor controlado de ações (allowlist restrita ao Obsidian);
-- verificador de processos ativos no Windows;
+- verificador de processos ativos no Windows (com `timeout=5`);
 - sistema técnico de permissões (allowlist);
 - sistema técnico de confirmação obrigatória;
-- interface CLI textual simples.
+- interface CLI textual simples;
+- interface desktop PySide6 com system tray;
+- configuração local JSON com validação robusta;
+- `runtime.real_actions_enabled` com default False;
+- inicialização independente do terminal via `pythonw.exe`;
+- política fail-closed de permissões via `opencode.json`.
 
 Até que exista evidência técnica adicional, considerar como não implementado:
 
-- execução contínua em segundo plano;
-- ícone na bandeja;
+- inicialização automática no Windows (atalho, pasta de inicialização, etc.);
 - modelos de IA / LLMs integrados;
 - Skills executáveis reutilizáveis;
 - integração com calendário;
@@ -361,24 +396,25 @@ Todas as etapas previstas da V0 foram concluídas.
 
 ---
 
+### Próximas etapas para avanço da V1
+
+- [x] implementar `runtime.real_actions_enabled` com default False
+- [x] adicionar `timeout=5` ao Verifier com tratamento de `TimeoutExpired`
+- [x] validar execução real controlada via interface desktop
+- [x] validar inicialização independente do terminal via `pythonw.exe`
+- [x] adicionar `opencode.json` com política fail-closed de permissões
+- [ ] criar forma prática de iniciar o Therion no Windows sem terminal
+
+---
+
 ### Próxima meta principal
 
-**Validar e habilitar de forma controlada a execução real de ações pela interface desktop, substituindo simulate=True somente após auditoria específica.**
-
-Antes de mudar para execução real será necessário auditar:
-
-- como simulate=False afeta a UI;
-- confirmação obrigatória;
-- comportamento do Executor;
-- verificação da ação;
-- tratamento de erro;
-- risco de bloqueio da thread da interface;
-- necessidade ou não de worker/thread.
+**Criar uma forma prática de iniciar o Therion no Windows sem terminal, aproveitando a inicialização já validada via pythonw.exe.**
 
 Ainda NÃO implementados:
 
-- execução real de ações pela interface
-- models de IA / LLMs integrados
+- inicialização automática no Windows (atalho, pasta de inicialização, etc.)
+- modelos de IA / LLMs integrados
 - Skills executáveis reutilizáveis
 - integração com calendário
 - delegação automática para outros agentes
@@ -451,4 +487,15 @@ Marco da V1 alcançado: melhoria da apresentação dos snippets da busca textual
 
 Marco da V1 alcançado: integração da interface desktop PySide6 com o Orchestrator implementada e validada com 274 testes automatizados (274/274 passando). Interface funcional para entrada e resposta de comandos. Testes manuais aprovados. Execução ainda simulada (simulate=True).
 
-Governança reforçada: Regra 13 "Transição entre análise e execução" formalizada, auditada cruzadamente e classificada como CONSISTENTE.
+Marco da V1 alcançado: configuração `runtime.real_actions_enabled` implementada e validada com 290 testes automatizados (290/290 passando). Execução real controlada validada via teste manual. Verifier com `timeout=5` e tratamento de `TimeoutExpired`. Inicialização via `pythonw.exe` validada. `opencode.json` com política fail-closed adicionado.
+
+Próxima etapa principal:
+
+**Criar uma forma prática de iniciar o Therion no Windows sem terminal.**
+
+---
+
+## Checkpoints recentes
+
+- `b9b9783` — `chore(security): add OpenCode permission guardrails`
+- `1a817bb` — `feat(v1): add controlled real action configuration`
