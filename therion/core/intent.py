@@ -157,14 +157,23 @@ class IntentRecognizer:
             # extrair horário
             time_match = re.search(r'(?:às|as)\s+(\d{1,2}(?:h|:\d{2})?)', rest, re.IGNORECASE)
             if time_match:
-                entities['start_time'] = time_match.group(1)
+                raw_time = time_match.group(1)
+                # normalizar "15h" → "15:00"
+                if re.match(r'^\d{1,2}h$', raw_time, re.IGNORECASE):
+                    raw_time = raw_time.replace('h', ':00')
+                entities['start_time'] = raw_time
                 rest = rest.replace(time_match.group(0), '')
                 
-            # extrair data
-            date_match = re.search(r'\b(amanhã|hoje|dia\s+\d+|\d{1,2}/\d{1,2}(?:/\d{4})?)\b', rest, re.IGNORECASE)
+            # extrair data (numérica primeiro, depois "dia N")
+            date_match = re.search(r'\b(\d{1,2}/\d{1,2}(?:/\d{4})?)\b', rest, re.IGNORECASE)
+            if not date_match:
+                date_match = re.search(r'\b(amanhã|hoje|dia\s+\d+)\b', rest, re.IGNORECASE)
             if date_match:
                 entities['date'] = date_match.group(1)
                 rest = rest.replace(date_match.group(0), '')
+                
+            # remover "dia" solto que sobra após extração da data
+            rest = re.sub(r'\bdia\b\s*', '', rest, flags=re.IGNORECASE).strip()
                 
             # remover termos genéricos do começo para encontrar o título
             rest = re.sub(r'^(?:um\s+evento|uma\s+reunião|evento|reunião)\b\s*', '', rest, flags=re.IGNORECASE).strip()
