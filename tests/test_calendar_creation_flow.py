@@ -77,11 +77,12 @@ class TestCalendarCreationFlow(unittest.TestCase):
         
         self.orc._reset_calendar_create_flow()
         
+        # Com MagicMock adapter, confirmação completa chama create_event
         self.orc.process_command("marque reunião amanhã às 15h")
         res = self.orc.process_command("sim")
         self.assertEqual(res.status, "success")
         self.assertIsNone(self.orc._pending_event_draft)
-        self.mock_adapter.create_event.assert_not_called()
+        self.mock_adapter.create_event.assert_called_once()
 
     def test_existing_flows_continue_working(self):
         res = self.orc.process_command("liste meus aliases")

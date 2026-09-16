@@ -1,7 +1,8 @@
 """Módulo central de orquestração da V0 com integração à memória de trabalho."""
 
+import re
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Optional
 
 from therion.actions.executor import ActionExecutor
@@ -49,6 +50,7 @@ class Orchestrator:
         self.audit_logger = AuditLogger(log_dir=log_dir)
         self.alias_manager = AliasManager()
         self.calendar_adapter = calendar_adapter
+        self._now_func = None  # injetável para testes
         # Estado do fluxo conversacional de substituir alias
         self._replace_alias_flow_step: Optional[str] = None
         self._pending_replace_alias: Optional[str] = None
@@ -115,6 +117,49 @@ class Orchestrator:
     def _reset_calendar_create_flow(self) -> None:
         """Limpa o estado do fluxo de criação de evento."""
         self._pending_event_draft = None
+
+    def _parse_event_datetimes(self, draft: dict) -> tuple[datetime, datetime]:
+        """Converte data/hora do rascunho em datetimes timezone-aware.
+
+        Returns:
+            Tupla (start, end) com fuso horário configurado.
+
+        Raises:
+            CalendarError: Se data ou hora não puderem ser interpretadas.
+        """
+        from zoneinfo import ZoneInfo
+
+        tz = ZoneInfo("America/Sao_Paulo")
+        now = self._now_func() if self._now_func else datetime.now(tz)
+
+        # --- Data ---
+        raw_date = draft.get("date", "").strip().lower()
+        if raw_date in ("hoje", ""):
+            target_date = now.date()
+        elif raw_date == "amanhã":
+            target_date = now.date() + timedelta(days=1)
+        else:
+            m = re.match(r'^(\d{1,2})/(\d{1,2})(?:/(\d{4}))?$', raw_date)
+            if not m:
+                raise CalendarError(f"Data não reconhecida: '{draft['date']}'.")
+            day, month = int(m.group(1)), int(m.group(2))
+            year = int(m.group(3)) if m.group(3) else now.year
+            target_date = date(year, month, day)
+
+        # --- Hora ---
+        raw_time = draft.get("start_time", "").strip()
+        tm = re.search(r'(\d{1,2})(?:h|:(\d{2}))?', raw_time, re.IGNORECASE)
+        if not tm:
+            raise CalendarError(f"Hora não reconhecida: '{draft['start_time']}'.")
+        hour = int(tm.group(1))
+        minute = int(tm.group(2) or 0)
+
+        start = datetime(target_date.year, target_date.month, target_date.day,
+                         hour, minute, tzinfo=tz)
+        duration = draft.get("duration_minutes", 60)
+        end = start + timedelta(minutes=duration)
+
+        return start, end
 
     def _format_calendar_event(self, event, index: int) -> str:
         """Formata um evento de calendário para exibição."""
@@ -662,8 +707,41 @@ class Orchestrator:
             
         confirmation = self.confirmation_handler.evaluate_response(cleaned)
         if confirmation is True:
+            if self.calendar_adapter is None:
+                self._reset_calendar_create_flow()
+                return OrchestrationResult(
+                    status="execution_failed",
+                    message="Calendário não disponível.",
+                )
+            try:
+                start, end = self._parse_event_datetimes(draft)
+            except CalendarError as err:
+                self._reset_calendar_create_flow()
+                return OrchestrationResult(
+                    status="execution_failed",
+                    message=f"Erro ao preparar evento: {err}",
+                )
+            try:
+                event = self.calendar_adapter.create_event(
+                    summary=draft["title"],
+                    start=start,
+                    end=end,
+                )
+            except CalendarError as err:
+                self._reset_calendar_create_flow()
+                return OrchestrationResult(
+                    status="execution_failed",
+                    message=f"Erro ao criar evento: {err}",
+                )
             self._reset_calendar_create_flow()
-            return OrchestrationResult(status="success", message="Plano pronto para execução futura.")
+            return OrchestrationResult(
+                status="success",
+                message=(
+                    f"Evento criado:\n"
+                    f"{event.summary} — "
+                    f"{start.strftime('%d/%m/%Y %H:%M')}–{end.strftime('%H:%M')}"
+                ),
+            )
         elif confirmation is False:
             self._reset_calendar_create_flow()
             return OrchestrationResult(status="cancelled", message="Operação cancelada pelo usuário.")
