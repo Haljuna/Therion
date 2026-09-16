@@ -65,6 +65,8 @@ class Orchestrator:
         self._unknown_target_flow_step: Optional[str] = None
         self._pending_unknown_original: Optional[str] = None
         self._pending_unknown_explained: Optional[str] = None
+        # Estado do fluxo de criação de evento
+        self._pending_event_draft: Optional[dict] = None
 
     def _complete_task(self) -> None:
         """Conclui a tarefa na memória de trabalho e audita o registro."""
@@ -109,6 +111,10 @@ class Orchestrator:
         self._unknown_target_flow_step = None
         self._pending_unknown_original = None
         self._pending_unknown_explained = None
+
+    def _reset_calendar_create_flow(self) -> None:
+        """Limpa o estado do fluxo de criação de evento."""
+        self._pending_event_draft = None
 
     def _format_calendar_event(self, event, index: int) -> str:
         """Formata um evento de calendário para exibição."""
@@ -574,6 +580,96 @@ class Orchestrator:
         
         return None
 
+    def _format_time_range(self, start_time_str: str) -> str:
+        import re
+        match = re.search(r'(\d{1,2})(?:h|:(\d{2}))?', start_time_str, re.IGNORECASE)
+        if match:
+            h = int(match.group(1))
+            m = int(match.group(2) or 0)
+            end_h = (h + 1) % 24
+            return f"{h:02d}:{m:02d}–{end_h:02d}:{m:02d}"
+        return f"{start_time_str} (duração 1h)"
+
+    def _present_calendar_summary(self, ambiguous: bool = False) -> OrchestrationResult:
+        draft = self._pending_event_draft
+        prefix = "Resposta ambígua.\n\n" if ambiguous else ""
+        time_display = self._format_time_range(draft['start_time'])
+        message = (
+            f"{prefix}Vou criar:\n"
+            f"Título: {draft['title']}\n"
+            f"Data: {draft['date']}\n"
+            f"Horário: {time_display}\n\n"
+            f"Confirmar? [s/n]"
+        )
+        return OrchestrationResult(status="awaiting_confirmation", message=message)
+
+    def _handle_calendar_create_flow(self, command: str) -> Optional[OrchestrationResult]:
+        """Processa o fluxo conversacional de criar evento."""
+        if self._pending_event_draft is None:
+            return None
+            
+        cleaned = command.strip()
+        draft = self._pending_event_draft
+        
+        is_complete = "title" in draft and "date" in draft and "start_time" in draft
+        
+        if not is_complete:
+            if not cleaned:
+                # If empty response, ask the same question again
+                if "title" not in draft:
+                    return OrchestrationResult(status="awaiting_confirmation", message="Qual é o título do evento?")
+                if "date" not in draft:
+                    return OrchestrationResult(status="awaiting_confirmation", message="Para qual data?")
+                if "start_time" not in draft:
+                    return OrchestrationResult(status="awaiting_confirmation", message="A que horas?")
+                    
+            if "title" not in draft:
+                draft["title"] = cleaned.capitalize()
+            elif "date" not in draft:
+                draft["date"] = cleaned
+            elif "start_time" not in draft:
+                draft["start_time"] = cleaned
+                
+            if "title" not in draft:
+                return OrchestrationResult(status="awaiting_confirmation", message="Qual é o título do evento?")
+            if "date" not in draft:
+                return OrchestrationResult(status="awaiting_confirmation", message="Para qual data?")
+            if "start_time" not in draft:
+                return OrchestrationResult(status="awaiting_confirmation", message="A que horas?")
+                
+            return self._present_calendar_summary()
+            
+        # Is complete, waiting for confirmation or correction
+        import re
+        is_correction = False
+        
+        time_match = re.search(r'(?:mude|troque|para)\s+(?:as|às)?\s*(\d{1,2}(?:h|:\d{2})?)', cleaned, re.IGNORECASE)
+        date_match = re.search(r'(?:mude|troque|para)\s+(amanhã|hoje|dia\s+\d+|\d{1,2}/\d{1,2})', cleaned, re.IGNORECASE)
+        title_match = re.search(r'(?:o\s+nome\s+é|título\s+é|mude\s+o\s+título\s+para)\s+(.+)', cleaned, re.IGNORECASE)
+        
+        if time_match:
+            draft['start_time'] = time_match.group(1)
+            is_correction = True
+        if date_match:
+            draft['date'] = date_match.group(1)
+            is_correction = True
+        if title_match:
+            draft['title'] = title_match.group(1).strip().capitalize()
+            is_correction = True
+            
+        if is_correction:
+            return self._present_calendar_summary()
+            
+        confirmation = self.confirmation_handler.evaluate_response(cleaned)
+        if confirmation is True:
+            self._reset_calendar_create_flow()
+            return OrchestrationResult(status="success", message="Plano pronto para execução futura.")
+        elif confirmation is False:
+            self._reset_calendar_create_flow()
+            return OrchestrationResult(status="cancelled", message="Operação cancelada pelo usuário.")
+        else:
+            return self._present_calendar_summary(ambiguous=True)
+
     def process_command(self, command: str) -> OrchestrationResult:
         """Processa um comando textual registrando todas as etapas na memória de trabalho."""
         mode = "simulado" if self.simulate else "real"
@@ -607,6 +703,13 @@ class Orchestrator:
             self._complete_task()
             self._finalize_session_result(unknown_target_flow_result)
             return unknown_target_flow_result
+
+        # Verifica se está no fluxo de criação de calendário
+        calendar_create_flow_result = self._handle_calendar_create_flow(command)
+        if calendar_create_flow_result is not None:
+            self._complete_task()
+            self._finalize_session_result(calendar_create_flow_result)
+            return calendar_create_flow_result
 
         intent = self.intent_recognizer.parse(command)
         if not intent:
@@ -731,6 +834,37 @@ class Orchestrator:
             self._complete_task()
             self._finalize_session_result(calendar_result)
             return calendar_result
+
+        # Tratamento especial para criar evento
+        if intent.action == "criar evento calendário":
+            entities = intent.entities or {}
+            self._pending_event_draft = {
+                "duration_minutes": 60
+            }
+            if "title" in entities:
+                self._pending_event_draft["title"] = entities["title"]
+            if "date" in entities:
+                self._pending_event_draft["date"] = entities["date"]
+            if "start_time" in entities:
+                self._pending_event_draft["start_time"] = entities["start_time"]
+                
+            draft = self._pending_event_draft
+            if "title" not in draft:
+                msg = "Qual é o título do evento?"
+            elif "date" not in draft:
+                msg = "Para qual data?"
+            elif "start_time" not in draft:
+                msg = "A que horas?"
+            else:
+                result = self._present_calendar_summary()
+                self._complete_task()
+                self._finalize_session_result(result)
+                return result
+                
+            self._complete_task()
+            result = OrchestrationResult(status="awaiting_confirmation", intent=intent, message=msg)
+            self._finalize_session_result(result)
+            return result
 
         # Resolve alias antes da verificação de permissão
         resolved_target = self.alias_manager.resolve(intent.target)

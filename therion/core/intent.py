@@ -13,6 +13,7 @@ class Intent:
     target: str
     raw_command: str
     requires_confirmation: bool = True
+    entities: Optional[dict] = None
 
 
 class IntentRecognizer:
@@ -65,6 +66,11 @@ class IntentRecognizer:
         r"|compromissos?\s+(?:de\s+)?hoje"
         r"|eventos?\s+(?:de\s+)?hoje"
         r")\s*[!.?]?\s*$",
+        re.IGNORECASE,
+    )
+
+    _CREATE_EVENT_PATTERN = re.compile(
+        r"^(?:therion[,\s]+)?(?:marque|marcar|agende|agendar|crie|criar)\s+(.+)$",
         re.IGNORECASE,
     )
 
@@ -140,6 +146,43 @@ class IntentRecognizer:
                 target="",
                 raw_command=command,
                 requires_confirmation=False,
+            )
+
+        # Verificar padrão de criar evento no calendário
+        create_event_match = self._CREATE_EVENT_PATTERN.match(cleaned)
+        if create_event_match:
+            rest = create_event_match.group(1).strip()
+            entities = {}
+            
+            # extrair horário
+            time_match = re.search(r'(?:às|as)\s+(\d{1,2}(?:h|:\d{2})?)', rest, re.IGNORECASE)
+            if time_match:
+                entities['start_time'] = time_match.group(1)
+                rest = rest.replace(time_match.group(0), '')
+                
+            # extrair data
+            date_match = re.search(r'\b(amanhã|hoje|dia\s+\d+|\d{1,2}/\d{1,2}(?:/\d{4})?)\b', rest, re.IGNORECASE)
+            if date_match:
+                entities['date'] = date_match.group(1)
+                rest = rest.replace(date_match.group(0), '')
+                
+            # remover termos genéricos do começo para encontrar o título
+            rest = re.sub(r'^(?:um\s+evento|uma\s+reunião|evento|reunião)\b\s*', '', rest, flags=re.IGNORECASE).strip()
+            
+            if rest:
+                entities['title'] = rest.capitalize()
+            else:
+                if 'reunião' in create_event_match.group(1).lower():
+                    entities['title'] = 'Reunião'
+                elif 'evento' in create_event_match.group(1).lower():
+                    entities['title'] = 'Evento'
+            
+            return Intent(
+                action="criar evento calendário",
+                target="",
+                raw_command=command,
+                requires_confirmation=True,
+                entities=entities,
             )
         
         match = self._OPEN_APP_PATTERN.match(cleaned)
