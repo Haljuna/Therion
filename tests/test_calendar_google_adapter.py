@@ -291,6 +291,16 @@ class TestListEventsForDayErrors(unittest.TestCase):
 
         self.assertIn("Formato de evento inválido", str(ctx.exception))
 
+    def test_timezone_invalida_levanta_calendar_error(self) -> None:
+        """13. Fuso horário inválido levanta CalendarError controlado."""
+        with patch("therion.calendar.google_adapter.get_valid_credentials"):
+            with patch("therion.calendar.google_adapter.build"):
+                adapter = GoogleCalendarAdapter(time_zone="Fuso/Inexistente")
+                with self.assertRaises(CalendarError) as ctx:
+                    adapter.list_events_for_day(date(2026, 9, 15))
+
+        self.assertIn("Fuso horário inválido ou não suportado", str(ctx.exception))
+
 
 class TestListEventsApiParameters(unittest.TestCase):
     """Valida parâmetros passados à API Google Calendar."""
@@ -329,15 +339,15 @@ class TestListEventsApiParameters(unittest.TestCase):
         self.assertEqual(kwargs["timeZone"], "America/Sao_Paulo")
 
     def test_time_min_e_time_max_cobrem_dia_inteiro(self) -> None:
-        """17. timeMin e timeMax cobrem exatamente o dia especificado (sem sobreposição)."""
-        list_mock = self._call_and_capture(date(2026, 9, 15))
+        """17. timeMin e timeMax cobrem exatamente o dia especificado com offset adequado."""
+        list_mock = self._call_and_capture(date(2026, 9, 15), time_zone="America/Sao_Paulo")
         _, kwargs = list_mock.call_args
 
         time_min_str = kwargs["timeMin"]
         time_max_str = kwargs["timeMax"]
 
-        self.assertIn("2026-09-15", time_min_str)
-        self.assertIn("2026-09-16", time_max_str)
+        self.assertEqual("2026-09-15T00:00:00-03:00", time_min_str)
+        self.assertEqual("2026-09-16T00:00:00-03:00", time_max_str)
 
     def test_time_min_menor_que_time_max(self) -> None:
         """18. timeMin é anterior a timeMax (intervalo válido)."""

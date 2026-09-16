@@ -41,12 +41,11 @@ class GoogleCalendarAdapter(CalendarAdapter):
         except Exception as e:
             raise CalendarError(f"Falha ao criar serviço Google Calendar: {e}") from e
 
-        tz = timezone.utc
         try:
-            import zoneinfo
-            tz = zoneinfo.ZoneInfo(self._time_zone)
-        except Exception:
-            pass
+            from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+            tz = ZoneInfo(self._time_zone)
+        except ZoneInfoNotFoundError as e:
+            raise CalendarError(f"Fuso horário inválido ou não suportado: '{self._time_zone}'.") from e
 
         start_of_day = datetime.combine(day, datetime.min.time(), tzinfo=tz)
         end_of_day = start_of_day + timedelta(days=1)
