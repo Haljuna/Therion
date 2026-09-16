@@ -469,8 +469,9 @@ class TestDesktopOrchestratorIntegration(unittest.TestCase):
                 window._append("Você", "teste")
                 window._history.append.assert_called_once()
                 call_args = window._history.append.call_args[0][0]
-                self.assertIn("<b>Você:</b>", call_args)
+                self.assertIn("Você", call_args)
                 self.assertIn("teste", call_args)
+                self.assertIn("align=\"right\"", call_args)
 
     def test_append_uses_html_for_therion(self) -> None:
         from therion.interface.desktop import MainWindow
@@ -482,8 +483,22 @@ class TestDesktopOrchestratorIntegration(unittest.TestCase):
                 window._append("Therion", "resposta")
                 window._history.append.assert_called_once()
                 call_args = window._history.append.call_args[0][0]
-                self.assertIn("<b>Therion:</b>", call_args)
+                self.assertIn("Therion", call_args)
                 self.assertIn("resposta", call_args)
+                self.assertIn("align=\"left\"", call_args)
+
+    def test_append_uses_limited_width_bubbles(self) -> None:
+        from therion.interface.desktop import MainWindow
+        mock_app = MagicMock()
+        with patch.object(MainWindow, '_setup_ui'):
+            with patch.object(MainWindow, '_setup_tray'):
+                window = MainWindow(mock_app)
+                window._history = MagicMock()
+                window._append("Você", "teste")
+                call_args = window._history.append.call_args[0][0]
+                self.assertIn("width:auto;", call_args)
+                self.assertIn("max-width:72%;", call_args)
+                self.assertIn("padding:10px 14px;", call_args)
 
     def test_append_escapes_html_in_message(self) -> None:
         from therion.interface.desktop import MainWindow
@@ -545,6 +560,326 @@ class TestDesktopOrchestratorIntegration(unittest.TestCase):
         window._input.toPlainText.return_value = "\n\n  \n\n"
         window._send_command()
         window._orchestrator.process_command.assert_not_called()
+
+
+class TestDesktopOrbe(unittest.TestCase):
+    """Testes do orbe visual e mapeamento de estados."""
+
+    _qapp = None
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        from PySide6.QtWidgets import QApplication
+        if QApplication.instance() is None:
+            cls._qapp = QApplication(sys.argv)
+        else:
+            cls._qapp = QApplication.instance()
+
+    def _create_window_with_orbe(self):
+        from therion.interface.desktop import MainWindow
+        mock_app = MagicMock()
+        window = MainWindow(mock_app)
+        window._orchestrator = MagicMock()
+        window._confirmation_handler = MagicMock()
+        return window
+
+    def test_update_orbe_idle(self) -> None:
+        window = self._create_window_with_orbe()
+        window._update_orbe("idle")
+        self.assertEqual(window._orbe_label.text(), "Pronto")
+
+    def test_update_orbe_thinking(self) -> None:
+        window = self._create_window_with_orbe()
+        window._update_orbe("thinking")
+        self.assertEqual(window._orbe_label.text(), "Pensando...")
+
+    def test_update_orbe_awaiting_confirmation(self) -> None:
+        window = self._create_window_with_orbe()
+        window._update_orbe("awaiting_confirmation")
+        self.assertEqual(window._orbe_label.text(), "Aguardando confirmação")
+
+    def test_update_orbe_executing(self) -> None:
+        window = self._create_window_with_orbe()
+        window._update_orbe("executing")
+        self.assertEqual(window._orbe_label.text(), "Executando...")
+
+    def test_update_orbe_success(self) -> None:
+        window = self._create_window_with_orbe()
+        window._update_orbe("success")
+        self.assertEqual(window._orbe_label.text(), "Concluído")
+
+    def test_update_orbe_error(self) -> None:
+        window = self._create_window_with_orbe()
+        window._update_orbe("error")
+        self.assertEqual(window._orbe_label.text(), "Erro")
+
+    def test_update_orbe_unknown_state_fallback(self) -> None:
+        window = self._create_window_with_orbe()
+        window._update_orbe("unknown_state_xyz")
+        self.assertEqual(window._orbe_label.text(), "Pronto")
+
+    def test_executing_color_differs_from_error(self) -> None:
+        from therion.interface.desktop import _ORBE_EXECUTING, _ORBE_ERROR
+        self.assertNotEqual(_ORBE_EXECUTING, _ORBE_ERROR)
+
+    def test_status_map_success_for_executed_simulated(self) -> None:
+        from therion.interface.desktop import _ORBE_STATUS_MAP
+        self.assertEqual(_ORBE_STATUS_MAP["executed_simulated"], "success")
+
+    def test_status_map_idle_for_cancelled(self) -> None:
+        from therion.interface.desktop import _ORBE_STATUS_MAP
+        self.assertEqual(_ORBE_STATUS_MAP["cancelled"], "idle")
+
+    def test_status_map_error_for_execution_failed(self) -> None:
+        from therion.interface.desktop import _ORBE_STATUS_MAP
+        self.assertEqual(_ORBE_STATUS_MAP["execution_failed"], "error")
+
+    def test_status_map_error_for_verification_failed(self) -> None:
+        from therion.interface.desktop import _ORBE_STATUS_MAP
+        self.assertEqual(_ORBE_STATUS_MAP["verification_failed"], "error")
+
+    def test_status_map_error_for_forbidden(self) -> None:
+        from therion.interface.desktop import _ORBE_STATUS_MAP
+        self.assertEqual(_ORBE_STATUS_MAP["forbidden"], "error")
+
+    def test_status_map_idle_for_unknown_intent(self) -> None:
+        from therion.interface.desktop import _ORBE_STATUS_MAP
+        self.assertEqual(_ORBE_STATUS_MAP["unknown_intent"], "idle")
+
+    def test_status_map_awaiting_for_awaiting_confirmation(self) -> None:
+        from therion.interface.desktop import _ORBE_STATUS_MAP
+        self.assertEqual(_ORBE_STATUS_MAP["awaiting_confirmation"], "awaiting_confirmation")
+
+    def test_status_map_success_for_success(self) -> None:
+        from therion.interface.desktop import _ORBE_STATUS_MAP
+        self.assertEqual(_ORBE_STATUS_MAP["success"], "success")
+
+    def test_send_command_shows_executing_on_true_then_success(self) -> None:
+        window = self._create_window_with_orbe()
+        window._input = MagicMock()
+        window._input.toPlainText.return_value = "abra o Obsidian"
+        mock_plan = MagicMock()
+        window._orchestrator.process_command.return_value = MagicMock(
+            status="awaiting_confirmation", message="Continuar?", plan=mock_plan,
+        )
+        window._send_command()
+        self.assertEqual(window._orbe_label.text(), "Aguardando confirmação")
+        window._input.toPlainText.return_value = "sim"
+        window._confirmation_handler.evaluate_response.return_value = True
+        window._orchestrator.confirm_and_execute.return_value = MagicMock(
+            status="executed_simulated", message="OK",
+        )
+        window._send_command()
+        self.assertEqual(window._orbe_label.text(), "Concluído")
+
+    def test_send_command_shows_idle_on_false_negation(self) -> None:
+        window = self._create_window_with_orbe()
+        window._input = MagicMock()
+        window._input.toPlainText.return_value = "abra o Obsidian"
+        mock_plan = MagicMock()
+        window._orchestrator.process_command.return_value = MagicMock(
+            status="awaiting_confirmation", message="Continuar?", plan=mock_plan,
+        )
+        window._send_command()
+        self.assertEqual(window._orbe_label.text(), "Aguardando confirmação")
+        window._input.toPlainText.return_value = "não"
+        window._confirmation_handler.evaluate_response.return_value = False
+        window._orchestrator.confirm_and_execute.return_value = MagicMock(
+            status="cancelled", message="Operação cancelada.",
+        )
+        window._send_command()
+        self.assertEqual(window._orbe_label.text(), "Pronto")
+
+    def test_send_command_no_executing_on_false(self) -> None:
+        window = self._create_window_with_orbe()
+        window._input = MagicMock()
+        window._input.toPlainText.return_value = "abra o Obsidian"
+        mock_plan = MagicMock()
+        window._orchestrator.process_command.return_value = MagicMock(
+            status="awaiting_confirmation", message="Continuar?", plan=mock_plan,
+        )
+        window._send_command()
+        window._input.toPlainText.return_value = "não"
+        window._confirmation_handler.evaluate_response.return_value = False
+        window._orchestrator.confirm_and_execute.return_value = MagicMock(
+            status="cancelled", message="Cancelado.",
+        )
+        window._send_command()
+        self.assertNotEqual(window._orbe_label.text(), "Executando...")
+
+    def test_send_command_error_status_shows_error(self) -> None:
+        window = self._create_window_with_orbe()
+        window._input = MagicMock()
+        window._input.toPlainText.return_value = "comando qualquer"
+        window._orchestrator.process_command.return_value = MagicMock(
+            status="execution_failed", message="Falha.",
+        )
+        window._send_command()
+        self.assertEqual(window._orbe_label.text(), "Erro")
+
+    def test_send_command_forbidden_shows_error(self) -> None:
+        window = self._create_window_with_orbe()
+        window._input = MagicMock()
+        window._input.toPlainText.return_value = "comando proibido"
+        window._orchestrator.process_command.return_value = MagicMock(
+            status="forbidden", message="Não autorizado.",
+        )
+        window._send_command()
+        self.assertEqual(window._orbe_label.text(), "Erro")
+
+    def test_send_command_cancelled_shows_idle(self) -> None:
+        window = self._create_window_with_orbe()
+        window._input = MagicMock()
+        window._input.toPlainText.return_value = "algo cancelado"
+        window._orchestrator.process_command.return_value = MagicMock(
+            status="cancelled", message="Cancelado.",
+        )
+        window._send_command()
+        self.assertEqual(window._orbe_label.text(), "Pronto")
+
+    def test_send_command_unknown_intent_shows_idle(self) -> None:
+        window = self._create_window_with_orbe()
+        window._input = MagicMock()
+        window._input.toPlainText.return_value = "blablabla"
+        window._orchestrator.process_command.return_value = MagicMock(
+            status="unknown_intent", message="Não entendi.",
+        )
+        window._send_command()
+        self.assertEqual(window._orbe_label.text(), "Pronto")
+
+
+class TestDesktopConfirmPanel(unittest.TestCase):
+    """Testes do painel de confirmação visual (Bloco 5)."""
+
+    _qapp = None
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        from PySide6.QtWidgets import QApplication
+        if QApplication.instance() is None:
+            cls._qapp = QApplication(sys.argv)
+        else:
+            cls._qapp = QApplication.instance()
+
+    def _create_window(self) -> "MainWindow":
+        from therion.interface.desktop import MainWindow
+        mock_app = MagicMock()
+        with patch.object(MainWindow, '_setup_ui'):
+            with patch.object(MainWindow, '_setup_tray'):
+                window = MainWindow(mock_app)
+        window._confirm_panel = MagicMock()
+        window._confirm_description = MagicMock()
+        window._btn_confirm = MagicMock()
+        window._btn_cancel = MagicMock()
+        window._input = MagicMock()
+        window._input.toPlainText.return_value = "sim"
+        window._orchestrator = MagicMock()
+        window._confirmation_handler = MagicMock()
+        window._confirmation_handler.evaluate_response.return_value = True
+        window._orbe = MagicMock()
+        window._orbe_label = MagicMock()
+        window._history = MagicMock()
+        window._clear_button = MagicMock()
+        window._pending_plan = None
+        return window
+
+    def test_panel_hidden_initially(self) -> None:
+        from PySide6.QtWidgets import QApplication
+        from therion.interface.desktop import MainWindow
+
+        app = QApplication.instance() or QApplication(sys.argv)
+        with patch.object(MainWindow, "_setup_tray"):
+            window = MainWindow(app)
+
+        self.assertFalse(window._confirm_panel.isVisible())
+
+    def test_awaiting_confirmation_shows_panel(self) -> None:
+        window = self._create_window()
+        mock_plan = MagicMock()
+        mock_plan.description = "Abrir Obsidian"
+        window._orchestrator.process_command.return_value = MagicMock(
+            status="awaiting_confirmation", message="Continuar?", plan=mock_plan,
+        )
+        window._input.toPlainText.return_value = "abra o Obsidian"
+        window._send_command()
+        window._confirm_panel.setVisible.assert_called_with(True)
+
+    def test_visible_panel_keeps_history_scrolled_to_end(self) -> None:
+        window = self._create_window()
+        window._pending_plan = MagicMock()
+        scrollbar = window._history.verticalScrollBar.return_value
+        window._update_confirm_panel()
+        scrollbar.setValue.assert_called_once_with(scrollbar.maximum.return_value)
+
+    def test_no_pending_plan_hides_panel(self) -> None:
+        window = self._create_window()
+        window._orchestrator.process_command.return_value = MagicMock(
+            status="success", message="Ok",
+        )
+        window._input.toPlainText.return_value = "teste"
+        window._send_command()
+        window._confirm_panel.setVisible.assert_called_with(False)
+
+    def test_confirm_button_calls_handle_confirmation_sim(self) -> None:
+        window = self._create_window()
+        window._pending_plan = MagicMock()
+        window._on_confirm()
+        window._confirmation_handler.evaluate_response.assert_called_once_with("sim")
+
+    def test_cancel_button_calls_handle_confirmation_nao(self) -> None:
+        window = self._create_window()
+        window._pending_plan = MagicMock()
+        window._on_cancel()
+        window._confirmation_handler.evaluate_response.assert_called_once_with("não")
+
+    def test_buttons_do_not_call_orchestrator_directly(self) -> None:
+        window = self._create_window()
+        window._pending_plan = MagicMock()
+        window._orchestrator.confirm_and_execute = MagicMock()
+        window._confirmation_handler.evaluate_response.return_value = None
+        window._on_confirm()
+        window._orchestrator.confirm_and_execute.assert_not_called()
+
+    def test_cancel_hides_panel(self) -> None:
+        window = self._create_window()
+        window._pending_plan = MagicMock()
+        window._confirmation_handler.evaluate_response.return_value = False
+        window._orchestrator.confirm_and_execute.return_value = MagicMock(
+            status="cancelled", message="Cancelado.",
+        )
+        window._on_cancel()
+        window._confirm_panel.setVisible.assert_called_with(False)
+
+    def test_description_appears_as_safe_text(self) -> None:
+        window = self._create_window()
+        window._pending_plan = MagicMock()
+        window._pending_plan.description = "Ação perigosa"
+        window._update_confirm_panel()
+        window._confirm_description.setText.assert_called_once_with("Ação perigosa")
+
+    def test_description_is_plain_text(self) -> None:
+        from PySide6.QtCore import Qt
+        from PySide6.QtWidgets import QApplication
+        from therion.interface.desktop import MainWindow
+
+        app = QApplication.instance() or QApplication(sys.argv)
+        with patch.object(MainWindow, "_setup_tray"):
+            window = MainWindow(app)
+
+        window._pending_plan = MagicMock()
+        window._pending_plan.description = "<b>teste</b>"
+        window._update_confirm_panel()
+        self.assertEqual(window._confirm_description.textFormat(), Qt.PlainText)
+        self.assertEqual(window._confirm_description.text(), "<b>teste</b>")
+
+    def test_fallback_description_when_none(self) -> None:
+        window = self._create_window()
+        window._pending_plan = MagicMock()
+        window._pending_plan.description = None
+        window._update_confirm_panel()
+        window._confirm_description.setText.assert_called_once_with(
+            "Deseja prosseguir com esta ação?"
+        )
 
 
 if __name__ == "__main__":

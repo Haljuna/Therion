@@ -20,11 +20,11 @@ O conceito do Therion teve seu ciclo básico implementado e validado com sucesso
 As decisões técnicas principais da V1 foram aprovadas (interface PySide6, processo persistente, configuração JSON, Skills híbridas, calendário Google). A implementação da V1 segue de forma incremental.
 
 ### Progresso da V1
-- ✅ Interface conversacional
+- ✅ Interface conversacional (UI-1 desktop concluída)
 - ✅ Memória de sessão + contexto operacional
 - ✅ Calendário — consulta/leitura
 - ✅ Calendário — criação com confirmação
-- ⏳ IA central local-first
+- ⏳ IA central local-first (Marco A2)
 
 ### Progresso da V1 validado até o momento
 
@@ -285,6 +285,15 @@ As decisões técnicas principais da V1 foram aprovadas (interface PySide6, proc
     - Janela de busca real validada: `00:00:00-03:00` (início do dia) até `00:00:00-03:00` (início do dia seguinte);
   - Política de segurança do OpenCode (`opencode.json`) refinada para permitir permanentemente leitura e organização (`read`, `glob`, `grep`, `todowrite`, `git status*`, `git diff*`, `git log*`), mantendo escrita/execução protegidas (`ask`) e `git push*` bloqueado (`deny`);
   - Suíte de testes automatizados: 394/394 testes passando (0 failures, 0 errors; warning controlado de "Disk full" continua esperado).
+- Interface desktop UI-1 concluída e validada visual e tecnicamente:
+  - Interface desktop própria em PySide6 com identidade visual preto (`#0d0d0d`) + laranja (`#ff6a00`);
+  - Orbe com estados visuais (`idle`, `thinking`, `executing`, `awaiting_confirmation`, `completed`, `error`, `cancelled`) e rótulo de estado integrado na barra superior;
+  - Histórico de mensagens estruturado em balões (usuário à direita com fundo escuro alaranjado; Therion à esquerda com fundo escuro neutro);
+  - Painel compacto de confirmação com botões "Confirmar" e "Cancelar" integrados, reutilizando o fluxo seguro existente de confirmação;
+  - Status inferior redundante removido (estado consolidado junto ao orbe);
+  - Entrada de texto com `Enter` para envio e `Shift+Enter` para quebra de linha;
+  - Arquitetura funcional preservada sem nenhuma execução direta na UI (Orchestrator, AICore, Planner, Executor, PermissionManager, calendário, memória e system tray intactos);
+  - Regressão final: 504/504 testes passando, 0 failures, 0 errors (incluindo 82 testes de interface/integração desktop).
 
 ---
 
@@ -470,6 +479,7 @@ Todas as etapas previstas da V0 foram concluídas.
 - [x] corrigir tratamento de timezone e adicionar `tzdata`
 - [x] refinar permissões de leitura no `opencode.json`
 - [x] implementar criação de eventos no calendário mediante confirmação explícita
+- [x] implementar interface visual UI-1 (PySide6, tema preto + laranja, orbe de estados, balões, confirmação compacta)
 
 ---
 
@@ -478,7 +488,7 @@ Todas as etapas previstas da V0 foram concluídas.
 **Concluir e validar as funcionalidades restantes da V1.**
 
 Próxima etapa funcional principal:
-- **IA central local-first.**
+- **A2 — IA central local-first com provider real**, respeitando a arquitetura `AICore` → `AIProvider`.
 
 Funcionalidades da V1 ainda não implementadas (conforme Roadmap):
 
@@ -569,9 +579,11 @@ Marco de governança alcançado: `opencode.json` refinado para permitir permanen
 
 Marco da V1 alcançado: criação de eventos no calendário com confirmação explícita implementada e validada de ponta a ponta (449 testes, 0 failures). Fluxo completo: Usuário → IntentRecognizer → Orchestrator → confirmação explícita → CalendarAdapter → GoogleCalendarAdapter → Google Calendar. OAuth real atualizado para `calendar.events.owned`. Primeiro evento real criado com sucesso ("Teste do therion", 15/09/2026 23:30–00:30, event_id retornado, consulta posterior confirma presença). Token antigo preservado como `token.json.bak.readonly`.
 
+Marco da V1 alcançado: interface desktop UI-1 concluída e validada visual e tecnicamente de ponta a ponta (504 testes passando, 0 failures, 0 errors; 82 testes de interface/integração desktop). Nova interface PySide6 com tema preto e laranja, orbe de estados visuais, histórico em balões, painel compacto de confirmação com Confirmar/Cancelar, remoção do status inferior redundante e atalhos Enter/Shift+Enter. Arquitetura funcional e governança preservadas sem execução direta pela UI.
+
 Próxima etapa principal:
 
-**IA central local-first.**
+**A2 — IA central local-first com provider real**, respeitando a arquitetura `AICore` → `AIProvider`.
 
 ---
 
