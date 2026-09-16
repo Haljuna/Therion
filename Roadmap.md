@@ -58,7 +58,7 @@ A V0 é concluída quando o fluxo principal funcionar de ponta a ponta de forma 
 
 ## V1 — Assistente utilizável
 
-### Status: **Fase ativa / Em preparação (decisões técnicas aprovadas)**
+### Status: **Fase ativa — Em andamento**
 
 ### Objetivo
 
@@ -77,9 +77,9 @@ Transformar a prova de conceito em uma aplicação útil no cotidiano.
 - sistema inicial de Skills;
 - múltiplas ações controladas;
 - abertura de aplicativos;
-- integração básica com calendário;
-- consulta de eventos;
-- criação de eventos mediante confirmação;
+- integração básica com calendário:
+  - consulta/leitura de eventos (CONCLUÍDO);
+  - criação de eventos mediante confirmação (PRÓXIMA ETAPA);
 - logs básicos;
 - configuração local.
 
@@ -225,10 +225,51 @@ Não fazem parte da V0:
 
 ## Próxima meta
 
-**Concluir e validar a V1.**
+**Concluir e validar as funcionalidades restantes da V1.**
 
-Primeiro marco técnico:
+Primeiro marco técnico (V0 concluída):
 
 ```text
 Therion recebe um comando de texto e consegue abrir o Obsidian após confirmação, verificar o resultado e responder corretamente.
 ```
+
+Próxima etapa funcional:
+- **Calendário — criação de eventos com confirmação explícita.**
+
+---
+
+## Futuras integrações Google
+
+> Mapeamento conceitual para expansão progressiva do ecossistema Google.
+> **Nota de escopo:** Estas integrações são possibilidades futuras e NÃO estão promovidas automaticamente para a V1 nem constituem tarefas imediatas.
+
+### Serviços mapeados
+
+- Gmail API
+- Google Drive API
+- Google Docs API
+- Google Sheets API
+- Google Tasks API
+- Google Meet API
+- Google Classroom API
+- Google Chat API
+- serviços Google Cloud quando houver caso de uso concreto
+
+### Princípio arquitetural
+
+```text
+Usuário
+→ Therion
+→ Orchestrator
+→ PermissionManager / confirmação
+→ API específica
+```
+
+### Diretrizes
+
+- integrar uma API por vez;
+- só implementar quando houver caso de uso concreto;
+- leitura primeiro quando possível;
+- ações de escrita exigem confirmação explícita;
+- nenhuma nova API deve ampliar automaticamente permissões já concedidas;
+- Gmail é um forte candidato para uma das próximas integrações Google após Calendar, quando o roadmap chegar nessa etapa.

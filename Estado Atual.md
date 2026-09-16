@@ -17,7 +17,14 @@ Detalhes técnicos ficam em [[Arquitetura]].
 
 O conceito do Therion teve seu ciclo básico implementado e validado com sucesso no Windows através do teste simbólico de abertura do Obsidian de ponta a ponta (V0 concluída).
 
-As decisões técnicas principais da V1 foram aprovadas (interface PySide6, processo persistente, configuração JSON, Skills híbridas, calendário Google). A implementação da V1 foi iniciada de forma incremental.
+As decisões técnicas principais da V1 foram aprovadas (interface PySide6, processo persistente, configuração JSON, Skills híbridas, calendário Google). A implementação da V1 segue de forma incremental.
+
+### Progresso da V1
+- ✅ Interface conversacional
+- ✅ Memória de sessão + contexto operacional
+- ✅ Calendário — consulta/leitura
+- ⏳ Calendário — criação com confirmação
+- ⏳ IA central local-first
 
 ### Progresso da V1 validado até o momento
 
@@ -262,6 +269,22 @@ As decisões técnicas principais da V1 foram aprovadas (interface PySide6, proc
     - Teste 2: segunda interação acumula contexto na mesma sessão
     - Teste 3: clear_session limpa turns + last_* e preserva history/current_task
     - Teste 4: novo processo começa com memória vazia (volatilidade confirmada)
+- Integração de leitura com Google Calendar implementada e validada:
+  - `GoogleCalendarAdapter` (`therion/calendar/google_adapter.py`) usando `calendarId="primary"`
+  - Autenticação OAuth2 (`therion/calendar/auth.py`) implementada e validada com sucesso; `credentials.json` e `token.json` armazenados com segurança fora do repositório em `%APPDATA%\Therion\`
+  - Configuração do usuário validada: `calendar.enabled=true`, `calendar.time_zone=America/Sao_Paulo`
+  - Consulta real validada pela interface desktop; diagnóstico técnico real também validado diretamente via GoogleCalendarAdapter
+  - Comando conversacional validado: "Therion, o que tenho hoje?"
+  - Eventos reais retornados corretamente pela interface desktop
+  - Operação estritamente de leitura (somente consulta); nenhuma criação, edição ou exclusão de evento nesta etapa
+  - Correção de fuso horário no Windows:
+    - `ZoneInfo("America/Sao_Paulo")` inicialmente falhava no Windows por falta de banco de dados de fuso horário no sistema;
+    - `tzdata` (2026.4) foi instalado no `.venv` e registrado como dependência no `requirements.txt` (encoding UTF-16 LE preservado);
+    - Fallback silencioso para UTC foi completamente removido;
+    - Fuso horário inválido agora gera `CalendarError` controlado;
+    - Janela de busca real validada: `00:00:00-03:00` (início do dia) até `00:00:00-03:00` (início do dia seguinte);
+  - Política de segurança do OpenCode (`opencode.json`) refinada para permitir permanentemente leitura e organização (`read`, `glob`, `grep`, `todowrite`, `git status*`, `git diff*`, `git log*`), mantendo escrita/execução protegidas (`ask`) e `git push*` bloqueado (`deny`);
+  - Suíte de testes automatizados: 394/394 testes passando (0 failures, 0 errors; warning controlado de "Disk full" continua esperado).
 
 ---
 
@@ -393,16 +416,15 @@ Componentes já validados na V0 e V1:
 - `runtime.real_actions_enabled` com default False;
 - inicialização independente do terminal via `pythonw.exe`;
 - inicialização prática via atalho do Windows (`Therion.lnk`);
-- política fail-closed de permissões via `opencode.json`;
-- memória de sessão + contexto operacional (Turn, last_*, recent_turns, clear_session).
+- política fail-closed de permissões via `opencode.json` (com leitura/organização fluidas autorizadas);
+- memória de sessão + contexto operacional (Turn, last_*, recent_turns, clear_session);
+- integração básica com Google Calendar (consulta/leitura de eventos de hoje via comando conversacional com OAuth e fuso horário estrito).
 
 Até que exista evidência técnica adicional, considerar como não implementado:
 
+- criação de eventos no calendário mediante confirmação;
 - modelos de IA / LLMs integrados;
 - Skills executáveis reutilizáveis;
-- integração com calendário;
-- consulta de eventos;
-- criação de eventos mediante confirmação;
 - delegação automática para outros agentes;
 - voz;
 - automações avançadas;
@@ -445,6 +467,10 @@ Todas as etapas previstas da V0 foram concluídas.
 - [x] adicionar `opencode.json` com política fail-closed de permissões
 - [x] criar forma prática de iniciar o Therion no Windows sem terminal
 - [x] implementar memória de sessão + contexto operacional (Turn, last_*, recent_turns, clear_session)
+- [x] implementar integração básica com calendário (consulta/leitura de eventos via Google Calendar)
+- [x] corrigir tratamento de timezone e adicionar `tzdata`
+- [x] refinar permissões de leitura no `opencode.json`
+- [ ] implementar criação de eventos no calendário mediante confirmação explícita
 
 ---
 
@@ -452,11 +478,14 @@ Todas as etapas previstas da V0 foram concluídas.
 
 **Concluir e validar as funcionalidades restantes da V1.**
 
+Próxima etapa funcional principal:
+- **Calendário — criação de eventos com confirmação explícita.**
+
 Funcionalidades da V1 ainda não implementadas (conforme Roadmap):
 
-- integração básica com calendário (começar por consulta/leitura de eventos antes de criação);
-- consulta de eventos;
-- criação de eventos mediante confirmação.
+- criação de eventos mediante confirmação explícita;
+- IA central local-first;
+- sistema inicial de Skills.
 
 Ainda NÃO implementados:
 
@@ -536,14 +565,23 @@ Marco da V1 alcançado: configuração `runtime.real_actions_enabled` implementa
 
 Marco da V1 alcançado: atalho do Windows `Therion.lnk` criado e validado na Área de Trabalho visível. Therion inicia sem terminal, permanece na bandeja, pode ser restaurado e encerrado corretamente. Não é mais necessário usar terminal para iniciar o Therion no uso normal.
 
+Marco da V1 alcançado: integração de leitura do Google Calendar implementada e validada de ponta a ponta com 394 testes automatizados (394/394 passando, 0 failures, 0 errors). Fluxo OAuth funcional armazenando `credentials.json` e `token.json` em `%APPDATA%\Therion\`. Comando "Therion, o que tenho hoje?" retorna eventos reais na interface desktop. Correção do fuso `America/Sao_Paulo` validada com dependência `tzdata` e limites de busca `00:00:00-03:00`.
+
+Marco de governança alcançado: `opencode.json` refinado para permitir permanentemente leitura e organização (`read`, `glob`, `grep`, `todowrite`, `git status*`, `git diff*`, `git log*`), mantendo segurança fail-closed contra escrita/execução arbitrária e bloqueio de `git push*`.
+
 Próxima etapa principal:
 
-**Concluir e validar as funcionalidades restantes da V1.**
+**Calendário — criação de eventos com confirmação explícita.**
 
 ---
 
 ## Checkpoints recentes
 
+- `48c053e` — `chore(security): refine OpenCode read permissions`
+- `029500c` — `fix(v1): correct calendar timezone handling`
+- `644e97b` — `feat(v1): wire calendar oauth and desktop integration`
+- `e58973b` — `feat(v1): add google calendar read-only integration`
+- `1570d91` — `feat(v1): add calendar read-only core`
 - `1c5696c` — `feat(v1): add session memory and operational context`
 - `b9b9783` — `chore(security): add OpenCode permission guardrails`
 - `1a817bb` — `feat(v1): add controlled real action configuration`
