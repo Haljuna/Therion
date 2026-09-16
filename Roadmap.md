@@ -79,7 +79,7 @@ Transformar a prova de conceito em uma aplicação útil no cotidiano.
 - abertura de aplicativos;
 - integração básica com calendário:
   - consulta/leitura de eventos (CONCLUÍDO);
-  - criação de eventos mediante confirmação (PRÓXIMA ETAPA);
+  - criação de eventos mediante confirmação (CONCLUÍDO);
 - logs básicos;
 - configuração local.
 
@@ -234,7 +234,7 @@ Therion recebe um comando de texto e consegue abrir o Obsidian após confirmaç�
 ```
 
 Próxima etapa funcional:
-- **Calendário — criação de eventos com confirmação explícita.**
+- **IA central local-first.**
 
 ---
 

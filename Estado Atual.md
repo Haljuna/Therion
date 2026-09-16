@@ -23,7 +23,7 @@ As decisões técnicas principais da V1 foram aprovadas (interface PySide6, proc
 - ✅ Interface conversacional
 - ✅ Memória de sessão + contexto operacional
 - ✅ Calendário — consulta/leitura
-- ⏳ Calendário — criação com confirmação
+- ✅ Calendário — criação com confirmação
 - ⏳ IA central local-first
 
 ### Progresso da V1 validado até o momento
@@ -422,7 +422,6 @@ Componentes já validados na V0 e V1:
 
 Até que exista evidência técnica adicional, considerar como não implementado:
 
-- criação de eventos no calendário mediante confirmação;
 - modelos de IA / LLMs integrados;
 - Skills executáveis reutilizáveis;
 - delegação automática para outros agentes;
@@ -470,7 +469,7 @@ Todas as etapas previstas da V0 foram concluídas.
 - [x] implementar integração básica com calendário (consulta/leitura de eventos via Google Calendar)
 - [x] corrigir tratamento de timezone e adicionar `tzdata`
 - [x] refinar permissões de leitura no `opencode.json`
-- [ ] implementar criação de eventos no calendário mediante confirmação explícita
+- [x] implementar criação de eventos no calendário mediante confirmação explícita
 
 ---
 
@@ -479,11 +478,10 @@ Todas as etapas previstas da V0 foram concluídas.
 **Concluir e validar as funcionalidades restantes da V1.**
 
 Próxima etapa funcional principal:
-- **Calendário — criação de eventos com confirmação explícita.**
+- **IA central local-first.**
 
 Funcionalidades da V1 ainda não implementadas (conforme Roadmap):
 
-- criação de eventos mediante confirmação explícita;
 - IA central local-first;
 - sistema inicial de Skills.
 
@@ -569,14 +567,20 @@ Marco da V1 alcançado: integração de leitura do Google Calendar implementada 
 
 Marco de governança alcançado: `opencode.json` refinado para permitir permanentemente leitura e organização (`read`, `glob`, `grep`, `todowrite`, `git status*`, `git diff*`, `git log*`), mantendo segurança fail-closed contra escrita/execução arbitrária e bloqueio de `git push*`.
 
+Marco da V1 alcançado: criação de eventos no calendário com confirmação explícita implementada e validada de ponta a ponta (449 testes, 0 failures). Fluxo completo: Usuário → IntentRecognizer → Orchestrator → confirmação explícita → CalendarAdapter → GoogleCalendarAdapter → Google Calendar. OAuth real atualizado para `calendar.events.owned`. Primeiro evento real criado com sucesso ("Teste do therion", 15/09/2026 23:30–00:30, event_id retornado, consulta posterior confirma presença). Token antigo preservado como `token.json.bak.readonly`.
+
 Próxima etapa principal:
 
-**Calendário — criação de eventos com confirmação explícita.**
+**IA central local-first.**
 
 ---
 
 ## Checkpoints recentes
 
+- `f260bff` — `fix(v1): correct calendar date parsing`
+- `97b595f` — `feat(v1): connect calendar confirmation to event creation`
+- `c1cc4cd` — `feat(v1): add calendar event creation adapter`
+- `f0a2f4d` — `feat(v1): add calendar creation confirmation flow`
 - `48c053e` — `chore(security): refine OpenCode read permissions`
 - `029500c` — `fix(v1): correct calendar timezone handling`
 - `644e97b` — `feat(v1): wire calendar oauth and desktop integration`
