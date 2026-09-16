@@ -5,7 +5,7 @@ Todos os testes usam mocks e patches controlados.
 """
 
 import unittest
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch, call
 
 from googleapiclient.errors import HttpError
@@ -368,6 +368,151 @@ class TestAdapterDefaultTimeZone(unittest.TestCase):
         """20. Adapter com time_zone customizado preserva o valor."""
         adapter = GoogleCalendarAdapter(time_zone="Europe/London")
         self.assertEqual(adapter._time_zone, "Europe/London")
+
+
+class TestCreateEvent(unittest.TestCase):
+    """Valida criação de evento via GoogleCalendarAdapter."""
+
+    def _make_insert_mock(self, event_id: str = "new_evt") -> MagicMock:
+        service = MagicMock()
+        (
+            service.events.return_value
+            .insert.return_value
+            .execute.return_value
+        ) = {
+            "id": event_id,
+            "summary": "Reunião",
+            "start": {"dateTime": "2026-09-15T10:00:00-03:00", "timeZone": "America/Sao_Paulo"},
+            "end": {"dateTime": "2026-09-15T11:00:00-03:00", "timeZone": "America/Sao_Paulo"},
+        }
+        return service
+
+    def _tz(self, offset_hours: int = -3):
+        return timezone(timedelta(hours=offset_hours))
+
+    def test_create_event_usa_calendar_primary(self) -> None:
+        """21. create_event usa calendarId='primary'."""
+        service = self._make_insert_mock()
+        insert_mock = service.events.return_value.insert
+        start = datetime(2026, 9, 15, 10, 0, tzinfo=self._tz())
+        end = datetime(2026, 9, 15, 11, 0, tzinfo=self._tz())
+        with patch("therion.calendar.google_adapter.get_valid_credentials"):
+            with patch("therion.calendar.google_adapter.build", return_value=service):
+                adapter = GoogleCalendarAdapter()
+                adapter.create_event("Reunião", start, end)
+        _, kwargs = insert_mock.call_args
+        self.assertEqual(kwargs["calendarId"], "primary")
+
+    def test_create_event_payload_summary(self) -> None:
+        """22. Payload contém summary."""
+        service = self._make_insert_mock()
+        insert_mock = service.events.return_value.insert
+        start = datetime(2026, 9, 15, 10, 0, tzinfo=self._tz())
+        end = datetime(2026, 9, 15, 11, 0, tzinfo=self._tz())
+        with patch("therion.calendar.google_adapter.get_valid_credentials"):
+            with patch("therion.calendar.google_adapter.build", return_value=service):
+                adapter = GoogleCalendarAdapter()
+                adapter.create_event("Stand-up", start, end)
+        _, kwargs = insert_mock.call_args
+        self.assertEqual(kwargs["body"]["summary"], "Stand-up")
+
+    def test_create_event_start_end(self) -> None:
+        """23. Payload contém start e end dateTime."""
+        service = self._make_insert_mock()
+        insert_mock = service.events.return_value.insert
+        start = datetime(2026, 9, 15, 14, 0, tzinfo=self._tz())
+        end = datetime(2026, 9, 15, 15, 0, tzinfo=self._tz())
+        with patch("therion.calendar.google_adapter.get_valid_credentials"):
+            with patch("therion.calendar.google_adapter.build", return_value=service):
+                adapter = GoogleCalendarAdapter()
+                adapter.create_event("Reunião", start, end)
+        _, kwargs = insert_mock.call_args
+        self.assertIn("2026-09-15T14:00:00", kwargs["body"]["start"]["dateTime"])
+        self.assertIn("2026-09-15T15:00:00", kwargs["body"]["end"]["dateTime"])
+
+    def test_create_event_timezone(self) -> None:
+        """24. Payload contém timeZone correto."""
+        service = self._make_insert_mock()
+        insert_mock = service.events.return_value.insert
+        start = datetime(2026, 9, 15, 10, 0, tzinfo=self._tz())
+        end = datetime(2026, 9, 15, 11, 0, tzinfo=self._tz())
+        with patch("therion.calendar.google_adapter.get_valid_credentials"):
+            with patch("therion.calendar.google_adapter.build", return_value=service):
+                adapter = GoogleCalendarAdapter(time_zone="America/Sao_Paulo")
+                adapter.create_event("Reunião", start, end)
+        _, kwargs = insert_mock.call_args
+        self.assertEqual(kwargs["body"]["start"]["timeZone"], "America/Sao_Paulo")
+        self.assertEqual(kwargs["body"]["end"]["timeZone"], "America/Sao_Paulo")
+
+    def test_create_event_execute_chamado(self) -> None:
+        """25. execute() é chamado."""
+        service = self._make_insert_mock()
+        insert_mock = service.events.return_value.insert
+        start = datetime(2026, 9, 15, 10, 0, tzinfo=self._tz())
+        end = datetime(2026, 9, 15, 11, 0, tzinfo=self._tz())
+        with patch("therion.calendar.google_adapter.get_valid_credentials"):
+            with patch("therion.calendar.google_adapter.build", return_value=service):
+                adapter = GoogleCalendarAdapter()
+                adapter.create_event("Reunião", start, end)
+        insert_mock.return_value.execute.assert_called_once()
+
+    def test_create_event_retorna_calendar_event(self) -> None:
+        """26. Resposta convertida para CalendarEvent."""
+        service = self._make_insert_mock(event_id="evt_abc")
+        start = datetime(2026, 9, 15, 10, 0, tzinfo=self._tz())
+        end = datetime(2026, 9, 15, 11, 0, tzinfo=self._tz())
+        with patch("therion.calendar.google_adapter.get_valid_credentials"):
+            with patch("therion.calendar.google_adapter.build", return_value=service):
+                adapter = GoogleCalendarAdapter()
+                result = adapter.create_event("Reunião", start, end)
+        self.assertIsInstance(result, CalendarEvent)
+        self.assertEqual(result.event_id, "evt_abc")
+        self.assertEqual(result.summary, "Reunião")
+        self.assertFalse(result.all_day)
+
+    def test_create_event_summary_vazio_rejeitado(self) -> None:
+        """27. Summary vazio levanta CalendarError."""
+        start = datetime(2026, 9, 15, 10, 0, tzinfo=self._tz())
+        end = datetime(2026, 9, 15, 11, 0, tzinfo=self._tz())
+        adapter = GoogleCalendarAdapter()
+        with self.assertRaises(CalendarError) as ctx:
+            adapter.create_event("", start, end)
+        self.assertIn("vazio", str(ctx.exception))
+
+    def test_create_event_start_sem_timezone_rejeitado(self) -> None:
+        """28. Datetime sem timezone rejeitado."""
+        start = datetime(2026, 9, 15, 10, 0)
+        end = datetime(2026, 9, 15, 11, 0, tzinfo=self._tz())
+        adapter = GoogleCalendarAdapter()
+        with self.assertRaises(CalendarError) as ctx:
+            adapter.create_event("Reunião", start, end)
+        self.assertIn("timezone", str(ctx.exception))
+
+    def test_create_event_end_menor_igual_start(self) -> None:
+        """29. end <= start rejeitado."""
+        start = datetime(2026, 9, 15, 11, 0, tzinfo=self._tz())
+        end = datetime(2026, 9, 15, 10, 0, tzinfo=self._tz())
+        adapter = GoogleCalendarAdapter()
+        with self.assertRaises(CalendarError) as ctx:
+            adapter.create_event("Reunião", start, end)
+        self.assertIn("posterior", str(ctx.exception))
+
+    def test_create_event_http_error_levanta_calendar_error(self) -> None:
+        """30. HttpError é convertido em CalendarError."""
+        service = MagicMock()
+        http_resp = MagicMock()
+        http_resp.status = 403
+        http_resp.reason = "Forbidden"
+        error = HttpError(resp=http_resp, content=b"Forbidden")
+        service.events.return_value.insert.return_value.execute.side_effect = error
+        start = datetime(2026, 9, 15, 10, 0, tzinfo=self._tz())
+        end = datetime(2026, 9, 15, 11, 0, tzinfo=self._tz())
+        with patch("therion.calendar.google_adapter.get_valid_credentials"):
+            with patch("therion.calendar.google_adapter.build", return_value=service):
+                adapter = GoogleCalendarAdapter()
+                with self.assertRaises(CalendarError) as ctx:
+                    adapter.create_event("Reunião", start, end)
+        self.assertIn("Erro da API Google Calendar", str(ctx.exception))
 
 
 if __name__ == "__main__":

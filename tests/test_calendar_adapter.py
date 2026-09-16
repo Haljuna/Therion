@@ -20,6 +20,23 @@ class DummyCalendarAdapter(CalendarAdapter):
             raise CalendarError("Erro simulado de calendário")
         return self._events
 
+    def create_event(
+        self,
+        summary: str,
+        start: datetime,
+        end: datetime,
+    ) -> CalendarEvent:
+        if self._raise_error:
+            raise CalendarError("Erro simulado de calendário")
+        event = CalendarEvent(
+            event_id="new_event",
+            summary=summary,
+            start=start,
+            end=end,
+            all_day=False,
+        )
+        return event
+
 
 class TestCalendarEventModel(unittest.TestCase):
     """Valida o modelo CalendarEvent."""

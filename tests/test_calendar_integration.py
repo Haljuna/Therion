@@ -22,6 +22,22 @@ class MockCalendarAdapter(CalendarAdapter):
             raise CalendarError("Erro simulado")
         return self._events
 
+    def create_event(
+        self,
+        summary: str,
+        start: datetime,
+        end: datetime,
+    ) -> CalendarEvent:
+        if self._raise_error:
+            raise CalendarError("Erro simulado")
+        return CalendarEvent(
+            event_id="new_event",
+            summary=summary,
+            start=start,
+            end=end,
+            all_day=False,
+        )
+
 
 class TestIntentRecognizerCalendar(unittest.TestCase):
     """Valida reconhecimento de intenções de calendário."""

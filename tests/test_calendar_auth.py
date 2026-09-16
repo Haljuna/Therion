@@ -12,6 +12,7 @@ from google.oauth2.credentials import Credentials
 
 from therion.calendar.adapter import CalendarError
 from therion.calendar.auth import (
+    SCOPE,
     _get_therion_dir,
     _get_token_path,
     _persist_token,
@@ -104,23 +105,25 @@ class TestEnsureValidCredentials(unittest.TestCase):
         valid: bool = True,
         expired: bool = False,
         refresh_token: str | None = "refresh_123",
+        scopes: list[str] | None = None,
     ) -> Credentials:
         """Cria Credentials mockadas com estado controlado."""
         creds = MagicMock(spec=Credentials)
         creds.valid = valid
         creds.expired = expired
         creds.refresh_token = refresh_token
+        creds.scopes = scopes or [SCOPE]
         return creds
 
     def test_ja_valido_retorna_mesmo(self) -> None:
-        """7. Credenciais já válidas são retornadas sem refresh."""
+        """7. Credenciais já válidas com scope correto são retornadas sem refresh."""
         creds = self.make_creds(valid=True)
         result = ensure_valid_credentials(creds)
         self.assertIs(result, creds)
         creds.refresh.assert_not_called()
 
     def test_expirado_com_refresh_token_faz_refresh_e_persiste(self) -> None:
-        """8. Expirado com refresh_token faz refresh e persiste."""
+        """8. Expirado com refresh_token e scope correto faz refresh e persiste."""
         creds = self.make_creds(valid=False, expired=True, refresh_token="refresh_123")
 
         with patch("therion.calendar.auth._persist_token") as mock_persist:
@@ -156,6 +159,54 @@ class TestEnsureValidCredentials(unittest.TestCase):
             ensure_valid_credentials(None)
         self.assertIn("Token de acesso ausente", str(ctx.exception))
         self.assertIn("autenticação inicial", str(ctx.exception))
+
+    def test_scope_insuficiente_levanta_calendar_error(self) -> None:
+        """12. Token com scope insuficiente (readonly) levanta CalendarError antes de qualquer chamada Google."""
+        creds = self.make_creds(
+            valid=True,
+            scopes=["https://www.googleapis.com/auth/calendar.readonly"],
+        )
+        with self.assertRaises(CalendarError) as ctx:
+            ensure_valid_credentials(creds)
+        self.assertIn("insuficiente", str(ctx.exception))
+        self.assertIn("Reautenticação necessária", str(ctx.exception))
+        creds.refresh.assert_not_called()
+
+    def test_scope_correto_aceito(self) -> None:
+        """13. Token com calendar.events.owned é aceito."""
+        creds = self.make_creds(
+            valid=True,
+            scopes=["https://www.googleapis.com/auth/calendar.events.owned"],
+        )
+        result = ensure_valid_credentials(creds)
+        self.assertIs(result, creds)
+
+    def test_expirado_com_scope_correto_faz_refresh(self) -> None:
+        """14. Token expirado com scope correto faz refresh normalmente."""
+        creds = self.make_creds(
+            valid=False,
+            expired=True,
+            refresh_token="refresh_123",
+            scopes=["https://www.googleapis.com/auth/calendar.events.owned"],
+        )
+        with patch("therion.calendar.auth._persist_token"):
+            creds.refresh = MagicMock()
+            result = ensure_valid_credentials(creds)
+        creds.refresh.assert_called_once()
+        self.assertIs(result, creds)
+
+    def test_expirado_com_scope_insuficiente_nao_faz_refresh(self) -> None:
+        """15. Token expirado com scope insuficiente NÃO tenta refresh — rejeita imediatamente."""
+        creds = self.make_creds(
+            valid=False,
+            expired=True,
+            refresh_token="refresh_123",
+            scopes=["https://www.googleapis.com/auth/calendar.readonly"],
+        )
+        with self.assertRaises(CalendarError) as ctx:
+            ensure_valid_credentials(creds)
+        self.assertIn("insuficiente", str(ctx.exception))
+        creds.refresh.assert_not_called()
 
 
 class TestPersistToken(unittest.TestCase):
@@ -194,8 +245,12 @@ class TestPersistToken(unittest.TestCase):
 class TestGetValidCredentials(unittest.TestCase):
     """Valida fluxo completo get_valid_credentials."""
 
+    def test_scope_events_owned(self) -> None:
+        """13. SCOPE é calendar.events.owned (menor privilégio para escrita)."""
+        self.assertEqual(SCOPE, "https://www.googleapis.com/auth/calendar.events.owned")
+
     def test_fluxo_completo_token_valido(self) -> None:
-        """13. Fluxo completo com token válido retorna credenciais."""
+        """14. Fluxo completo com token válido retorna credenciais."""
         creds = MagicMock(spec=Credentials)
         creds.valid = True
 
@@ -207,14 +262,14 @@ class TestGetValidCredentials(unittest.TestCase):
         mock_ensure.assert_called_once_with(creds)
 
     def test_propaga_calendar_error_do_load(self) -> None:
-        """14. Propaga CalendarError do load_credentials."""
+        """15. Propaga CalendarError do load_credentials."""
         with patch("therion.calendar.auth.load_credentials", side_effect=CalendarError("token corrupt")):
             with self.assertRaises(CalendarError) as ctx:
                 get_valid_credentials()
         self.assertIn("token corrupt", str(ctx.exception))
 
     def test_propaga_calendar_error_do_ensure(self) -> None:
-        """15. Propaga CalendarError do ensure_valid_credentials."""
+        """16. Propaga CalendarError do ensure_valid_credentials."""
         creds = MagicMock(spec=Credentials)
         with patch("therion.calendar.auth.load_credentials", return_value=creds):
             with patch("therion.calendar.auth.ensure_valid_credentials", side_effect=CalendarError("refresh failed")):

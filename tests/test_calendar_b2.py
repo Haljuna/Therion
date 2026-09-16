@@ -103,7 +103,7 @@ class TestRunInitialAuth(unittest.TestCase):
 
         _, kwargs = mock_from_file.call_args
         scopes = kwargs.get("scopes") or mock_from_file.call_args[0][1]
-        self.assertIn("https://www.googleapis.com/auth/calendar.readonly", scopes)
+        self.assertIn("https://www.googleapis.com/auth/calendar.events.owned", scopes)
 
     def test_token_existente_nao_apagado(self) -> None:
         """6. run_initial_auth não apaga token existente — apenas persiste o novo após OAuth."""

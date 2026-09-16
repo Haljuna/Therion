@@ -11,7 +11,7 @@ from google.oauth2.credentials import Credentials
 from therion.calendar.adapter import CalendarError
 
 
-SCOPE = "https://www.googleapis.com/auth/calendar.readonly"
+SCOPE = "https://www.googleapis.com/auth/calendar.events.owned"
 
 
 def _get_therion_dir() -> Path:
@@ -73,13 +73,20 @@ def ensure_valid_credentials(creds: Credentials | None) -> Credentials:
         Credentials válidas e atualizadas.
     
     Raises:
-        CalendarError: Se credenciais ausentes, inválidas sem refresh_token,
-                       ou refresh falhou.
+        CalendarError: Se credenciais ausentes, scopes insuficientes,
+                       inválidas sem refresh_token, ou refresh falhou.
     """
     if creds is None:
         raise CalendarError(
             "Token de acesso ausente. Execute a autenticação inicial "
             "para gerar token.json em %APPDATA%\\Therion\\."
+        )
+    
+    granted_scopes = set(creds.scopes or [])
+    if SCOPE not in granted_scopes:
+        raise CalendarError(
+            "Permissão do Google Calendar insuficiente. "
+            "Reautenticação necessária para permitir criação de eventos."
         )
     
     if creds.valid:
