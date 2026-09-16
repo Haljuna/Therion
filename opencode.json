@@ -3,7 +3,11 @@
   "permission": {
     "*": "ask",
     "read": "allow",
+    "glob": "allow",
+    "grep": "allow",
+    "todowrite": "allow",
     "edit": "ask",
+    "write": "ask",
     "bash": {
       "*": "ask",
       "git status*": "allow",
