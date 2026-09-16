@@ -10,6 +10,7 @@ from therion.actions.verifier import ActionVerifier
 from therion.calendar.adapter import CalendarAdapter, CalendarError
 from therion.config import AliasManager
 from therion.context.second_brain import ReadResult, SecondBrainReader
+from therion.core.ai_core import AICore
 from therion.core.intent import Intent, IntentRecognizer
 from therion.core.planner import Plan, Planner
 from therion.governance.confirmation import ConfirmationHandler
@@ -37,6 +38,7 @@ class Orchestrator:
         log_dir: Optional[str] = None,
         vault_root: Optional[str] = None,
         calendar_adapter: Optional[CalendarAdapter] = None,
+        ai_core: Optional[AICore] = None,
     ) -> None:
         self.simulate = simulate
         self.intent_recognizer = IntentRecognizer()
@@ -50,6 +52,7 @@ class Orchestrator:
         self.audit_logger = AuditLogger(log_dir=log_dir)
         self.alias_manager = AliasManager()
         self.calendar_adapter = calendar_adapter
+        self.ai_core = ai_core
         self._now_func = None  # injetável para testes
         # Estado do fluxo conversacional de substituir alias
         self._replace_alias_flow_step: Optional[str] = None
@@ -748,6 +751,52 @@ class Orchestrator:
         else:
             return self._present_calendar_summary(ambiguous=True)
 
+    def _build_ai_context(self) -> dict:
+        """Cria snapshot somente leitura do contexto para o AICore."""
+        return {
+            "recent_turns": [
+                {"role": t.role, "text": t.text}
+                for t in self.memory.recent_turns(5)
+            ],
+            "last_intent": self.memory.last_intent,
+            "last_target": self.memory.last_target,
+            "last_status": self.memory.last_status,
+            "last_result_summary": (
+                self.memory.last_result[:200]
+                if self.memory.last_result
+                else None
+            ),
+        }
+
+    def _ai_response_to_intent(self, response) -> Intent:
+        """Converte AIResponse para Intent canônico existente."""
+        intent_str = response.intent
+        args = response.arguments or {}
+
+        target = ""
+        entities = None
+
+        if intent_str == "abrir aplicativo":
+            target = args.get("target", "")
+        elif intent_str == "buscar segundo cérebro":
+            target = args.get("term", "")
+        elif intent_str == "consultar segundo cérebro":
+            target = args.get("path", "")
+        elif intent_str == "criar evento calendário":
+            entities = args
+
+        requires_confirmation = self.permission_manager.requires_confirmation(
+            Intent(action=intent_str, target=target, raw_command="")
+        )
+
+        return Intent(
+            action=intent_str,
+            target=target,
+            raw_command=response.message or "",
+            requires_confirmation=requires_confirmation,
+            entities=entities,
+        )
+
     def process_command(self, command: str) -> OrchestrationResult:
         """Processa um comando textual registrando todas as etapas na memória de trabalho."""
         mode = "simulado" if self.simulate else "real"
@@ -789,7 +838,38 @@ class Orchestrator:
             self._finalize_session_result(calendar_create_flow_result)
             return calendar_create_flow_result
 
-        intent = self.intent_recognizer.parse(command)
+        # --- AICore: classificação por IA (após todos os fluxos pendentes) ---
+        if self.ai_core is not None:
+            ai_context = self._build_ai_context()
+            ai_response = self.ai_core.classify(command, ai_context)
+
+            if ai_response is not None and ai_response.type == "chat":
+                self._complete_task()
+                result = OrchestrationResult(
+                    status="success",
+                    message=ai_response.message,
+                )
+                self._finalize_session_result(result)
+                return result
+
+            if ai_response is not None and ai_response.type == "clarification":
+                self._complete_task()
+                result = OrchestrationResult(
+                    status="success",
+                    message=ai_response.message,
+                )
+                self._finalize_session_result(result)
+                return result
+
+            if ai_response is not None and ai_response.type == "action":
+                intent = self._ai_response_to_intent(ai_response)
+                self.memory.record_intent(intent.action, intent.target)
+            else:
+                # AI falhou ou retornou None → fallback para IntentRecognizer
+                intent = self.intent_recognizer.parse(command)
+        else:
+            # Sem AICore → IntentRecognizer legado
+            intent = self.intent_recognizer.parse(command)
         if not intent:
             msg = "Não consegui identificar a intenção no comando recebido."
             self.memory.record_error(msg)
