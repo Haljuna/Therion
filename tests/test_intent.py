@@ -111,5 +111,53 @@ class TestCreateEventParsing(unittest.TestCase):
         self.assertEqual(intent.raw_command, "crie Teste amanhã às 15h")
 
 
+class TestPlanDayParsing(unittest.TestCase):
+    """Valida reconhecimento da intent planejar dia (SKILL-002)."""
+
+    def setUp(self):
+        self.ir = IntentRecognizer()
+
+    def test_planeje_meu_dia(self):
+        """'planeje meu dia' retorna action='planejar dia'."""
+        intent = self.ir.parse("planeje meu dia")
+        self.assertEqual(intent.action, "planejar dia")
+        self.assertEqual(intent.target, "")
+        self.assertFalse(intent.requires_confirmation)
+        self.assertEqual(intent.raw_command, "planeje meu dia")
+
+    def test_organize_meu_dia(self):
+        """'organize meu dia' retorna action='planejar dia'."""
+        intent = self.ir.parse("organize meu dia")
+        self.assertEqual(intent.action, "planejar dia")
+        self.assertEqual(intent.target, "")
+        self.assertFalse(intent.requires_confirmation)
+
+    def test_prepare_meu_dia(self):
+        """'prepare meu dia' retorna action='planejar dia'."""
+        intent = self.ir.parse("prepare meu dia")
+        self.assertEqual(intent.action, "planejar dia")
+        self.assertEqual(intent.target, "")
+        self.assertFalse(intent.requires_confirmation)
+
+    def test_with_therion_prefix(self):
+        """'Therion, planeje meu dia' é reconhecido."""
+        intent = self.ir.parse("Therion, planeje meu dia")
+        self.assertEqual(intent.action, "planejar dia")
+        self.assertEqual(intent.raw_command, "Therion, planeje meu dia")
+
+    def test_with_punctuation(self):
+        """'planeje meu dia.' aceita pontuação final."""
+        intent = self.ir.parse("planeje meu dia.")
+        self.assertEqual(intent.action, "planejar dia")
+
+    def test_planeje_meu_trabalho_not_recognized(self):
+        """'planeje meu trabalho' não é reconhecido."""
+        self.assertIsNone(self.ir.parse("planeje meu trabalho"))
+
+    def test_organize_sem_dia_not_recognized(self):
+        """'organize minhas tarefas' não é reconhecido."""
+        self.assertIsNone(self.ir.parse("organize minhas tarefas"))
+
+
 if __name__ == "__main__":
     unittest.main()

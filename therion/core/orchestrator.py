@@ -17,6 +17,7 @@ from therion.governance.confirmation import ConfirmationHandler
 from therion.governance.permissions import PermissionManager
 from therion.logging.audit import AuditLogger
 from therion.memory.working_memory import WorkingMemory
+from therion.skills.registry import get_skill
 
 
 @dataclass
@@ -993,6 +994,48 @@ class Orchestrator:
             self._complete_task()
             self._finalize_session_result(calendar_result)
             return calendar_result
+
+        # Tratamento especial para planejar dia (Skill SKILL-002, somente leitura)
+        if intent.action == "planejar dia":
+            try:
+                skill_cls = get_skill("SKILL-002")
+            except KeyError:
+                self._complete_task()
+                result = OrchestrationResult(
+                    status="execution_failed",
+                    intent=intent,
+                    message="Skill de planejamento não disponível.",
+                )
+                self._finalize_session_result(result)
+                return result
+            try:
+                skill = skill_cls(
+                    calendar=self.calendar_adapter,
+                    second_brain=self.second_brain,
+                )
+                skill_result = skill.execute()
+            except Exception as err:
+                self._complete_task()
+                result = OrchestrationResult(
+                    status="execution_failed",
+                    intent=intent,
+                    message=f"Erro ao executar planejamento: {err}",
+                )
+                self._finalize_session_result(result)
+                return result
+            status_map = {
+                "success": "success",
+                "partial": "success",
+                "unavailable": "execution_failed",
+            }
+            result = OrchestrationResult(
+                status=status_map.get(skill_result.status, "execution_failed"),
+                intent=intent,
+                message=skill_result.message,
+            )
+            self._complete_task()
+            self._finalize_session_result(result)
+            return result
 
         # Tratamento especial para criar evento
         if intent.action == "criar evento calendário":

@@ -1,7 +1,9 @@
 """SKILL-002 — Planejar meu dia.
 
-Skill read-only que combina eventos do calendário com contexto do
-Segundo Cérebro para fornecer um panorama do dia.
+Skill read-only que fornece um panorama determinístico da agenda do dia.
+Na versão atual (Em teste), consulta somente o calendário.
+Notas pessoais de tarefas serão consultadas quando existir uma fonte
+explicitamente definida e autorizada.
 """
 
 from dataclasses import dataclass, field
@@ -9,12 +11,8 @@ from datetime import date
 from typing import Optional
 
 from therion.calendar.adapter import CalendarAdapter, CalendarError
-from therion.context.second_brain import SecondBrainReader
 
 _READ_ONLY_WARNING = "[Leitura apenas — nenhuma alteração foi realizada]"
-
-_SEARCH_TERMS = ("prioridades", "tarefas")
-_MAX_RESULTS_PER_TERM = 3
 
 
 @dataclass
@@ -35,10 +33,9 @@ class PlanDaySkill:
     def __init__(
         self,
         calendar: Optional[CalendarAdapter],
-        second_brain: SecondBrainReader,
+        second_brain: None = None,
     ) -> None:
         self._calendar = calendar
-        self._second_brain = second_brain
 
     def execute(self, today: Optional[date] = None) -> SkillResult:
         """Executa o planejamento diário.
@@ -49,11 +46,9 @@ class PlanDaySkill:
         if today is None:
             today = date.today()
 
-        calendar_ok = True
+        # --- Calendário ---
         events: list = []
-        context_results: list[str] = []
-
-        # --- 1. Calendário ---
+        calendar_ok = True
         if self._calendar is None:
             calendar_ok = False
         else:
@@ -62,33 +57,17 @@ class PlanDaySkill:
             except CalendarError:
                 calendar_ok = False
 
-        # --- 2. Segundo Cérebro ---
-        second_brain_ok = True
-        for term in _SEARCH_TERMS:
-            try:
-                results = self._second_brain.search_notes(
-                    term, max_results=_MAX_RESULTS_PER_TERM
-                )
-                for r in results:
-                    context_results.append(f"- {r.snippet}")
-            except Exception:
-                second_brain_ok = False
-
-        # --- 3. Avaliar status ---
-        if not calendar_ok and not second_brain_ok:
+        if not calendar_ok:
             return SkillResult(
                 skill_id=self.SKILL_ID,
-                status="unavailable",
+                status="partial",
                 message=(
-                    "Calendário e Segundo Cérebro indisponíveis. "
-                    "Nenhum dado disponível para planejamento.\n\n"
+                    "Calendário não disponível.\n\n"
                     f"{_READ_ONLY_WARNING}"
                 ),
             )
 
-        partial = not calendar_ok or not second_brain_ok
-
-        # --- 4. Montar mensagem ---
+        # --- Montar mensagem ---
         sections: list[str] = []
 
         timed = [e for e in events if not e.all_day]
@@ -107,10 +86,6 @@ class PlanDaySkill:
             for i, evt in enumerate(all_day, 1):
                 sections.append(f"{i}. {evt.summary} — Dia inteiro")
 
-        if context_results:
-            sections.append("Contexto:")
-            sections.extend(context_results)
-
         next_commitment = ""
         if timed:
             first = timed[0]
@@ -120,19 +95,16 @@ class PlanDaySkill:
                 f"{t.hour:02d}:{t.minute:02d}"
             )
 
-        status_label = "partial" if partial else "success"
-
         message = "\n".join(sections) if sections else "Nenhum evento para hoje."
         message += next_commitment
         message += f"\n\n{_READ_ONLY_WARNING}"
 
         return SkillResult(
             skill_id=self.SKILL_ID,
-            status=status_label,
+            status="success",
             message=message,
             data={
                 "timed_events": len(timed),
                 "all_day_events": len(all_day),
-                "context_snippets": len(context_results),
             },
         )

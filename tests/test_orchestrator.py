@@ -360,5 +360,80 @@ class TestCalendarSafeCollection(unittest.TestCase):
             self.assertIsNone(orch._pending_event_draft)
 
 
+class TestPlanDayIntegration(unittest.TestCase):
+    """Testes de integração da SKILL-002 com o Orchestrator."""
+
+    def test_returns_read_only_warning(self):
+        """process_command('planeje meu dia') retorna mensagem com aviso read-only."""
+        orch = Orchestrator(simulate=True)
+        result = orch.process_command("planeje meu dia")
+        self.assertIn("[Leitura apenas", result.message)
+
+    def test_success_status(self):
+        """SkillResult success vira OrchestrationResult success."""
+        orch = Orchestrator(simulate=True)
+        result = orch.process_command("planeje meu dia")
+        self.assertEqual(result.status, "success")
+
+    def test_last_intent_registered(self):
+        """last_intent registra 'planejar dia'."""
+        orch = Orchestrator(simulate=True)
+        orch.process_command("planeje meu dia")
+        self.assertEqual(orch.memory.last_intent, "planejar dia")
+
+    def test_user_and_therion_turns(self):
+        """Registra turnos user e therion."""
+        orch = Orchestrator(simulate=True)
+        orch.process_command("planeje meu dia")
+        roles = [t.role for t in orch.memory.turns]
+        self.assertIn("user", roles)
+        self.assertIn("therion", roles)
+
+    def test_no_ai_core_consulta(self):
+        """IntentRecognizer processa sem consultar AICore."""
+        orch = Orchestrator(simulate=True)
+        orch.ai_core = MagicMock()
+        orch.process_command("planeje meu dia")
+        orch.ai_core.classify.assert_not_called()
+
+    def test_with_prefix_therion(self):
+        """'Therion, planeje meu dia' funciona igualmente."""
+        orch = Orchestrator(simulate=True)
+        result = orch.process_command("Therion, planeje meu dia")
+        self.assertEqual(result.status, "success")
+        self.assertIn("[Leitura apenas", result.message)
+
+    def test_partial_status_becomes_success(self):
+        """SkillResult partial vira success com mensagem."""
+        from unittest.mock import MagicMock as Mock
+        orch = Orchestrator(simulate=True)
+        # calendar_adapter ausente → parcial
+        orch.calendar_adapter = None
+        result = orch.process_command("planeje meu dia")
+        self.assertEqual(result.status, "success")
+        self.assertIn("[Leitura apenas", result.message)
+
+    def test_calendar_none_yields_success_with_message(self):
+        """Calendar indisponível → Skill retorna parcial → Orchestrator mapeia para success."""
+        orch = Orchestrator(simulate=True)
+        orch.calendar_adapter = None
+        result = orch.process_command("planeje meu dia")
+        self.assertEqual(result.status, "success")
+        self.assertIn("Calendário não disponível", result.message)
+
+    def test_skill_not_registered_returns_error(self):
+        """SKILL-002 ausente do registry gera erro controlado."""
+        import therion.skills.registry as reg
+        original = reg.SKILLS.copy()
+        try:
+            reg.SKILLS.clear()
+            orch = Orchestrator(simulate=True)
+            result = orch.process_command("planeje meu dia")
+            self.assertEqual(result.status, "execution_failed")
+            self.assertIn("não disponível", result.message)
+        finally:
+            reg.SKILLS.update(original)
+
+
 if __name__ == "__main__":
     unittest.main()

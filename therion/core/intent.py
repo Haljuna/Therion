@@ -58,6 +58,15 @@ class IntentRecognizer:
         re.IGNORECASE,
     )
 
+    _PLAN_DAY_PATTERN = re.compile(
+        r"^(?:therion[,\s]+)?(?:"
+        r"planeje\s+(?:meu\s+)?dia"
+        r"|organize\s+(?:meu\s+)?dia"
+        r"|prepare\s+(?:meu\s+)?dia"
+        r")\s*[!.?]?\s*$",
+        re.IGNORECASE,
+    )
+
     _CALENDAR_TODAY_PATTERN = re.compile(
         r"^(?:therion[,\s]+)?(?:"
         r"(?:o\s+)?(?:que|qual|quais)\s+(?:tenho|ha|existe|está)\s+(?:hoje|neste\s+dia)"
@@ -175,6 +184,16 @@ class IntentRecognizer:
             return Intent(
                 action="consultar segundo cérebro",
                 target=consult_match.group(1).strip(),
+                raw_command=command,
+                requires_confirmation=False,
+            )
+
+        # Verificar padrão de planejar dia (somente leitura)
+        plan_day_match = self._PLAN_DAY_PATTERN.match(cleaned)
+        if plan_day_match:
+            return Intent(
+                action="planejar dia",
+                target="",
                 raw_command=command,
                 requires_confirmation=False,
             )

@@ -6,7 +6,6 @@ from unittest.mock import MagicMock
 
 from therion.calendar.adapter import CalendarAdapter, CalendarError
 from therion.calendar.models import CalendarEvent
-from therion.context.second_brain import SecondBrainReader, SearchResult
 from therion.skills.plan_day import PlanDaySkill, SkillResult, _READ_ONLY_WARNING
 from therion.skills.registry import get_skill, list_skills
 
@@ -38,19 +37,6 @@ class FakeCalendar:
         return self._events
 
 
-class FakeSB:
-    def __init__(self, results=None, raise_error=False):
-        self._results = results or {}
-        self._raise = raise_error
-        self.calls = []
-
-    def search_notes(self, term, max_results=5):
-        self.calls.append(term)
-        if self._raise:
-            raise RuntimeError("falha simulada")
-        return list(self._results.get(term, []))[:max_results]
-
-
 # ---- Registry ----
 
 class TestRegistry(unittest.TestCase):
@@ -71,7 +57,7 @@ class TestRegistry(unittest.TestCase):
 class TestOrdering(unittest.TestCase):
     def test_sorted_by_start(self):
         cal = FakeCalendar([_timed("Tarde", 14), _timed("Manha", 9), _timed("Meio", 12)])
-        skill = PlanDaySkill(cal, FakeSB())
+        skill = PlanDaySkill(cal)
         r = skill.execute(today=DAY)
         self.assertIn("1. Manha — 09:00", r.message)
         self.assertIn("2. Meio — 12:00", r.message)
@@ -83,7 +69,7 @@ class TestOrdering(unittest.TestCase):
 class TestAllDay(unittest.TestCase):
     def test_allday_after_timed(self):
         cal = FakeCalendar([_timed("Reuniao", 10), _allday("Feriado")])
-        skill = PlanDaySkill(cal, FakeSB())
+        skill = PlanDaySkill(cal)
         r = skill.execute(today=DAY)
         i_comp = r.message.index("Compromissos:")
         i_dia = r.message.index("Dia inteiro:")
@@ -91,66 +77,17 @@ class TestAllDay(unittest.TestCase):
         self.assertIn("1. Feriado — Dia inteiro", r.message)
 
 
-# ---- Buscas literais ----
-
-class TestSearches(unittest.TestCase):
-    def test_only_literal_terms(self):
-        sb = FakeSB()
-        PlanDaySkill(FakeCalendar(), sb).execute(today=DAY)
-        self.assertEqual(sb.calls, ["prioridades", "tarefas"])
-
-    def test_max_three_results(self):
-        many = [SearchResult(path=f"n{i}.md", snippet=f"s{i}") for i in range(10)]
-        sb = FakeSB({"prioridades": many, "tarefas": []})
-        r = PlanDaySkill(FakeCalendar(), sb).execute(today=DAY)
-        self.assertIn("s0", r.message)
-        self.assertIn("s1", r.message)
-        self.assertIn("s2", r.message)
-        self.assertNotIn("s3", r.message)
-
-
 # ---- Calendário indisponível ----
 
 class TestCalendarDown(unittest.TestCase):
     def test_none_calendar_partial(self):
-        sb = FakeSB({"prioridades": [SearchResult("p.md", "pri A")], "tarefas": []})
-        r = PlanDaySkill(None, sb).execute(today=DAY)
+        r = PlanDaySkill(None).execute(today=DAY)
         self.assertEqual(r.status, "partial")
-        self.assertIn("pri A", r.message)
+        self.assertIn("Calendário não disponível", r.message)
 
     def test_calendar_error_partial(self):
-        sb = FakeSB({"prioridades": [], "tarefas": []})
-        r = PlanDaySkill(FakeCalendar(raise_error=True), sb).execute(today=DAY)
+        r = PlanDaySkill(FakeCalendar(raise_error=True)).execute(today=DAY)
         self.assertEqual(r.status, "partial")
-
-
-# ---- Segundo Cérebro vazio ----
-
-class TestSBEmpty(unittest.TestCase):
-    def test_empty_sb_keeps_calendar(self):
-        cal = FakeCalendar([_timed("Reuniao", 10)])
-        r = PlanDaySkill(cal, FakeSB()).execute(today=DAY)
-        self.assertEqual(r.status, "success")
-        self.assertIn("Reuniao", r.message)
-
-
-# ---- SB falhou ----
-
-class TestSBDown(unittest.TestCase):
-    def test_sb_error_partial_with_calendar(self):
-        cal = FakeCalendar([_timed("Reuniao", 10)])
-        r = PlanDaySkill(cal, FakeSB(raise_error=True)).execute(today=DAY)
-        self.assertEqual(r.status, "partial")
-        self.assertIn("Reuniao", r.message)
-
-
-# ---- Ambas indisponíveis ----
-
-class TestBothDown(unittest.TestCase):
-    def test_unavailable(self):
-        r = PlanDaySkill(None, FakeSB(raise_error=True)).execute(today=DAY)
-        self.assertEqual(r.status, "unavailable")
-        self.assertIn("indisponíveis", r.message)
 
 
 # ---- Sem escrita ----
@@ -159,24 +96,33 @@ class TestNoWrites(unittest.TestCase):
     def test_no_create_event(self):
         cal = MagicMock(spec=CalendarAdapter)
         cal.list_events_for_day.return_value = []
-        PlanDaySkill(cal, FakeSB()).execute(today=DAY)
+        PlanDaySkill(cal).execute(today=DAY)
         cal.list_events_for_day.assert_called_once()
         self.assertFalse(cal.create_event.called)
+
+    def test_search_notes_not_called(self):
+        """Skill não chama search_notes em nenhum cenário."""
+        sb = MagicMock()
+        cal = FakeCalendar([_timed("Reuniao", 10)])
+        PlanDaySkill(cal, second_brain=sb).execute(today=DAY)
+        sb.search_notes.assert_not_called()
+
+    def test_search_notes_not_called_when_calendar_down(self):
+        """Skill não chama search_notes mesmo com calendário indisponível."""
+        sb = MagicMock()
+        PlanDaySkill(None, second_brain=sb).execute(today=DAY)
+        sb.search_notes.assert_not_called()
 
 
 # ---- Read-only warning ----
 
 class TestReadOnly(unittest.TestCase):
     def test_success_ends_with_warning(self):
-        r = PlanDaySkill(FakeCalendar(), FakeSB()).execute(today=DAY)
+        r = PlanDaySkill(FakeCalendar()).execute(today=DAY)
         self.assertTrue(r.message.endswith(_READ_ONLY_WARNING))
 
     def test_partial_ends_with_warning(self):
-        r = PlanDaySkill(None, FakeSB()).execute(today=DAY)
-        self.assertTrue(r.message.endswith(_READ_ONLY_WARNING))
-
-    def test_unavailable_ends_with_warning(self):
-        r = PlanDaySkill(None, FakeSB(raise_error=True)).execute(today=DAY)
+        r = PlanDaySkill(None).execute(today=DAY)
         self.assertTrue(r.message.endswith(_READ_ONLY_WARNING))
 
 
