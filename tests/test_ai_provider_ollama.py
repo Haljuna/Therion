@@ -216,6 +216,130 @@ class TestOllamaProviderIsolated(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 self.provider.generate("teste", {}, [])
 
+    def test_payload_contains_classify_actions_instruction(self):
+        """Payload deve conter instrução de classificar actions permitidas."""
+        payload = self.provider._build_payload("teste", {}, [])
+        system_content = payload["messages"][0]["content"]
+        self.assertIn("classificador central", system_content.lower())
+        self.assertIn("action", system_content)
+        self.assertIn(" Você é apenas um classificador", system_content)
+
+    def test_payload_contains_orchestrator_executes_instruction(self):
+        """Payload deve conter instrução de que o Orchestrator executa."""
+        payload = self.provider._build_payload("teste", {}, [])
+        system_content = payload["messages"][0]["content"]
+        self.assertIn("Orchestrator", system_content)
+        self.assertIn("executa", system_content)
+
+    def test_payload_contains_action_examples(self):
+        """Payload deve conter as duas actions de exemplo."""
+        payload = self.provider._build_payload("teste", {}, [])
+        system_content = payload["messages"][0]["content"]
+        # Exemplo de busca no Segundo Cérebro
+        self.assertIn("buscar segundo cérebro", system_content)
+        self.assertIn("tarefas pendentes", system_content)
+        # Exemplo de abrir aplicativo
+        self.assertIn("abrir aplicativo", system_content)
+        self.assertIn("Obsidian", system_content)
+
+    def test_payload_contains_accurate_canonical_strings(self):
+        """Payload deve conter strings canônicas com acentos corretos."""
+        payload = self.provider._build_payload("teste", {}, [])
+        system_content = payload["messages"][0]["content"]
+        self.assertIn("buscar segundo cérebro", system_content)
+        self.assertIn("calendário hoje", system_content)
+        self.assertIn("criar evento calendário", system_content)
+        self.assertIn("abrir aplicativo", system_content)
+        self.assertIn("listar aliases", system_content)
+
+    def test_payload_contains_all_five_action_examples(self):
+        """Payload deve conter exemplos completos de arguments para todas as cinco actions."""
+        payload = self.provider._build_payload("teste", {}, [])
+        system_content = payload["messages"][0]["content"]
+        # abrir aplicativo com target
+        self.assertIn('"abrir aplicativo"', system_content)
+        self.assertIn('"target":"Obsidian"', system_content)
+        # listar aliases sem arguments
+        self.assertIn('"listar aliases"', system_content)
+        self.assertIn('"arguments":{}', system_content)
+        # buscar segundo cérebro com term
+        self.assertIn('"buscar segundo cérebro"', system_content)
+        self.assertIn('"term":"tarefas pendentes"', system_content)
+        # calendário hoje sem arguments
+        self.assertIn('"calendário hoje"', system_content)
+        # criar evento calendário com campos
+        self.assertIn('"criar evento calendário"', system_content)
+        self.assertIn('"title":"Reunião"', system_content)
+        self.assertIn('"date":"amanhã"', system_content)
+        self.assertIn('"start_time":"15:00"', system_content)
+
+    def test_payload_contains_aliases_action(self):
+        """Payload deve incluir ação de aliases explicitamente."""
+        payload = self.provider._build_payload("teste", {}, [])
+        system_content = payload["messages"][0]["content"]
+        self.assertIn("listar aliases", system_content)
+        self.assertIn("aliases cadastrados", system_content.lower())
+
+    def test_payload_contains_calendar_today_action(self):
+        """Payload deve incluir ação de calendário hoje explicitamente."""
+        payload = self.provider._build_payload("teste", {}, [])
+        system_content = payload["messages"][0]["content"]
+        self.assertIn("calendário hoje", system_content)
+        self.assertIn("o que tenho hoje", system_content.lower())
+
+    def test_payload_contains_clarification_rule(self):
+        """Payload deve conter regra de clarification para evento incompleto."""
+        payload = self.provider._build_payload("teste", {}, [])
+        system_content = payload["messages"][0]["content"]
+        self.assertIn("clarification", system_content)
+        self.assertIn("incompleto", system_content.lower())
+
+    def test_payload_contains_prompt_injection_rule(self):
+        """Payload deve conter regra de chat para prompt injection."""
+        payload = self.provider._build_payload("teste", {}, [])
+        system_content = payload["messages"][0]["content"]
+        self.assertIn("prompt injection", system_content.lower())
+        self.assertIn("chat", system_content)
+
+    def test_payload_contains_natural_chat_instruction(self):
+        """Payload deve instruir resposta conversacional natural para chat."""
+        payload = self.provider._build_payload("teste", {}, [])
+        system_content = payload["messages"][0]["content"]
+        self.assertIn("resposta conversacional natural", system_content.lower())
+
+    def test_payload_contains_natural_chat_example(self):
+        """Payload deve conter exemplo de resposta natural de chat."""
+        payload = self.provider._build_payload("teste", {}, [])
+        system_content = payload["messages"][0]["content"]
+        self.assertIn("Olá! Tudo bem sim. Como posso ajudar?", system_content)
+
+    def test_payload_prohibits_classification_message(self):
+        """Payload deve proibir mensagens classificatórias genéricas."""
+        payload = self.provider._build_payload("teste", {}, [])
+        system_content = payload["messages"][0]["content"]
+        self.assertIn("Classificado como conversa.", system_content)
+        self.assertIn("Nunca descreva a classificação", system_content)
+
+    def test_payload_contains_natural_clarification_instruction(self):
+        """Payload deve instruir pergunta natural para clarification."""
+        payload = self.provider._build_payload("teste", {}, [])
+        system_content = payload["messages"][0]["content"]
+        self.assertIn("pergunta curta e natural", system_content.lower())
+
+    def test_payload_preserves_security_and_actions(self):
+        """Payload deve preservar regras de segurança e actions canônicas."""
+        payload = self.provider._build_payload("teste", {}, [])
+        system_content = payload["messages"][0]["content"]
+        # Segurança preservada
+        self.assertIn("prompt injection", system_content.lower())
+        self.assertIn("neutro e seguro", system_content)
+        # Actions preservadas
+        self.assertIn("abrir aplicativo", system_content)
+        self.assertIn("listar aliases", system_content)
+        self.assertIn("buscar segundo cérebro", system_content)
+        self.assertIn("calendário hoje", system_content)
+        self.assertIn("criar evento calendário", system_content)
+
 
 if __name__ == "__main__":
     unittest.main()
