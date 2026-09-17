@@ -838,38 +838,25 @@ class Orchestrator:
             self._finalize_session_result(calendar_create_flow_result)
             return calendar_create_flow_result
 
-        # --- AICore: classificação por IA (após todos os fluxos pendentes) ---
-        if self.ai_core is not None:
+        # --- IntentRecognizer primeiro (determinístico) ---
+        intent = self.intent_recognizer.parse(command)
+
+        if intent is None and self.ai_core is not None:
+            # Intent não reconhecida → consulta AICore/Ollama
             ai_context = self._build_ai_context()
             ai_response = self.ai_core.classify(command, ai_context)
-
-            if ai_response is not None and ai_response.type == "chat":
-                self._complete_task()
-                result = OrchestrationResult(
-                    status="success",
-                    message=ai_response.message,
-                )
-                self._finalize_session_result(result)
-                return result
-
-            if ai_response is not None and ai_response.type == "clarification":
-                self._complete_task()
-                result = OrchestrationResult(
-                    status="success",
-                    message=ai_response.message,
-                )
-                self._finalize_session_result(result)
-                return result
 
             if ai_response is not None and ai_response.type == "action":
                 intent = self._ai_response_to_intent(ai_response)
                 self.memory.record_intent(intent.action, intent.target)
-            else:
-                # AI falhou ou retornou None → fallback para IntentRecognizer
-                intent = self.intent_recognizer.parse(command)
-        else:
-            # Sem AICore → IntentRecognizer legado
-            intent = self.intent_recognizer.parse(command)
+            elif ai_response is not None and ai_response.type in ("chat", "clarification"):
+                self._complete_task()
+                result = OrchestrationResult(
+                    status="success",
+                    message=ai_response.message,
+                )
+                self._finalize_session_result(result)
+                return result
         if not intent:
             msg = "Não consegui identificar a intenção no comando recebido."
             self.memory.record_error(msg)

@@ -121,5 +121,187 @@ class TestSessionMemoryIntegration(unittest.TestCase):
         self.assertIn("alias", turns[1].text.lower())
 
 
+class TestAICoreAliasRouting(unittest.TestCase):
+    """Valida que action via AICore roteia corretamente para listagem de aliases."""
+
+    def test_ai_action_listar_aliases_returns_actual_aliases(self) -> None:
+        """Action 'listar aliases' via AICore retorna aliases reais, não mensagem genérica."""
+        from therion.core.ai_provider import AIResponse
+
+        # --- Arrange ---
+        # Provider fake que retorna AIResponse de action
+        fake_provider = MagicMock()
+        fake_ai_response = AIResponse(
+            type="action",
+            intent="listar aliases",
+            arguments={},
+            message="Processando listagem de aliases.",
+        )
+        fake_provider.generate.return_value = fake_ai_response
+
+        # AICore com o provider fake
+        from therion.core.ai_core import AICore
+
+        ai_core = AICore(
+            provider=fake_provider,
+            available_intents=[
+                "abrir aplicativo",
+                "listar aliases",
+                "buscar segundo cérebro",
+                "calendário hoje",
+                "criar evento calendário",
+            ],
+        )
+
+        # Orchestrator com AICore fake e AliasManager mockado
+        orch = Orchestrator(simulate=True, ai_core=ai_core)
+        orch.alias_manager = MagicMock()
+        orch.alias_manager.list_aliases.return_value = {
+            "obsidian": "Obsidian",
+            "navegador": "Chrome",
+        }
+
+        # --- Act ---
+        result = orch.process_command("Mostre quais são meus aliases cadastrados")
+
+        # --- Assert ---
+        # 1. Resultado contém os aliases conhecidos
+        self.assertIn("obsidian", result.message.lower())
+        self.assertIn("navegador", result.message.lower())
+        self.assertIn("Obsidian", result.message)
+        self.assertIn("Chrome", result.message)
+
+        # 2. Resposta NÃO é a mensagem genérica do provider
+        self.assertNotEqual(result.message, "Processando listagem de aliases.")
+        self.assertNotEqual(result.message, "Listando aliases...")
+
+        # 3. Status é success
+        self.assertEqual(result.status, "success")
+
+        # 4. Intent foi registrada corretamente
+        self.assertEqual(result.intent.action, "listar aliases")
+
+        # 5. Nenhuma escrita occurceu (somente leitura)
+        orch.alias_manager.add_alias.assert_not_called()
+        orch.alias_manager.remove_alias.assert_not_called()
+        orch.alias_manager.replace_alias.assert_not_called()
+
+
+class TestDeterministicRoutingPriority(unittest.TestCase):
+    """Valida que IntentRecognizer é priorizado sobre AICore para comandos conhecidos."""
+
+    def test_deterministic_command_skips_ai(self) -> None:
+        """'liste meus aliases' é processado pelo IntentRecognizer sem consultar AICore."""
+        from therion.core.ai_provider import AIResponse
+
+        fake_provider = MagicMock()
+        fake_provider.generate.return_value = AIResponse(
+            type="action",
+            intent="listar aliases",
+            arguments={},
+            message="NÃO deveria ser chamado.",
+        )
+
+        from therion.core.ai_core import AICore
+
+        ai_core = AICore(
+            provider=fake_provider,
+            available_intents=["listar aliases"],
+        )
+
+        orch = Orchestrator(simulate=True, ai_core=ai_core)
+        orch.alias_manager = MagicMock()
+        orch.alias_manager.list_aliases.return_value = {"obsidian": "Obsidian"}
+
+        result = orch.process_command("liste meus aliases")
+
+        fake_provider.generate.assert_not_called()
+        self.assertEqual(result.status, "success")
+        self.assertEqual(result.intent.action, "listar aliases")
+        self.assertIn("obsidian", result.message)
+
+    def test_unknown_command_consults_ai(self) -> None:
+        """Comando não reconhecido pelo IntentRecognizer consulta AICore."""
+        from therion.core.ai_provider import AIResponse
+
+        fake_provider = MagicMock()
+        fake_provider.generate.return_value = AIResponse(
+            type="chat",
+            intent=None,
+            arguments={},
+            message="Olá! Sou o Therion.",
+        )
+
+        from therion.core.ai_core import AICore
+
+        ai_core = AICore(
+            provider=fake_provider,
+            available_intents=["listar aliases"],
+        )
+
+        orch = Orchestrator(simulate=True, ai_core=ai_core)
+
+        result = orch.process_command("Olá, tudo bem?")
+
+        fake_provider.generate.assert_called_once()
+        self.assertEqual(result.status, "success")
+        self.assertIn("Olá", result.message)
+
+    def test_ai_action_routed_when_recognizer_unknown(self) -> None:
+        """Action válida do AICore é roteada quando IntentRecognizer não reconhece."""
+        from therion.core.ai_provider import AIResponse
+
+        fake_provider = MagicMock()
+        fake_provider.generate.return_value = AIResponse(
+            type="action",
+            intent="calendário hoje",
+            arguments={},
+            message="Consultando calendário.",
+        )
+
+        from therion.core.ai_core import AICore
+
+        ai_core = AICore(
+            provider=fake_provider,
+            available_intents=["calendário hoje"],
+        )
+
+        orch = Orchestrator(simulate=True, ai_core=ai_core)
+
+        result = orch.process_command("O que tenho hoje no calendário?")
+
+        fake_provider.generate.assert_called_once()
+        self.assertEqual(result.status, "success")
+        self.assertEqual(result.intent.action, "calendário hoje")
+
+    def test_pending_flow_priority_over_recognizer_and_ai(self) -> None:
+        """Pending flows continuam tendo prioridade sobre recognizer e IA."""
+        from therion.core.ai_provider import AIResponse
+
+        fake_provider = MagicMock()
+        fake_provider.generate.return_value = AIResponse(
+            type="chat",
+            intent=None,
+            arguments={},
+            message="NÃO deveria ser chamado.",
+        )
+
+        from therion.core.ai_core import AICore
+
+        ai_core = AICore(
+            provider=fake_provider,
+            available_intents=["listar aliases"],
+        )
+
+        orch = Orchestrator(simulate=True, ai_core=ai_core)
+        orch.alias_manager = MagicMock()
+
+        orch.process_command("adicione um alias")
+        fake_provider.generate.assert_not_called()
+
+        result = orch.process_command("sim")
+        fake_provider.generate.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()
