@@ -556,6 +556,37 @@ Decisões aprovadas:
 
 ---
 
+## DEC-030 — Provider local-first Ollama para V1
+
+**Status:** Aprovada
+
+A integração inicial de modelo de IA da V1 utilizará o runtime local **Ollama** com arquitetura local-first e fallback determinístico.
+
+Decisões aprovadas:
+
+- **Runtime local:** Ollama adotado como runtime local da V1.
+- **Implementação do provider:** `OllamaProvider` conecta-se à API HTTP local (`/api/chat`) utilizando `urllib.request` da biblioteca padrão do Python (sem novas dependências).
+- **Rede e isolamento:**
+  - Endpoint fixo e restrito a loopback (`http://127.0.0.1:11434/api/chat`).
+  - Sem endpoint configurável e sem configuração de proxy (proxy desabilitado explicitamente com `ProxyHandler({})`).
+  - Sem chamadas a nuvem ou serviços externos.
+- **Escopo operacional do provider:**
+  - Sem uso de tools/function calling do modelo;
+  - Sem download ou gerenciamento de processos pelo Therion;
+  - Sem streaming e sem retry automático;
+  - Timeout estrito configurável (padrão 90s).
+- **Segurança e ativação:**
+  - IA desabilitada por padrão na configuração local (`ai.enabled: false`);
+  - Nenhuma requisição ou inferência é realizada durante a inicialização do aplicativo.
+- **Modelo inicial:**
+  - `qwen3:4b-instruct` adotado como modelo inicial validado, sem compromisso de permanência exclusiva.
+- **Fronteira de validação e fallback:**
+  - O `AICore` é a fronteira final e obrigatória de validação sintática e semântica;
+  - Saídas com schemas inválidos, saídas híbridas (chat/clarification com intent ou arguments operacionais) ou intents fora da allowlist canônica retornam `None`;
+  - Qualquer falha de inferência aciona obrigatoriamente o fallback determinístico do `Orchestrator` (`IntentRecognizer`).
+
+---
+
 ## Regra de manutenção
 
 Ao registrar uma nova decisão:

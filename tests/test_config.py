@@ -166,6 +166,46 @@ class TestConfig(unittest.TestCase):
         self.assertEqual(result["campo_desconhecido"], "valor")
         self.assertEqual(result["runtime"]["real_actions_enabled"], False)
 
+    def test_ai_bloco_ausente_recebe_defaults(self) -> None:
+        """Bloco ai ausente recebe defaults."""
+        data = {"ui": {}}
+        result = _validate_config(data)
+        self.assertEqual(result["ai"]["enabled"], False)
+        self.assertEqual(result["ai"]["model"], "qwen3:4b-instruct")
+        self.assertEqual(result["ai"]["timeout_seconds"], 90)
+
+    def test_ai_enabled_invalido_resulta_em_false(self) -> None:
+        """ai.enabled inválido deve resultar em False."""
+        for invalid in ["true", 1, 0, None, [], {}]:
+            result = _validate_config({"ai": {"enabled": invalid}})
+            self.assertIs(result["ai"]["enabled"], False)
+
+    def test_ai_model_vazio_ou_invalido_resulta_em_padrao(self) -> None:
+        """ai.model vazio ou inválido deve resultar no modelo padrão."""
+        for invalid in ["", "   ", 123, None, True, []]:
+            result = _validate_config({"ai": {"model": invalid}})
+            self.assertEqual(result["ai"]["model"], "qwen3:4b-instruct")
+
+    def test_ai_timeout_seconds_invalido_resulta_em_90(self) -> None:
+        """ai.timeout_seconds inválido, zero, negativo ou bool resulta em 90."""
+        for invalid in [0, -1, -90, True, False, "90", 90.5, None, []]:
+            result = _validate_config({"ai": {"timeout_seconds": invalid}})
+            self.assertEqual(result["ai"]["timeout_seconds"], 90)
+
+    def test_ai_valores_validos_preservados(self) -> None:
+        """Valores válidos para ai são preservados."""
+        data = {
+            "ai": {
+                "enabled": True,
+                "model": "meu-modelo-custom:latest",
+                "timeout_seconds": 120,
+            }
+        }
+        result = _validate_config(data)
+        self.assertIs(result["ai"]["enabled"], True)
+        self.assertEqual(result["ai"]["model"], "meu-modelo-custom:latest")
+        self.assertEqual(result["ai"]["timeout_seconds"], 120)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -30,6 +30,11 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "allowed_apps": [],
     "runtime": {"real_actions_enabled": False},
     "calendar": {"enabled": False, "time_zone": "America/Sao_Paulo"},
+    "ai": {
+        "enabled": False,
+        "model": "qwen3:4b-instruct",
+        "timeout_seconds": 90,
+    },
 }
 
 _CONFIG_PATH: Path | None = None
@@ -101,6 +106,22 @@ def _validate_config(data: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(cal_tz, str):
             calendar["time_zone"] = DEFAULT_CONFIG["calendar"]["time_zone"]
         validated["calendar"] = calendar
+
+    # ai.enabled -> bool, ai.model -> str não vazia, ai.timeout_seconds -> int estrito > 0
+    ai = validated.get("ai")
+    if not isinstance(ai, dict):
+        validated["ai"] = DEFAULT_CONFIG["ai"].copy()
+    else:
+        ai_enabled = ai.get("enabled")
+        if not isinstance(ai_enabled, bool):
+            ai["enabled"] = DEFAULT_CONFIG["ai"]["enabled"]
+        ai_model = ai.get("model")
+        if not isinstance(ai_model, str) or not ai_model.strip():
+            ai["model"] = DEFAULT_CONFIG["ai"]["model"]
+        ai_timeout = ai.get("timeout_seconds")
+        if type(ai_timeout) is not int or ai_timeout <= 0:
+            ai["timeout_seconds"] = DEFAULT_CONFIG["ai"]["timeout_seconds"]
+        validated["ai"] = ai
 
     return validated
 

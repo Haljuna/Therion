@@ -67,6 +67,7 @@ Transformar a prova de conceito em uma aplicação útil no cotidiano.
 ### Funcionalidades previstas
 
 - interface própria por texto (UI-1 — CONCLUÍDO);
+- IA central local-first (A2 — CONCLUÍDO);
 - execução em segundo plano no Windows;
 - ícone na bandeja do sistema;
 - janela compacta;
@@ -234,7 +235,7 @@ Therion recebe um comando de texto e consegue abrir o Obsidian após confirmaç�
 ```
 
 Próxima etapa funcional:
-- **A2 — IA central local-first** (integração de provider de IA real).
+- **Sistema inicial de Skills** (arquitetura híbrida e registry local conforme DEC-028).
 
 ---
 

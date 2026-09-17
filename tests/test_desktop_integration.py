@@ -882,5 +882,111 @@ class TestDesktopConfirmPanel(unittest.TestCase):
         )
 
 
+class TestDesktopAIIntegration(unittest.TestCase):
+    """Testes de integração desktop com injeção local de OllamaProvider e AICore."""
+
+    _qapp = None
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        from PySide6.QtWidgets import QApplication
+        if QApplication.instance() is None:
+            cls._qapp = QApplication(sys.argv)
+        else:
+            cls._qapp = QApplication.instance()
+
+    def test_ai_disabled_no_provider_and_orchestrator_without_aicore(self) -> None:
+        """Com IA desabilitada, OllamaProvider não é criado e Orchestrator permanece sem AICore."""
+        from therion.interface.desktop import MainWindow
+        mock_app = MagicMock()
+        config = {"ai": {"enabled": False}}
+
+        with patch("therion.interface.desktop.OllamaProvider") as mock_provider_cls:
+            with patch("therion.interface.desktop.AICore") as mock_aicore_cls:
+                with patch("therion.interface.desktop.Orchestrator") as mock_orch_cls:
+                    with patch.object(MainWindow, "_setup_ui"):
+                        with patch.object(MainWindow, "_setup_tray"):
+                            MainWindow(mock_app, config=config)
+
+                            mock_provider_cls.assert_not_called()
+                            mock_aicore_cls.assert_not_called()
+                            self.assertNotIn("ai_core", mock_orch_cls.call_args.kwargs)
+
+    def test_ai_config_absent_no_provider_and_orchestrator_without_aicore(self) -> None:
+        """Quando ai ausente na config, OllamaProvider não é criado e Orchestrator sem AICore."""
+        from therion.interface.desktop import MainWindow
+        mock_app = MagicMock()
+
+        with patch("therion.interface.desktop.OllamaProvider") as mock_provider_cls:
+            with patch("therion.interface.desktop.AICore") as mock_aicore_cls:
+                with patch("therion.interface.desktop.Orchestrator") as mock_orch_cls:
+                    with patch.object(MainWindow, "_setup_ui"):
+                        with patch.object(MainWindow, "_setup_tray"):
+                            MainWindow(mock_app, config={})
+
+                            mock_provider_cls.assert_not_called()
+                            mock_aicore_cls.assert_not_called()
+                            self.assertNotIn("ai_core", mock_orch_cls.call_args.kwargs)
+
+    def test_ai_enabled_creates_provider_with_config_and_injects_into_orchestrator(self) -> None:
+        """Com IA habilitada, OllamaProvider recebe config, AICore é criado e injetado sem inferência."""
+        from therion.interface.desktop import MainWindow
+        mock_app = MagicMock()
+        config = {
+            "ai": {
+                "enabled": True,
+                "model": "qwen-custom:7b",
+                "timeout_seconds": 150,
+            }
+        }
+
+        mock_provider = MagicMock()
+        mock_aicore = MagicMock()
+
+        with patch("therion.interface.desktop.OllamaProvider", return_value=mock_provider) as mock_provider_cls:
+            with patch("therion.interface.desktop.AICore", return_value=mock_aicore) as mock_aicore_cls:
+                with patch("therion.interface.desktop.Orchestrator") as mock_orch_cls:
+                    with patch.object(MainWindow, "_setup_ui"):
+                        with patch.object(MainWindow, "_setup_tray"):
+                            MainWindow(mock_app, config=config)
+
+                            # 1. OllamaProvider recebe model e timeout
+                            mock_provider_cls.assert_called_once_with(model="qwen-custom:7b", timeout=150)
+                            # 2. AICore é criado com o provider
+                            mock_aicore_cls.assert_called_once()
+                            self.assertEqual(mock_aicore_cls.call_args.kwargs["provider"], mock_provider)
+                            # 3. Orchestrator recebe o AICore
+                            mock_orch_cls.assert_called_once()
+                            self.assertEqual(mock_orch_cls.call_args.kwargs["ai_core"], mock_aicore)
+                            # 4. Nenhuma inferência na inicialização
+                            mock_provider.generate.assert_not_called()
+                            mock_aicore.classify.assert_not_called()
+
+    def test_ai_enabled_injects_canonical_allowlist_exactly(self) -> None:
+        """A allowlist injetada no AICore contém exatamente as 5 intents canônicas."""
+        from therion.interface.desktop import MainWindow
+        mock_app = MagicMock()
+        config = {"ai": {"enabled": True}}
+
+        expected_allowlist = [
+            "abrir aplicativo",
+            "listar aliases",
+            "buscar segundo cérebro",
+            "calendário hoje",
+            "criar evento calendário",
+        ]
+
+        with patch("therion.interface.desktop.OllamaProvider"):
+            with patch("therion.interface.desktop.AICore") as mock_aicore_cls:
+                with patch("therion.interface.desktop.Orchestrator"):
+                    with patch.object(MainWindow, "_setup_ui"):
+                        with patch.object(MainWindow, "_setup_tray"):
+                            MainWindow(mock_app, config=config)
+
+                            mock_aicore_cls.assert_called_once()
+                            passed_intents = mock_aicore_cls.call_args.kwargs["available_intents"]
+                            self.assertEqual(passed_intents, expected_allowlist)
+
+
 if __name__ == "__main__":
     unittest.main()

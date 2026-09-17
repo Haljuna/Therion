@@ -24,7 +24,7 @@ As decisões técnicas principais da V1 foram aprovadas (interface PySide6, proc
 - ✅ Memória de sessão + contexto operacional
 - ✅ Calendário — consulta/leitura
 - ✅ Calendário — criação com confirmação
-- ⏳ IA central local-first (Marco A2)
+- ✅ IA central local-first (Marco A2 concluído)
 
 ### Progresso da V1 validado até o momento
 
@@ -294,6 +294,17 @@ As decisões técnicas principais da V1 foram aprovadas (interface PySide6, proc
   - Entrada de texto com `Enter` para envio e `Shift+Enter` para quebra de linha;
   - Arquitetura funcional preservada sem nenhuma execução direta na UI (Orchestrator, AICore, Planner, Executor, PermissionManager, calendário, memória e system tray intactos);
   - Regressão final: 504/504 testes passando, 0 failures, 0 errors (incluindo 82 testes de interface/integração desktop).
+- IA central local-first (Marco A2) implementada e validada de ponta a ponta:
+  - `OllamaProvider` concreto (`therion/core/ai_provider_ollama.py`) utilizando API HTTP local (`http://127.0.0.1:11434/api/chat`) via `urllib.request` da biblioteca padrão;
+  - Proxy desabilitado explicitamente com `ProxyHandler({})`;
+  - Bloco de configuração `ai` em `therion/config/local.py` com `enabled: false` por padrão, timeout padrão de 90 segundos e modelo inicial/candidato validado `qwen3:4b-instruct`;
+  - Request estruturada com format schema rígido (`type`, `message`, `intent`, `arguments`), `temperature: 0` e `num_ctx: 2048`, sem streaming ou uso de `think`;
+  - Endurecimento semântico do `AICore`: validação universal de `message` não vazia, rejeição de respostas híbridas para `chat` e `clarification` (`intent is None` e `arguments == {}`) e validação estrita de schemas fechados para as 5 actions canônicas da allowlist;
+  - Fallback determinístico preservado: qualquer falha de transporte, HTTP não-200 ou rejeição de validação faz `AICore.classify()` retornar `None`, acionando o fluxo determinístico existente no `Orchestrator`;
+  - Injeção na interface desktop (`MainWindow._build_ai_core`) sem nenhuma inferência durante a inicialização (inicialização limpa);
+  - Regressão técnica final: 547/547 testes passando (0 failures, 0 errors);
+  - Validação manual de ponta a ponta concluída: chat local informativo, clarification para comando ambíguo, action com apresentação de plano e confirmação explícita, e cancelamento seguro sem ação externa;
+  - Configuração local ativa restaurada com segurança para `ai.enabled=false`.
 
 ---
 
@@ -427,11 +438,11 @@ Componentes já validados na V0 e V1:
 - inicialização prática via atalho do Windows (`Therion.lnk`);
 - política fail-closed de permissões via `opencode.json` (com leitura/organização fluidas autorizadas);
 - memória de sessão + contexto operacional (Turn, last_*, recent_turns, clear_session);
-- integração básica com Google Calendar (consulta/leitura de eventos de hoje via comando conversacional com OAuth e fuso horário estrito).
+- integração básica com Google Calendar (consulta/leitura de eventos de hoje via comando conversacional com OAuth e fuso horário estrito);
+- IA central local-first (OllamaProvider via loopback, modelo qwen3:4b-instruct, format schema e AICore endurecido).
 
 Até que exista evidência técnica adicional, considerar como não implementado:
 
-- modelos de IA / LLMs integrados;
 - Skills executáveis reutilizáveis;
 - delegação automática para outros agentes;
 - voz;
@@ -480,6 +491,7 @@ Todas as etapas previstas da V0 foram concluídas.
 - [x] refinar permissões de leitura no `opencode.json`
 - [x] implementar criação de eventos no calendário mediante confirmação explícita
 - [x] implementar interface visual UI-1 (PySide6, tema preto + laranja, orbe de estados, balões, confirmação compacta)
+- [x] implementar IA central local-first com provider real (Marco A2 concluído)
 
 ---
 
@@ -488,16 +500,14 @@ Todas as etapas previstas da V0 foram concluídas.
 **Concluir e validar as funcionalidades restantes da V1.**
 
 Próxima etapa funcional principal:
-- **A2 — IA central local-first com provider real**, respeitando a arquitetura `AICore` → `AIProvider`.
+- **Sistema inicial de Skills da V1**, respeitando a governança do Segundo Cérebro.
 
 Funcionalidades da V1 ainda não implementadas (conforme Roadmap):
 
-- IA central local-first;
 - sistema inicial de Skills.
 
 Ainda NÃO implementados:
 
-- modelos de IA / LLMs integrados
 - Skills executáveis reutilizáveis
 - delegação automática para outros agentes
 - voz
@@ -581,9 +591,11 @@ Marco da V1 alcançado: criação de eventos no calendário com confirmação ex
 
 Marco da V1 alcançado: interface desktop UI-1 concluída e validada visual e tecnicamente de ponta a ponta (504 testes passando, 0 failures, 0 errors; 82 testes de interface/integração desktop). Nova interface PySide6 com tema preto e laranja, orbe de estados visuais, histórico em balões, painel compacto de confirmação com Confirmar/Cancelar, remoção do status inferior redundante e atalhos Enter/Shift+Enter. Arquitetura funcional e governança preservadas sem execução direta pela UI.
 
+Marco da V1 alcançado: IA central local-first (Marco A2) implementada e validada de ponta a ponta (547 testes passando, 0 failures, 0 errors). Provider local Ollama em loopback com proxy desabilitado, modelo candidato `qwen3:4b-instruct`, format schema estruturado e schemas fechados com endurecimento no AICore com fallback determinístico, configuração `ai.enabled=false` por padrão e injeção desktop sem inferência na inicialização. Validação manual concluída para chat, clarification e action confirmada.
+
 Próxima etapa principal:
 
-**A2 — IA central local-first com provider real**, respeitando a arquitetura `AICore` → `AIProvider`.
+**Sistema inicial de Skills da V1**, respeitando a governança do Segundo Cérebro.
 
 ---
 

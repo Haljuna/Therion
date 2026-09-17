@@ -31,7 +31,13 @@ class FakeAIProvider(AIProvider):
 class TestAICoreValidation(unittest.TestCase):
 
     def setUp(self):
-        self.intents = ["calendário hoje", "abrir aplicativo", "listar aliases"]
+        self.intents = [
+            "abrir aplicativo",
+            "listar aliases",
+            "buscar segundo cérebro",
+            "calendário hoje",
+            "criar evento calendário",
+        ]
         self.provider = FakeAIProvider()
         self.core = AICore(provider=self.provider, available_intents=self.intents)
 
@@ -43,11 +49,12 @@ class TestAICoreValidation(unittest.TestCase):
         self.assertEqual(result.message, "Ola!")
 
     def test_action_valid(self):
-        self.provider._response = AIResponse(type="action", intent="calendário hoje", arguments={})
+        self.provider._response = AIResponse(type="action", intent="calendário hoje", arguments={}, message="Consultando agenda")
         result = self.core.classify("o que tenho hoje?", {})
         self.assertIsNotNone(result)
         self.assertEqual(result.type, "action")
         self.assertEqual(result.intent, "calendário hoje")
+        self.assertEqual(result.message, "Consultando agenda")
 
     def test_clarification_valid(self):
         self.provider._response = AIResponse(type="clarification", message="Qual aplicativo?")
@@ -100,6 +107,206 @@ class TestAICoreValidation(unittest.TestCase):
         result = self.core.classify("teste", {})
         self.assertIsNone(result)
 
+    def test_chat_with_nonnull_intent_rejected(self):
+        self.provider._response = AIResponse(type="chat", message="Ola!", intent="abrir aplicativo")
+        result = self.core.classify("teste", {})
+        self.assertIsNone(result)
+
+    def test_clarification_with_nonnull_intent_rejected(self):
+        self.provider._response = AIResponse(type="clarification", message="Qual aplicativo?", intent="abrir aplicativo")
+        result = self.core.classify("teste", {})
+        self.assertIsNone(result)
+
+    def test_chat_with_nonempty_arguments_rejected(self):
+        self.provider._response = AIResponse(type="chat", message="Ola!", arguments={"app": "Obsidian"})
+        result = self.core.classify("teste", {})
+        self.assertIsNone(result)
+
+    def test_clarification_with_nonempty_arguments_rejected(self):
+        self.provider._response = AIResponse(type="clarification", message="Qual aplicativo?", arguments={"app": "Obsidian"})
+        result = self.core.classify("teste", {})
+        self.assertIsNone(result)
+
+    def test_action_abrir_aplicativo_valid(self):
+        self.provider._response = AIResponse(type="action", intent="abrir aplicativo", arguments={"target": "Obsidian"}, message="Abrindo")
+        result = self.core.classify("abra o Obsidian", {})
+        self.assertIsNotNone(result)
+        self.assertEqual(result.arguments, {"target": "Obsidian"})
+
+    def test_action_listar_aliases_valid(self):
+        self.provider._response = AIResponse(type="action", intent="listar aliases", arguments={}, message="Listando")
+        result = self.core.classify("liste os aliases", {})
+        self.assertIsNotNone(result)
+        self.assertEqual(result.arguments, {})
+
+    def test_action_buscar_segundo_cerebro_valid(self):
+        self.provider._response = AIResponse(type="action", intent="buscar segundo cérebro", arguments={"term": "arquitetura"}, message="Buscando")
+        result = self.core.classify("procure notas", {})
+        self.assertIsNotNone(result)
+        self.assertEqual(result.arguments, {"term": "arquitetura"})
+
+    def test_action_calendario_hoje_valid(self):
+        self.provider._response = AIResponse(type="action", intent="calendário hoje", arguments={}, message="Consultando")
+        result = self.core.classify("agenda hoje", {})
+        self.assertIsNotNone(result)
+        self.assertEqual(result.arguments, {})
+
+    def test_action_criar_evento_calendario_valid(self):
+        self.provider._response = AIResponse(
+            type="action",
+            intent="criar evento calendário",
+            arguments={"title": "Reunião", "date": "2026-09-17", "start_time": "14:00"},
+            message="Criando evento",
+        )
+        result = self.core.classify("novo evento", {})
+        self.assertIsNotNone(result)
+        self.assertEqual(result.arguments["title"], "Reunião")
+
+    def test_action_extra_key_rejected(self):
+        self.provider._response = AIResponse(type="action", intent="abrir aplicativo", arguments={"target": "Obsidian", "extra": 1}, message="Abrindo")
+        result = self.core.classify("teste", {})
+        self.assertIsNone(result)
+
+        self.provider._response = AIResponse(type="action", intent="listar aliases", arguments={"extra": 1}, message="Listando")
+        result = self.core.classify("teste", {})
+        self.assertIsNone(result)
+
+        self.provider._response = AIResponse(
+            type="action",
+            intent="criar evento calendário",
+            arguments={"title": "R", "date": "2026-09-17", "start_time": "14:00", "extra": 1},
+            message="Criando",
+        )
+        result = self.core.classify("teste", {})
+        self.assertIsNone(result)
+
+    def test_action_missing_required_key_rejected(self):
+        self.provider._response = AIResponse(type="action", intent="abrir aplicativo", arguments={}, message="Abrindo")
+        result = self.core.classify("teste", {})
+        self.assertIsNone(result)
+
+        self.provider._response = AIResponse(type="action", intent="buscar segundo cérebro", arguments={}, message="Buscando")
+        result = self.core.classify("teste", {})
+        self.assertIsNone(result)
+
+        self.provider._response = AIResponse(
+            type="action",
+            intent="criar evento calendário",
+            arguments={"title": "R", "date": "2026-09-17"},
+            message="Criando",
+        )
+        result = self.core.classify("teste", {})
+        self.assertIsNone(result)
+
+    def test_action_empty_string_rejected(self):
+        self.provider._response = AIResponse(type="action", intent="abrir aplicativo", arguments={"target": "   "}, message="Abrindo")
+        result = self.core.classify("teste", {})
+        self.assertIsNone(result)
+
+        self.provider._response = AIResponse(type="action", intent="buscar segundo cérebro", arguments={"term": ""}, message="Buscando")
+        result = self.core.classify("teste", {})
+        self.assertIsNone(result)
+
+        self.provider._response = AIResponse(
+            type="action",
+            intent="criar evento calendário",
+            arguments={"title": "", "date": "2026-09-17", "start_time": "14:00"},
+            message="Criando",
+        )
+        result = self.core.classify("teste", {})
+        self.assertIsNone(result)
+
+        self.provider._response = AIResponse(
+            type="action",
+            intent="criar evento calendário",
+            arguments={"title": "R", "date": "  ", "start_time": "14:00"},
+            message="Criando",
+        )
+        result = self.core.classify("teste", {})
+        self.assertIsNone(result)
+
+        self.provider._response = AIResponse(
+            type="action",
+            intent="criar evento calendário",
+            arguments={"title": "R", "date": "2026-09-17", "start_time": ""},
+            message="Criando",
+        )
+        result = self.core.classify("teste", {})
+        self.assertIsNone(result)
+
+    def test_action_duration_minutes_valid_accepted(self):
+        self.provider._response = AIResponse(
+            type="action",
+            intent="criar evento calendário",
+            arguments={"title": "Aula", "date": "2026-09-17", "start_time": "14:00", "duration_minutes": 45},
+            message="Criando",
+        )
+        result = self.core.classify("teste", {})
+        self.assertIsNotNone(result)
+        self.assertEqual(result.arguments["duration_minutes"], 45)
+
+    def test_action_duration_minutes_zero_rejected(self):
+        self.provider._response = AIResponse(
+            type="action",
+            intent="criar evento calendário",
+            arguments={"title": "Aula", "date": "2026-09-17", "start_time": "14:00", "duration_minutes": 0},
+            message="Criando",
+        )
+        result = self.core.classify("teste", {})
+        self.assertIsNone(result)
+
+    def test_action_duration_minutes_negative_rejected(self):
+        self.provider._response = AIResponse(
+            type="action",
+            intent="criar evento calendário",
+            arguments={"title": "Aula", "date": "2026-09-17", "start_time": "14:00", "duration_minutes": -15},
+            message="Criando",
+        )
+        result = self.core.classify("teste", {})
+        self.assertIsNone(result)
+
+    def test_action_duration_minutes_string_rejected(self):
+        self.provider._response = AIResponse(
+            type="action",
+            intent="criar evento calendário",
+            arguments={"title": "Aula", "date": "2026-09-17", "start_time": "14:00", "duration_minutes": "45"},
+            message="Criando",
+        )
+        result = self.core.classify("teste", {})
+        self.assertIsNone(result)
+
+    def test_action_duration_minutes_bool_rejected(self):
+        self.provider._response = AIResponse(
+            type="action",
+            intent="criar evento calendário",
+            arguments={"title": "Aula", "date": "2026-09-17", "start_time": "14:00", "duration_minutes": True},
+            message="Criando",
+        )
+        result = self.core.classify("teste", {})
+        self.assertIsNone(result)
+
+    def test_action_intent_outside_allowlist_rejected(self):
+        custom_core = AICore(provider=self.provider, available_intents=["executar powershell"])
+        self.provider._response = AIResponse(type="action", intent="executar powershell", arguments={}, message="Executando")
+        result = custom_core.classify("teste", {})
+        self.assertIsNone(result)
+
+    def test_action_empty_message_rejected(self):
+        self.provider._response = AIResponse(type="action", intent="calendário hoje", arguments={}, message="")
+        result = self.core.classify("teste", {})
+        self.assertIsNone(result)
+
+    def test_action_whitespace_message_rejected(self):
+        self.provider._response = AIResponse(type="action", intent="calendário hoje", arguments={}, message="   ")
+        result = self.core.classify("teste", {})
+        self.assertIsNone(result)
+
+    def test_action_valid_message_accepted(self):
+        self.provider._response = AIResponse(type="action", intent="calendário hoje", arguments={}, message="Consultando agenda")
+        result = self.core.classify("teste", {})
+        self.assertIsNotNone(result)
+        self.assertEqual(result.message, "Consultando agenda")
+
 
 class TestAICoreOrchestratorIntegration(unittest.TestCase):
 
@@ -114,7 +321,7 @@ class TestAICoreOrchestratorIntegration(unittest.TestCase):
         self.assertEqual(provider.call_count, 1)
 
     def test_B_action_calendar_today(self):
-        provider = FakeAIProvider(AIResponse(type="action", intent="calendário hoje", arguments={}))
+        provider = FakeAIProvider(AIResponse(type="action", intent="calendário hoje", arguments={}, message="Consultando hoje"))
         core = AICore(provider=provider, available_intents=["calendário hoje"])
         orch = Orchestrator(simulate=True, ai_core=core)
         result = orch.process_command("Tenho algum compromisso hoje?")
@@ -140,7 +347,7 @@ class TestAICoreOrchestratorIntegration(unittest.TestCase):
         self.assertIn("Obsidian", result.message)
 
     def test_E_invalid_intent_falls_back(self):
-        provider = FakeAIProvider(AIResponse(type="action", intent="executar powershell", arguments={"cmd": "x"}))
+        provider = FakeAIProvider(AIResponse(type="action", intent="executar powershell", arguments={"cmd": "x"}, message="Executando"))
         core = AICore(provider=provider, available_intents=["calendário hoje"])
         orch = Orchestrator(simulate=True, ai_core=core)
         result = orch.process_command("some texto qualquer")
@@ -149,7 +356,7 @@ class TestAICoreOrchestratorIntegration(unittest.TestCase):
     def test_F_pending_flow_priority(self):
         orch_no_ai = Orchestrator(simulate=True, ai_core=None)
         orch_no_ai.process_command("crie um evento")
-        provider = FakeAIProvider(AIResponse(type="action", intent="calendário hoje", arguments={}))
+        provider = FakeAIProvider(AIResponse(type="action", intent="calendário hoje", arguments={}, message="Consultando hoje"))
         core = AICore(provider=provider, available_intents=["calendário hoje"])
         orch_no_ai.ai_core = core
         provider.call_count = 0

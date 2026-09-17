@@ -26,6 +26,8 @@ from PySide6.QtCore import Qt, Signal
 from therion.calendar.adapter import CalendarError
 from therion.calendar.google_adapter import GoogleCalendarAdapter
 from therion.config import load_config
+from therion.core.ai_core import AICore
+from therion.core.ai_provider_ollama import OllamaProvider
 from therion.core.orchestrator import Orchestrator, Plan
 from therion.governance.confirmation import ConfirmationHandler
 
@@ -223,13 +225,13 @@ class MainWindow(QMainWindow):
         self._closing = False
         real_actions_enabled = self._config.get("runtime", {}).get("real_actions_enabled", False)
         calendar_adapter = self._build_calendar_adapter()
+        ai_core = self._build_ai_core()
+        orch_kwargs: dict = {"simulate": not real_actions_enabled}
         if calendar_adapter is not None:
-            self._orchestrator = Orchestrator(
-                simulate=not real_actions_enabled,
-                calendar_adapter=calendar_adapter,
-            )
-        else:
-            self._orchestrator = Orchestrator(simulate=not real_actions_enabled)
+            orch_kwargs["calendar_adapter"] = calendar_adapter
+        if ai_core is not None:
+            orch_kwargs["ai_core"] = ai_core
+        self._orchestrator = Orchestrator(**orch_kwargs)
         self._confirmation_handler = ConfirmationHandler()
         self._pending_plan: Optional[Plan] = None
         self._setup_ui()
@@ -253,6 +255,24 @@ class MainWindow(QMainWindow):
         except Exception as e:
             print(f"[Therion] Aviso: erro inesperado ao inicializar calendário: {e}")
             return None
+
+    def _build_ai_core(self) -> Optional[AICore]:
+        """Instancia AICore com OllamaProvider se ai.enabled=true; None caso contrário."""
+        ai_config = self._config.get("ai", {})
+        if not ai_config.get("enabled", False):
+            return None
+
+        model = ai_config.get("model", "qwen3:4b-instruct")
+        timeout_seconds = ai_config.get("timeout_seconds", 90)
+        provider = OllamaProvider(model=model, timeout=timeout_seconds)
+        available_intents = [
+            "abrir aplicativo",
+            "listar aliases",
+            "buscar segundo cérebro",
+            "calendário hoje",
+            "criar evento calendário",
+        ]
+        return AICore(provider=provider, available_intents=available_intents)
 
     def _setup_ui(self) -> None:
         """Configura os widgets da interface com tema escuro."""
