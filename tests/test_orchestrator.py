@@ -303,5 +303,62 @@ class TestDeterministicRoutingPriority(unittest.TestCase):
         fake_provider.generate.assert_not_called()
 
 
+class TestCalendarSafeCollection(unittest.TestCase):
+    """Valida coleta segura de evento incompleto durante draft pendente."""
+
+    def test_cancel_clears_draft(self):
+        """'não' cancela draft incompleto e limpa estado."""
+        orch = Orchestrator(simulate=True)
+        # Iniciar draft com título preenchido, faltando date
+        orch.process_command("crie uma reunião")
+
+        result = orch.process_command("não")
+
+        self.assertEqual(result.status, "cancelled")
+        self.assertIn("cancelada", result.message.lower())
+        self.assertIsNone(orch._pending_event_draft)
+
+    def test_empty_repeats_question(self):
+        """Resposta vazia repete a pergunta sem alterar draft."""
+        orch = Orchestrator(simulate=True)
+        orch.process_command("crie uma reunião")
+
+        result = orch.process_command("")
+
+        self.assertEqual(result.status, "awaiting_confirmation")
+        self.assertIn("data", result.message.lower())
+
+    def test_new_command_clears_draft(self):
+        """Comando reconhecido limpa draft e é processado normalmente."""
+        orch = Orchestrator(simulate=True)
+        orch.process_command("crie uma reunião")
+        self.assertIsNotNone(orch._pending_event_draft)
+
+        result = orch.process_command("liste meus aliases")
+
+        self.assertIsNone(orch._pending_event_draft)
+        self.assertEqual(result.status, "success")
+        self.assertEqual(result.intent.action, "listar aliases")
+
+    def test_normal_answer_fills_field(self):
+        """Resposta normal preenche o próximo campo faltante."""
+        orch = Orchestrator(simulate=True)
+        orch.process_command("crie uma reunião")
+
+        result = orch.process_command("amanhã")
+
+        self.assertIsNotNone(orch._pending_event_draft)
+        self.assertEqual(orch._pending_event_draft.get("date"), "amanhã")
+
+    def test_cancel_variations(self):
+        """Diversas variações de cancelamento limham o draft."""
+        for cancel_word in ["não", "cancelar", "cancele", "cancela"]:
+            orch = Orchestrator(simulate=True)
+            orch.process_command("crie uma reunião")
+            result = orch.process_command(cancel_word)
+            self.assertEqual(result.status, "cancelled", msg=f"Falhou com: {cancel_word}")
+            self.assertIsNone(orch._pending_event_draft)
+
+
 if __name__ == "__main__":
     unittest.main()

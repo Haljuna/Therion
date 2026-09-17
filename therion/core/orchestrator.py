@@ -662,15 +662,29 @@ class Orchestrator:
         is_complete = "title" in draft and "date" in draft and "start_time" in draft
         
         if not is_complete:
+            # --- Coleta segura: verificar antes de preencher campo ---
+
+            # A. Entrada vazia — repetir pergunta atual
             if not cleaned:
-                # If empty response, ask the same question again
                 if "title" not in draft:
                     return OrchestrationResult(status="awaiting_confirmation", message="Qual é o título do evento?")
                 if "date" not in draft:
                     return OrchestrationResult(status="awaiting_confirmation", message="Para qual data?")
                 if "start_time" not in draft:
                     return OrchestrationResult(status="awaiting_confirmation", message="A que horas?")
-                    
+
+            # B. Cancelamento explícito
+            if cleaned.lower() in ("não", "nao", "cancelar", "cancele", "cancela", "no"):
+                self._reset_calendar_create_flow()
+                return OrchestrationResult(status="cancelled", message="Operação cancelada pelo usuário.")
+
+            # C. Novo comando reconhecido pelo IntentRecognizer
+            new_intent = self.intent_recognizer.parse(cleaned)
+            if new_intent is not None:
+                self._reset_calendar_create_flow()
+                return None  # process_command principal processa normalmente
+
+            # D. Resposta comum — preencher próximo campo faltante
             if "title" not in draft:
                 draft["title"] = cleaned.capitalize()
             elif "date" not in draft:

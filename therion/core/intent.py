@@ -69,10 +69,51 @@ class IntentRecognizer:
         re.IGNORECASE,
     )
 
-    _CREATE_EVENT_PATTERN = re.compile(
+    _CREATE_EVENT_IMPERATIVE_PATTERN = re.compile(
         r"^(?:therion[,\s]+)?(?:marque|marcar|agende|agendar|crie|criar)\s+(.+)$",
         re.IGNORECASE,
     )
+
+    _CREATE_EVENT_NATURAL_PATTERN = re.compile(
+        r"^(?:therion[,\s]+)?(?:quero\s+|preciso\s+|vou\s+|pode\s+|gostaria\s+de\s+)?"
+        r"(?:marque|marcar|agende|agendar|crie|criar)\s+"
+        r"(?:um(?:a)?\s+)?"
+        r"(?:evento|reunião|compromisso|calendário|agenda)"
+        r"(?:\s+(.+))?$",
+        re.IGNORECASE,
+    )
+
+    _REJECT_ARTIFACT_PATTERN = re.compile(
+        r"^(?:um(?:a)?\s+)?(?:nota|arquivo|pasta|documento)",
+        re.IGNORECASE,
+    )
+
+    def _extract_event_fields(self, rest: str, entities: dict) -> str:
+        """Extrai start_time, date e title do texto restante. Retorna texto residual."""
+        # extrair horário
+        time_match = re.search(r'(?:às|as)\s+(\d{1,2}(?:h|:\d{2})?)', rest, re.IGNORECASE)
+        if time_match:
+            raw_time = time_match.group(1)
+            if re.match(r'^\d{1,2}h$', raw_time, re.IGNORECASE):
+                raw_time = raw_time.replace('h', ':00')
+            entities['start_time'] = raw_time
+            rest = rest.replace(time_match.group(0), '')
+
+        # extrair data
+        date_match = re.search(r'\b(\d{1,2}/\d{1,2}(?:/\d{4})?)\b', rest, re.IGNORECASE)
+        if not date_match:
+            date_match = re.search(r'\b(amanhã|hoje|dia\s+\d+)\b', rest, re.IGNORECASE)
+        if date_match:
+            entities['date'] = date_match.group(1)
+            rest = rest.replace(date_match.group(0), '')
+
+        # remover "dia" solto
+        rest = re.sub(r'\bdia\b\s*', '', rest, flags=re.IGNORECASE).strip()
+
+        # remover termos genéricos do começo
+        rest = re.sub(r'^(?:um\s+evento|uma\s+reunião|evento|reunião)\b\s*', '', rest, flags=re.IGNORECASE).strip()
+
+        return rest
 
     def parse(self, command: str) -> Optional[Intent]:
         """Extrai ação e alvo de um comando textual simples."""
@@ -149,43 +190,51 @@ class IntentRecognizer:
             )
 
         # Verificar padrão de criar evento no calendário
-        create_event_match = self._CREATE_EVENT_PATTERN.match(cleaned)
-        if create_event_match:
-            rest = create_event_match.group(1).strip()
+        # Variável local com pontuação removida — não altera cleaned nem outros recognizers
+        _event_candidate = re.sub(r'[.!?]+$', '', cleaned).strip()
+
+        # Padrão B: frase natural com keyword obrigatória (evento/reunião/compromisso/calendário/agenda)
+        natural_match = self._CREATE_EVENT_NATURAL_PATTERN.match(_event_candidate)
+        if natural_match:
+            rest = (natural_match.group(1) or '').strip()
             entities = {}
-            
-            # extrair horário
-            time_match = re.search(r'(?:às|as)\s+(\d{1,2}(?:h|:\d{2})?)', rest, re.IGNORECASE)
-            if time_match:
-                raw_time = time_match.group(1)
-                # normalizar "15h" → "15:00"
-                if re.match(r'^\d{1,2}h$', raw_time, re.IGNORECASE):
-                    raw_time = raw_time.replace('h', ':00')
-                entities['start_time'] = raw_time
-                rest = rest.replace(time_match.group(0), '')
-                
-            # extrair data (numérica primeiro, depois "dia N")
-            date_match = re.search(r'\b(\d{1,2}/\d{1,2}(?:/\d{4})?)\b', rest, re.IGNORECASE)
-            if not date_match:
-                date_match = re.search(r'\b(amanhã|hoje|dia\s+\d+)\b', rest, re.IGNORECASE)
-            if date_match:
-                entities['date'] = date_match.group(1)
-                rest = rest.replace(date_match.group(0), '')
-                
-            # remover "dia" solto que sobra após extração da data
-            rest = re.sub(r'\bdia\b\s*', '', rest, flags=re.IGNORECASE).strip()
-                
-            # remover termos genéricos do começo para encontrar o título
-            rest = re.sub(r'^(?:um\s+evento|uma\s+reunião|evento|reunião)\b\s*', '', rest, flags=re.IGNORECASE).strip()
-            
+            rest = self._extract_event_fields(rest, entities)
             if rest:
                 entities['title'] = rest.capitalize()
             else:
-                if 'reunião' in create_event_match.group(1).lower():
+                original_lower = natural_match.group(0).lower()
+                if 'reunião' in original_lower:
                     entities['title'] = 'Reunião'
-                elif 'evento' in create_event_match.group(1).lower():
+                elif 'evento' in original_lower and 'compromisso' not in original_lower:
+                    pass  # Não atribuir título padrão para "quero criar um evento"
+            return Intent(
+                action="criar evento calendário",
+                target="",
+                raw_command=command,
+                requires_confirmation=True,
+                entities=entities,
+            )
+
+        # Padrão A: imperativo existente
+        imperative_match = self._CREATE_EVENT_IMPERATIVE_PATTERN.match(_event_candidate)
+        if imperative_match:
+            rest = imperative_match.group(1).strip()
+
+            # Rejeitar artefatos não-calendário
+            if self._REJECT_ARTIFACT_PATTERN.match(rest):
+                return None
+
+            entities = {}
+            rest = self._extract_event_fields(rest, entities)
+            if rest:
+                entities['title'] = rest.capitalize()
+            else:
+                original_rest = imperative_match.group(1).lower()
+                if 'reunião' in original_rest:
+                    entities['title'] = 'Reunião'
+                elif 'evento' in original_rest:
                     entities['title'] = 'Evento'
-            
+
             return Intent(
                 action="criar evento calendário",
                 target="",
