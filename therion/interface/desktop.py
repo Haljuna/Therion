@@ -2,6 +2,7 @@
 
 import html
 import sys
+from pathlib import Path
 from typing import Optional
 
 from PySide6.QtWidgets import (
@@ -20,8 +21,10 @@ from PySide6.QtWidgets import (
     QSizePolicy,
     QSpacerItem,
 )
-from PySide6.QtGui import QAction, QKeyEvent, QFont
+from PySide6.QtGui import QAction, QKeyEvent, QFont, QIcon
 from PySide6.QtCore import Qt, Signal
+
+_ICONE_PATH = Path(__file__).resolve().parent.parent / "assets" / "icone.png"
 
 from therion.calendar.adapter import CalendarError
 from therion.calendar.google_adapter import GoogleCalendarAdapter
@@ -223,6 +226,7 @@ class MainWindow(QMainWindow):
         self._config = config or {}
         self._tray_icon: QSystemTrayIcon | None = None
         self._closing = False
+        self._therion_icon = self._load_icon()
         real_actions_enabled = self._config.get("runtime", {}).get("real_actions_enabled", False)
         calendar_adapter = self._build_calendar_adapter()
         ai_core = self._build_ai_core()
@@ -234,8 +238,16 @@ class MainWindow(QMainWindow):
         self._orchestrator = Orchestrator(**orch_kwargs)
         self._confirmation_handler = ConfirmationHandler()
         self._pending_plan: Optional[Plan] = None
+        if not self._therion_icon.isNull():
+            self.setWindowIcon(self._therion_icon)
         self._setup_ui()
         self._setup_tray()
+
+    def _load_icon(self) -> QIcon:
+        """Carrega o ícone oficial do Therion do asset PNG; retorna QIcon vazio se ausente."""
+        if _ICONE_PATH.is_file():
+            return QIcon(str(_ICONE_PATH))
+        return QIcon()
 
     def _build_calendar_adapter(self) -> "GoogleCalendarAdapter | None":
         """Instancia GoogleCalendarAdapter se calendar.enabled=true; None caso contrário.
@@ -403,12 +415,15 @@ class MainWindow(QMainWindow):
             print("Aviso: System Tray não disponível neste ambiente.")
             return
 
-        # Cria o ícone do tray (usa ícone padrão do Qt)
+        # Cria o ícone do tray (ícone oficial ou fallback do Qt)
         self._tray_icon = QSystemTrayIcon(self)
-        style = self.style()
-        if style:
-            icon = style.standardIcon(style.StandardPixmap.SP_ComputerIcon)
-            self._tray_icon.setIcon(icon)
+        if not self._therion_icon.isNull():
+            self._tray_icon.setIcon(self._therion_icon)
+        else:
+            style = self.style()
+            if style:
+                icon = style.standardIcon(style.StandardPixmap.SP_ComputerIcon)
+                self._tray_icon.setIcon(icon)
 
         # Cria menu de contexto
         tray_menu = QMenu(self)

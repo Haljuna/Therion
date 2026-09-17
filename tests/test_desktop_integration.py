@@ -988,5 +988,68 @@ class TestDesktopAIIntegration(unittest.TestCase):
                             self.assertEqual(passed_intents, expected_allowlist)
 
 
+class TestDesktopIcon(unittest.TestCase):
+    """Testes de integração do ícone oficial do Therion."""
+
+    _qapp = None
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        from PySide6.QtWidgets import QApplication
+        if QApplication.instance() is None:
+            cls._qapp = QApplication(sys.argv)
+        else:
+            cls._qapp = QApplication.instance()
+
+    def test_icon_path_is_relative_to_module(self) -> None:
+        """O caminho do ícone é calculado relativo ao módulo desktop.py."""
+        from therion.interface.desktop import _ICONE_PATH
+        from pathlib import Path
+        expected_parent = Path(__file__).resolve().parent.parent / "therion" / "interface"
+        self.assertEqual(_ICONE_PATH.parent.parent, expected_parent.parent)
+        self.assertEqual(_ICONE_PATH.name, "icone.png")
+
+    def test_window_receives_valid_icon_when_asset_exists(self) -> None:
+        """A janela recebe um QIcon válido quando o asset existe."""
+        from therion.interface.desktop import MainWindow, _ICONE_PATH
+        from PySide6.QtGui import QIcon
+        mock_app = MagicMock()
+        with patch.object(MainWindow, '_setup_ui'):
+            with patch.object(MainWindow, '_setup_tray'):
+                window = MainWindow(mock_app)
+                if _ICONE_PATH.is_file():
+                    self.assertFalse(window.windowIcon().isNull())
+                else:
+                    self.assertTrue(window.windowIcon().isNull())
+
+    def test_tray_uses_official_icon_when_asset_exists(self) -> None:
+        """O tray usa o ícone oficial quando o asset existe."""
+        from therion.interface.desktop import MainWindow, _ICONE_PATH
+        mock_app = MagicMock()
+        with patch.object(MainWindow, '_setup_ui'):
+            with patch('therion.interface.desktop.QSystemTrayIcon') as mock_tray_cls:
+                mock_tray = MagicMock()
+                mock_tray_cls.return_value = mock_tray
+                mock_tray_cls.isSystemTrayAvailable.return_value = True
+                window = MainWindow(mock_app)
+                if _ICONE_PATH.is_file():
+                    mock_tray.setIcon.assert_called()
+                    call_args = mock_tray.setIcon.call_args[0][0]
+                    self.assertFalse(call_args.isNull())
+
+    def test_tray_fallback_when_asset_missing(self) -> None:
+        """O fallback do tray permanece seguro se o asset estiver indisponível."""
+        from therion.interface.desktop import MainWindow, _ICONE_PATH
+        mock_app = MagicMock()
+        with patch.object(MainWindow, '_setup_ui'):
+            with patch('therion.interface.desktop.QSystemTrayIcon') as mock_tray_cls:
+                mock_tray = MagicMock()
+                mock_tray_cls.return_value = mock_tray
+                mock_tray_cls.isSystemTrayAvailable.return_value = True
+                with patch.object(_ICONE_PATH.__class__, 'is_file', return_value=False):
+                    window = MainWindow(mock_app)
+                    mock_tray.setIcon.assert_called()
+
+
 if __name__ == "__main__":
     unittest.main()
