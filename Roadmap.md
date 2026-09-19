@@ -75,7 +75,10 @@ Transformar a prova de conceito em uma aplicação útil no cotidiano.
 - memória de trabalho persistente durante sessões;
 - acesso seletivo ao Segundo Cérebro;
 - recuperação de contexto autorizado;
-- sistema inicial de Skills;
+- sistema inicial de Skills (SKILL-002 — Planejar meu dia integrada e Em teste);
+- evolução da SKILL-002: distinguir compromissos em andamento do próximo compromisso;
+- auditoria read-only do bootstrap e do custo de contexto;
+- definição posterior de uma fonte pessoal autorizada de tarefas para evoluir a SKILL-002;
 - múltiplas ações controladas;
 - abertura de aplicativos;
 - integração básica com calendário:
@@ -235,7 +238,29 @@ Therion recebe um comando de texto e consegue abrir o Obsidian após confirmaç�
 ```
 
 Próxima etapa funcional:
-- **Sistema inicial de Skills** (arquitetura híbrida e registry local conforme DEC-028).
+- **Auditar o bootstrap e o custo de contexto**, antes de alterar documentos obrigatórios ou ampliar fontes de conhecimento.
+
+Em seguida, a V1 deve definir explicitamente a fonte pessoal autorizada de tarefas e evoluir a SKILL-002 sem ampliar permissões automaticamente.
+
+### Evolução de Skills e capacidades — ordem aprovada
+
+1. estabilizar a SKILL-002 em uso real, ainda em estado Em teste;
+2. auditar o contexto de inicialização e desenhar a Camada Zero mínima;
+3. escolher uma pasta ou nota pessoal como fonte autorizada de tarefas;
+4. evoluir a SKILL-002 com essa fonte, mediante autorização;
+5. avaliar Skills candidatas de Planejamento de Estudos e Preparação de Compromissos.
+
+### Melhorias de usabilidade registradas em validação manual
+
+- normalizar respostas de cancelamento em fluxos de evento, aceitando pontuação terminal como `cancele.` e `não.`;
+- adicionar continuidade conversacional limitada à sessão, sem memória permanente nem autorização implícita;
+- distinguir compromissos em andamento do próximo compromisso na SKILL-002;
+- permitir raízes de leitura explicitamente autorizadas por tarefa para consultas ao Segundo Cérebro, sem acesso permanente;
+- evoluir a busca natural somente após a definição segura das raízes autorizadas;
+- melhorar a resposta controlada quando a IA local/Ollama não estiver disponível.
+- adicionar status e saúde das integrações, exibindo capacidades disponíveis e problemas de conexão sem expor segredos.
+
+O Capability Registry, a seleção entre múltiplos providers, agregação, versionamento de capacidades, MCP e Skills que dependem de contexto amplo ficam **após a estabilização da V1**. Eles não são pré-requisitos para a SKILL-002 atual.
 
 ---
 

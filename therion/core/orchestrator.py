@@ -20,6 +20,121 @@ from therion.memory.working_memory import WorkingMemory
 from therion.skills.registry import get_skill
 
 
+_DURATION_RE = re.compile(
+    r'(\d+)\s*(horas?|h|min(?:utos?)?)',
+    re.IGNORECASE,
+)
+
+_AMBIGUOUS_PREFIX_RE = re.compile(
+    r'(?:umas?\s+|mais\s+ou\s+menos\s+|cerca\s+de\s+|aproximadamente\s+)$',
+    re.IGNORECASE,
+)
+
+_AMBIGUOUS_SUFFIX_RE = re.compile(
+    r'^\s*(?:e\s+meia|e\s+quarenta|e\s+um\s+quarto)',
+    re.IGNORECASE,
+)
+
+_STUDY_SIGNALS = ("estudar", "estudo", "pomodoro")
+
+
+def _parse_duration_minutes(text: str) -> Optional[int]:
+    """Extrai duração em minutos de um texto V1 (formatos inequívocos)."""
+    m = _DURATION_RE.search(text)
+    if not m:
+        return None
+
+    start, end = m.span()
+    unit = m.group(2).lower()
+
+    # Rejeitar se há dígitos imediatamente após a unidade (ex: "1h30")
+    if end < len(text) and text[end].isdigit():
+        return None
+
+    # Rejeitar se há letras imediatamente após "h" (ex: "1h30")
+    if unit == "h" and end < len(text) and text[end].isalpha():
+        return None
+
+    # Rejeitar sufixos ambíguos como "e meia" (ex: "2 horas e meia")
+    if unit in ("h", "hora", "horas") and end < len(text):
+        suffix_match = _AMBIGUOUS_SUFFIX_RE.match(text[end:])
+        if suffix_match:
+            return None
+
+    # Rejeitar prefixos ambíguos como "umas", "mais ou menos"
+    prefix = text[:start]
+    if _AMBIGUOUS_PREFIX_RE.search(prefix):
+        return None
+
+    value = int(m.group(1))
+    if unit in ("h", "hora", "horas"):
+        return value * 60
+    if unit in ("min", "minuto", "minutos"):
+        return value
+    return None
+
+
+def _compute_pomodoro_budget(
+    available_minutes: int,
+    focus_minutes: int = 25,
+    break_minutes: int = 5,
+) -> Optional[dict]:
+    """Calcula orçamento Pomodoro determinístico. Retorna None se não couber 1 bloco."""
+    if available_minutes < focus_minutes:
+        return None
+    blocks = (available_minutes + break_minutes) // (focus_minutes + break_minutes)
+    planned = blocks * focus_minutes + max(0, blocks - 1) * break_minutes
+    return {
+        "available_minutes": available_minutes,
+        "blocks": blocks,
+        "focus_minutes": focus_minutes,
+        "break_minutes": break_minutes,
+        "planned_minutes": planned,
+        "remaining_minutes": available_minutes - planned,
+    }
+
+
+def _has_study_signal(text: str) -> bool:
+    """Verifica se o texto contém sinal explícito de estudo/Pomodoro V1."""
+    lower = text.lower()
+    return any(signal in lower for signal in _STUDY_SIGNALS)
+
+
+def _extract_pomodoro_budget(
+    command: str,
+    recent_turns: list[dict],
+) -> Optional[dict]:
+    """Extrai orçamento Pomodoro do command ou do último turno anterior do usuário.
+
+    Regra V1:
+    1. Buscar duração no command atual.
+    2. Se ausente, usar SOMENTE o último turno anterior do usuário em recent_turns,
+       ignorando explicitamente o turno que corresponde ao command atual.
+    3. Não percorrer histórico mais profundo.
+    4. Gerar budget somente se houver duração + sinal de estudo/Pomodoro.
+    """
+    duration = _parse_duration_minutes(command)
+    if duration is not None and _has_study_signal(command):
+        return _compute_pomodoro_budget(duration)
+
+    last_user_turn = None
+    for turn in reversed(recent_turns):
+        if not isinstance(turn, dict) or turn.get("role") != "user":
+            continue
+        text = turn.get("text", "")
+        if text == command:
+            continue
+        last_user_turn = text
+        break
+
+    if last_user_turn is not None:
+        duration = _parse_duration_minutes(last_user_turn)
+        if duration is not None and _has_study_signal(last_user_turn):
+            return _compute_pomodoro_budget(duration)
+
+    return None
+
+
 @dataclass
 class OrchestrationResult:
     """Resultado de uma etapa do ciclo de orquestração."""
@@ -73,6 +188,10 @@ class Orchestrator:
         self._pending_unknown_explained: Optional[str] = None
         # Estado do fluxo de criação de evento
         self._pending_event_draft: Optional[dict] = None
+        # Estado do fluxo de abertura contextual (target vago)
+        self._open_app_flow_active: bool = False
+        self._pending_open_app_target: Optional[str] = None
+        self._pending_open_app_result: Optional[Intent] = None
 
     def _complete_task(self) -> None:
         """Conclui a tarefa na memória de trabalho e audita o registro."""
@@ -121,6 +240,12 @@ class Orchestrator:
     def _reset_calendar_create_flow(self) -> None:
         """Limpa o estado do fluxo de criação de evento."""
         self._pending_event_draft = None
+
+    def _reset_open_app_flow(self) -> None:
+        """Limpa o estado do fluxo de abertura contextual."""
+        self._open_app_flow_active = False
+        self._pending_open_app_target = None
+        self._pending_open_app_result = None
 
     def _parse_event_datetimes(self, draft: dict) -> tuple[datetime, datetime]:
         """Converte data/hora do rascunho em datetimes timezone-aware.
@@ -703,6 +828,17 @@ class Orchestrator:
             return self._present_calendar_summary()
             
         # Is complete, waiting for confirmation or correction
+        # 1. Cancelamento local explícito
+        if cleaned.lower() in ("cancelar", "cancela", "cancele"):
+            self._reset_calendar_create_flow()
+            return OrchestrationResult(status="cancelled", message="Operação cancelada pelo usuário.")
+
+        # 2. Novo comando determinístico reconhecido pelo IntentRecognizer
+        new_intent = self.intent_recognizer.parse(cleaned)
+        if new_intent is not None:
+            self._reset_calendar_create_flow()
+            return None  # process_command principal processa normalmente
+
         import re
         is_correction = False
         
@@ -766,13 +902,57 @@ class Orchestrator:
         else:
             return self._present_calendar_summary(ambiguous=True)
 
-    def _build_ai_context(self) -> dict:
+    def _handle_open_app_flow(self, command: str) -> Optional[OrchestrationResult]:
+        """Processa o fluxo de abertura contextual quando target é vago ('isso'/'aquilo').
+        
+        Retorna OrchestrationResult se está no fluxo, None caso contrário.
+        """
+        if not self._open_app_flow_active:
+            return None
+
+        cleaned = command.strip()
+
+        # A. Entrada vazia — repetir pergunta
+        if not cleaned:
+            return OrchestrationResult(
+                status="awaiting_confirmation",
+                message="Qual aplicativo você quer abrir?",
+            )
+
+        # B. Cancelamento explícito
+        if cleaned.lower() in ("não", "nao", "cancelar", "cancele", "cancela", "no"):
+            self._reset_open_app_flow()
+            return OrchestrationResult(
+                status="cancelled",
+                message="Operação cancelada pelo usuário.",
+            )
+
+        # C. Novo comando determinístico — interrompe fluxo
+        new_intent = self.intent_recognizer.parse(cleaned)
+        if new_intent is not None:
+            self._reset_open_app_flow()
+            return None  # process_command principal processa normalmente
+
+        # D. Target textual — construir Intent e limpar pending
+        target = cleaned.capitalize() if cleaned.islower() else cleaned
+        self._reset_open_app_flow()
+        # Retornar Intent via variável auxiliar para process_command processar
+        self._pending_open_app_result = Intent(
+            action="abrir aplicativo",
+            target=target,
+            raw_command=command,
+            requires_confirmation=True,
+        )
+        return None
+
+    def _build_ai_context(self, command: str = "") -> dict:
         """Cria snapshot somente leitura do contexto para o AICore."""
-        return {
-            "recent_turns": [
-                {"role": t.role, "text": t.text}
-                for t in self.memory.recent_turns(5)
-            ],
+        recent = [
+            {"role": t.role, "text": t.text}
+            for t in self.memory.recent_turns(5)
+        ]
+        ctx = {
+            "recent_turns": recent,
             "last_intent": self.memory.last_intent,
             "last_target": self.memory.last_target,
             "last_status": self.memory.last_status,
@@ -782,6 +962,10 @@ class Orchestrator:
                 else None
             ),
         }
+        budget = _extract_pomodoro_budget(command, recent)
+        if budget is not None:
+            ctx["pomodoro_budget"] = budget
+        return ctx
 
     def _ai_response_to_intent(self, response) -> Intent:
         """Converte AIResponse para Intent canônico existente."""
@@ -853,12 +1037,25 @@ class Orchestrator:
             self._finalize_session_result(calendar_create_flow_result)
             return calendar_create_flow_result
 
-        # --- IntentRecognizer primeiro (determinístico) ---
-        intent = self.intent_recognizer.parse(command)
+        # Verifica se está no fluxo de abertura contextual (target vago)
+        open_app_flow_result = self._handle_open_app_flow(command)
+        if open_app_flow_result is not None:
+            self._complete_task()
+            self._finalize_session_result(open_app_flow_result)
+            return open_app_flow_result
+
+        # Se o fluxo de abertura retornou uma Intent via variável auxiliar
+        if self._pending_open_app_result is not None:
+            intent = self._pending_open_app_result
+            self._pending_open_app_result = None
+            self.memory.record_intent(intent.action, intent.target)
+        else:
+            # --- IntentRecognizer primeiro (determinístico) ---
+            intent = self.intent_recognizer.parse(command)
 
         if intent is None and self.ai_core is not None:
             # Intent não reconhecida → consulta AICore/Ollama
-            ai_context = self._build_ai_context()
+            ai_context = self._build_ai_context(command)
             ai_response = self.ai_core.classify(command, ai_context)
 
             if ai_response is not None and ai_response.type == "action":
@@ -1077,6 +1274,21 @@ class Orchestrator:
             raw_command=intent.raw_command,
             requires_confirmation=intent.requires_confirmation,
         )
+
+        # Verificar se target é vago ("isso"/"aquilo") — iniciar fluxo de abertura contextual
+        if (intent.action == "abrir aplicativo"
+                and intent.target.lower() in IntentRecognizer.VAGUE_TARGETS):
+            self._open_app_flow_active = True
+            self._pending_open_app_target = intent.target
+            self.memory.record_awaiting_confirmation()
+            self._complete_task()
+            result = OrchestrationResult(
+                status="awaiting_confirmation",
+                intent=intent,
+                message="Qual aplicativo você quer abrir?",
+            )
+            self._finalize_session_result(result)
+            return result
 
         if not self.permission_manager.is_allowed(resolved_intent):
             # Alvo desconhecido: abrir aplicativo, sem alias resolvido, não autorizado

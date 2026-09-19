@@ -359,6 +359,55 @@ class TestCalendarSafeCollection(unittest.TestCase):
             self.assertEqual(result.status, "cancelled", msg=f"Falhou com: {cancel_word}")
             self.assertIsNone(orch._pending_event_draft)
 
+    def test_natural_absence_clause_multiturn(self):
+        """Cenário multi-turno real: pedido inicial com vírgula e ausência de hora seguido de título."""
+        from unittest.mock import MagicMock
+        orch = Orchestrator(simulate=True)
+        mock_adapter = MagicMock()
+        orch.calendar_adapter = mock_adapter
+
+        # 1. Primeiro turno com Quero criar um evento, mas ainda não sei a hora.
+        res1 = orch.process_command("Quero criar um evento, mas ainda não sei a hora.")
+        # 2. Confirmar que o fluxo pendente é criado e Therion pergunta pelo título
+        self.assertEqual(res1.status, "awaiting_confirmation")
+        self.assertEqual(res1.message, "Qual é o título do evento?")
+        self.assertIsNotNone(orch._pending_event_draft)
+        self.assertNotIn("title", orch._pending_event_draft)
+
+        # 3. Segundo turno teste
+        res2 = orch.process_command("teste")
+        # 4. Confirmar continuidade com title Teste e pergunta Para qual data?
+        self.assertEqual(res2.status, "awaiting_confirmation")
+        self.assertEqual(res2.message, "Para qual data?")
+        self.assertIsNotNone(orch._pending_event_draft)
+        self.assertEqual(orch._pending_event_draft.get("title"), "Teste")
+
+        # 5. Confirmar que nenhuma criação externa de evento ocorreu
+        mock_adapter.create_event.assert_not_called()
+
+    def test_new_command_clears_complete_draft(self):
+        """Novo comando determinístico durante confirmação final limpa draft e processa comando sem criar evento."""
+        from unittest.mock import MagicMock
+        orch = Orchestrator(simulate=True)
+        mock_adapter = MagicMock()
+        orch.calendar_adapter = mock_adapter
+
+        # Evento completo aguardando confirmação
+        res1 = orch.process_command("marque reunião amanhã às 15h")
+        self.assertEqual(res1.status, "awaiting_confirmation")
+        self.assertIsNotNone(orch._pending_event_draft)
+
+        # Usuário envia novo comando determinístico
+        res2 = orch.process_command("liste meus aliases")
+
+        # Draft antigo é limpo e novo comando é processado normalmente
+        self.assertIsNone(orch._pending_event_draft)
+        self.assertEqual(res2.status, "success")
+        self.assertEqual(res2.intent.action, "listar aliases")
+
+        # Evento pendente NÃO é criado
+        mock_adapter.create_event.assert_not_called()
+
 
 class TestPlanDayIntegration(unittest.TestCase):
     """Testes de integração da SKILL-002 com o Orchestrator."""
@@ -433,6 +482,293 @@ class TestPlanDayIntegration(unittest.TestCase):
             self.assertIn("não disponível", result.message)
         finally:
             reg.SKILLS.update(original)
+
+
+class TestOpenAppContextualFlow(unittest.TestCase):
+    """Testes do fluxo de abertura contextual com targets vagos."""
+
+    def setUp(self) -> None:
+        self.orch = Orchestrator(simulate=True)
+
+    def test_abre_aquilo_starts_flow(self) -> None:
+        """1. 'abre aquilo' inicia pending de abertura, NÃO fluxo de alias."""
+        result = self.orch.process_command("abre aquilo")
+        self.assertEqual(result.status, "awaiting_confirmation")
+        self.assertIn("Qual aplicativo", result.message)
+        self.assertTrue(self.orch._open_app_flow_active)
+        self.assertIsNone(self.orch._pending_unknown_original)
+
+    def test_abre_isso_starts_flow(self) -> None:
+        """2. 'abre isso' inicia pending de abertura."""
+        result = self.orch.process_command("abre isso")
+        self.assertEqual(result.status, "awaiting_confirmation")
+        self.assertTrue(self.orch._open_app_flow_active)
+
+    def test_empty_repeats_question(self) -> None:
+        """3. Resposta vazia repete pergunta e mantém pending."""
+        self.orch.process_command("abre aquilo")
+        result = self.orch.process_command("")
+        self.assertEqual(result.status, "awaiting_confirmation")
+        self.assertIn("Qual aplicativo", result.message)
+        self.assertTrue(self.orch._open_app_flow_active)
+
+    def test_cancel_clears_flow(self) -> None:
+        """4. Cancelamento limpa pending, não executa nada."""
+        self.orch.process_command("abre aquilo")
+        result = self.orch.process_command("não")
+        self.assertEqual(result.status, "cancelled")
+        self.assertFalse(self.orch._open_app_flow_active)
+
+    def test_cancel_variations(self) -> None:
+        """5. Diversas variações de cancelamento limham o pending."""
+        for cancel_word in ["não", "nao", "cancelar", "cancele", "cancela", "no"]:
+            orch = Orchestrator(simulate=True)
+            orch.process_command("abre aquilo")
+            result = orch.process_command(cancel_word)
+            self.assertEqual(result.status, "cancelled", msg=f"Falhou com: {cancel_word}")
+            self.assertFalse(orch._open_app_flow_active)
+
+    def test_new_command_interrupts_flow(self) -> None:
+        """6. Novo comando determinístico interrompe pending e processa normalmente."""
+        self.orch.process_command("abre aquilo")
+        self.assertTrue(self.orch._open_app_flow_active)
+        result = self.orch.process_command("liste meus aliases")
+        self.assertFalse(self.orch._open_app_flow_active)
+        self.assertEqual(result.status, "success")
+        self.assertEqual(result.intent.action, "listar aliases")
+
+    def test_obsidian_response_enters_pipeline(self) -> None:
+        """7. 'obsidian' como resposta produz Intent e entra no pipeline normal."""
+        self.orch.process_command("abre aquilo")
+        result = self.orch.process_command("Obsidian")
+        self.assertEqual(result.status, "awaiting_confirmation")
+        self.assertEqual(result.intent.action, "abrir aplicativo")
+        self.assertEqual(result.intent.target, "Obsidian")
+        self.assertIn("Continuar?", result.message)
+
+    def test_permission_confirmation_preserved(self) -> None:
+        """8. Abertura continua exigindo permissão e confirmação."""
+        self.orch.process_command("abre aquilo")
+        result = self.orch.process_command("Obsidian")
+        self.assertTrue(result.intent.requires_confirmation)
+        self.assertIn("exige confirmação", result.message)
+
+    def test_no_execution_before_confirmation(self) -> None:
+        """9. Nenhuma execução real ocorre antes da confirmação."""
+        self.orch.process_command("abre aquilo")
+        result = self.orch.process_command("Obsidian")
+        self.assertEqual(result.status, "awaiting_confirmation")
+        self.assertIsNone(self.orch.executor._ALLOWED_TARGETS if hasattr(self.orch.executor, '_pending') else None)
+
+    def test_concrete_unknown_target_preserved(self) -> None:
+        """10. Target desconhecido concreto continua com comportamento anterior."""
+        result = self.orch.process_command("abra Photoshop")
+        self.assertEqual(result.status, "awaiting_confirmation")
+        self.assertTrue(self.orch._unknown_target_flow_step)
+        self.assertIn("Não reconheci", result.message)
+        self.assertFalse(self.orch._open_app_flow_active)
+
+
+class TestPomodoroBudget(unittest.TestCase):
+    """Testes do orçamento temporal determinístico Pomodoro (Incremento 4A)."""
+
+    def setUp(self) -> None:
+        self.orch = Orchestrator(simulate=True)
+
+    def test_A_duration_in_command_current(self) -> None:
+        """A) Duração no command atual com sinal de estudo."""
+        from therion.core.orchestrator import _extract_pomodoro_budget
+        budget = _extract_pomodoro_budget(
+            "tenho 2 horas para estudar com pomodoro", []
+        )
+        self.assertIsNotNone(budget)
+        self.assertEqual(budget["blocks"], 4)
+        self.assertEqual(budget["planned_minutes"], 115)
+        self.assertEqual(budget["remaining_minutes"], 5)
+
+    def test_B_duration_in_minutes(self) -> None:
+        """B) Formato minutos."""
+        from therion.core.orchestrator import _extract_pomodoro_budget
+        budget = _extract_pomodoro_budget("tenho 120 minutos para estudar", [])
+        self.assertIsNotNone(budget)
+        self.assertEqual(budget["blocks"], 4)
+        self.assertEqual(budget["planned_minutes"], 115)
+
+    def test_C_duration_format_2h(self) -> None:
+        """C) Formato 2h."""
+        from therion.core.orchestrator import _extract_pomodoro_budget
+        budget = _extract_pomodoro_budget("tenho 2h para estudar", [])
+        self.assertIsNotNone(budget)
+        self.assertEqual(budget["blocks"], 4)
+        self.assertEqual(budget["planned_minutes"], 115)
+
+    def test_D_multiturno_com_sim(self) -> None:
+        """D) Fluxo multiturno: recent_turns contém command atual 'sim'; turno anterior é usado."""
+        from therion.core.orchestrator import _extract_pomodoro_budget
+        recent = [
+            {"role": "user", "text": "tenho 2 horas para estudar Circuitos Lógicos"},
+            {"role": "therion", "text": "Deseja que eu gere o plano?"},
+            {"role": "user", "text": "sim"},
+        ]
+        budget = _extract_pomodoro_budget("sim", recent)
+        self.assertIsNotNone(budget)
+        self.assertEqual(budget["blocks"], 4)
+        self.assertEqual(budget["available_minutes"], 120)
+        self.assertEqual(budget["focus_minutes"], 25)
+        self.assertEqual(budget["break_minutes"], 5)
+        self.assertEqual(budget["planned_minutes"], 115)
+        self.assertEqual(budget["remaining_minutes"], 5)
+
+    def test_E_nao_busca_historico_profundo(self) -> None:
+        """E) Não reutiliza duração de histórico profundo quando turno anterior não tem duração."""
+        from therion.core.orchestrator import _extract_pomodoro_budget
+        recent = [
+            {"role": "user", "text": "tenho 2 horas para estudar matemática"},
+            {"role": "therion", "text": "Ok!"},
+            {"role": "user", "text": "quero estudar circuitos lógicos"},
+            {"role": "therion", "text": "Claro!"},
+        ]
+        budget = _extract_pomodoro_budget("sim", recent)
+        self.assertIsNone(budget)
+
+    def test_F_sem_contexto_estudo(self) -> None:
+        """F) Sem contexto de estudo: não gerar budget."""
+        from therion.core.orchestrator import _extract_pomodoro_budget
+        budget = _extract_pomodoro_budget("tenho 2 horas para jogar", [])
+        self.assertIsNone(budget)
+
+    def test_G_tempo_menor_25(self) -> None:
+        """G) Tempo menor que 25 min: não gerar budget."""
+        from therion.core.orchestrator import _extract_pomodoro_budget
+        budget = _extract_pomodoro_budget("tenho 20 minutos para estudar", [])
+        self.assertIsNone(budget)
+
+    def test_H_calculo_25_min(self) -> None:
+        """H) Caso 25 min."""
+        from therion.core.orchestrator import _compute_pomodoro_budget
+        b = _compute_pomodoro_budget(25)
+        self.assertEqual(b["blocks"], 1)
+        self.assertEqual(b["planned_minutes"], 25)
+        self.assertEqual(b["remaining_minutes"], 0)
+
+    def test_H_calculo_30_min(self) -> None:
+        """H) Caso 30 min."""
+        from therion.core.orchestrator import _compute_pomodoro_budget
+        b = _compute_pomodoro_budget(30)
+        self.assertEqual(b["blocks"], 1)
+        self.assertEqual(b["planned_minutes"], 25)
+        self.assertEqual(b["remaining_minutes"], 5)
+
+    def test_H_calculo_55_min(self) -> None:
+        """H) Caso 55 min."""
+        from therion.core.orchestrator import _compute_pomodoro_budget
+        b = _compute_pomodoro_budget(55)
+        self.assertEqual(b["blocks"], 2)
+        self.assertEqual(b["planned_minutes"], 55)
+        self.assertEqual(b["remaining_minutes"], 0)
+
+    def test_H_calculo_60_min(self) -> None:
+        """H) Caso 60 min."""
+        from therion.core.orchestrator import _compute_pomodoro_budget
+        b = _compute_pomodoro_budget(60)
+        self.assertEqual(b["blocks"], 2)
+        self.assertEqual(b["planned_minutes"], 55)
+        self.assertEqual(b["remaining_minutes"], 5)
+
+    def test_H_calculo_120_min(self) -> None:
+        """H) Caso 120 min."""
+        from therion.core.orchestrator import _compute_pomodoro_budget
+        b = _compute_pomodoro_budget(120)
+        self.assertEqual(b["blocks"], 4)
+        self.assertEqual(b["planned_minutes"], 115)
+        self.assertEqual(b["remaining_minutes"], 5)
+
+    def test_I_context_unchanged_when_not_applicable(self) -> None:
+        """I) ai_context não contém pomodoro_budget quando não aplicável."""
+        ctx = self.orch._build_ai_context("abra o Obsidian")
+        self.assertNotIn("pomodoro_budget", ctx)
+
+    def test_I_context_contains_budget_when_applicable(self) -> None:
+        """I) ai_context contém pomodoro_budget quando aplicável."""
+        ctx = self.orch._build_ai_context("tenho 2 horas para estudar")
+        self.assertIn("pomodoro_budget", ctx)
+        self.assertEqual(ctx["pomodoro_budget"]["blocks"], 4)
+
+    def test_J_parser_rejects_ambiguos_e_meia(self) -> None:
+        """J) Parser rejeita '2 horas e meia'."""
+        from therion.core.orchestrator import _parse_duration_minutes
+        self.assertIsNone(_parse_duration_minutes("2 horas e meia"))
+
+    def test_J_parser_rejects_mais_ou_menos(self) -> None:
+        """J) Parser rejeita 'mais ou menos 2 horas'."""
+        from therion.core.orchestrator import _parse_duration_minutes
+        self.assertIsNone(_parse_duration_minutes("mais ou menos 2 horas"))
+
+    def test_J_parser_rejects_umas(self) -> None:
+        """J) Parser rejeita 'umas 2 horas'."""
+        from therion.core.orchestrator import _parse_duration_minutes
+        self.assertIsNone(_parse_duration_minutes("umas 2 horas"))
+
+    def test_J_parser_rejects_1h30(self) -> None:
+        """J) Parser rejeita '1h30'."""
+        from therion.core.orchestrator import _parse_duration_minutes
+        self.assertIsNone(_parse_duration_minutes("1h30"))
+
+    def test_J_parser_rejects_a_tarde_toda(self) -> None:
+        """J) Parser rejeita 'a tarde toda'."""
+        from therion.core.orchestrator import _parse_duration_minutes
+        self.assertIsNone(_parse_duration_minutes("a tarde toda"))
+
+    def test_J_parser_accepts_validos(self) -> None:
+        """J) Parser continua aceitando formatos V1 válidos."""
+        from therion.core.orchestrator import _parse_duration_minutes
+        self.assertEqual(_parse_duration_minutes("tenho 2 horas para estudar"), 120)
+        self.assertEqual(_parse_duration_minutes("tenho 120 minutos para estudar"), 120)
+        self.assertEqual(_parse_duration_minutes("tenho 2h para estudar"), 120)
+        self.assertEqual(_parse_duration_minutes("1 hora de estudo"), 60)
+        self.assertEqual(_parse_duration_minutes("30 min de foco"), 30)
+
+    def test_K_multiturno_real_comando_atual_no_recent(self) -> None:
+        """K) recent_turns inclui command atual; turno anterior com duração é usado."""
+        from therion.core.orchestrator import _extract_pomodoro_budget
+        recent = [
+            {"role": "user", "text": "quero estudar circuitos lógicos"},
+            {"role": "therion", "text": "Claro!"},
+            {"role": "user", "text": "tenho 2 horas para estudar"},
+            {"role": "therion", "text": "Deseja que eu gere o plano?"},
+            {"role": "user", "text": "sim"},
+        ]
+        budget = _extract_pomodoro_budget("sim", recent)
+        self.assertIsNotNone(budget)
+        self.assertEqual(budget["blocks"], 4)
+
+    def test_K_historico_antigo_nao_reaproveitado(self) -> None:
+        """K) Último turno anterior sem duração: budget antigo não é reaproveitado."""
+        from therion.core.orchestrator import _extract_pomodoro_budget
+        recent = [
+            {"role": "user", "text": "tenho 2 horas para estudar matemática"},
+            {"role": "therion", "text": "Ok!"},
+            {"role": "user", "text": "quero estudar circuitos lógicos"},
+            {"role": "therion", "text": "Claro!"},
+            {"role": "user", "text": "sim"},
+        ]
+        budget = _extract_pomodoro_budget("sim", recent)
+        self.assertIsNone(budget)
+
+    def test_L_integracao_build_ai_context(self) -> None:
+        """L) _build_ai_context(command) produz budget correto no caminho real."""
+        self.orch.memory.add_turn("user", "tenho 2 horas para estudar Circuitos Lógicos")
+        self.orch.memory.add_turn("therion", "Deseja que eu gere o plano?")
+        self.orch.memory.add_turn("user", "sim")
+        ctx = self.orch._build_ai_context("sim")
+        self.assertIn("pomodoro_budget", ctx)
+        b = ctx["pomodoro_budget"]
+        self.assertEqual(b["available_minutes"], 120)
+        self.assertEqual(b["blocks"], 4)
+        self.assertEqual(b["focus_minutes"], 25)
+        self.assertEqual(b["break_minutes"], 5)
+        self.assertEqual(b["planned_minutes"], 115)
+        self.assertEqual(b["remaining_minutes"], 5)
 
 
 if __name__ == "__main__":

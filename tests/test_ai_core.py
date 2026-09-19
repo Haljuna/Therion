@@ -333,7 +333,7 @@ class TestAICoreOrchestratorIntegration(unittest.TestCase):
         provider = FakeAIProvider(AIResponse(type="clarification", message="Qual aplicativo voce gostaria de abrir?"))
         core = AICore(provider=provider, available_intents=["abrir aplicativo"])
         orch = Orchestrator(simulate=True, ai_core=core)
-        result = orch.process_command("Abre aquilo.")
+        result = orch.process_command("quero comer algo")
         self.assertEqual(result.status, "success")
         self.assertIn("Qual aplicativo", result.message)
         self.assertIsNone(orch.memory.last_intent)

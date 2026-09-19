@@ -25,6 +25,13 @@ As decisões técnicas principais da V1 foram aprovadas (interface PySide6, proc
 - ✅ Calendário — consulta/leitura
 - ✅ Calendário — criação com confirmação
 - ✅ IA central local-first (Marco A2 concluído)
+- 🧪 SKILL-002 — Planejar meu dia integrada, validada manualmente e Em teste (panorama read-only da agenda)
+
+### Prioridade arquitetural atual
+
+A auditoria read-only do bootstrap dos agentes e do custo de contexto foi concluída (5.1-B e 5.1-C aprovados, G1–G8 = 8/8 PASSA). O checkpoint Git foi deliberadamente adiado porque o working tree contém alterações mistas e Roadmap.md não apresentou fronteira segura.
+
+O próximo passo é o usuário escolher explicitamente uma pasta ou nota pessoal como fonte autorizada de tarefas. A SKILL-002 somente voltará a consultar o Segundo Cérebro após essa decisão e autorização.
 
 ### Progresso da V1 validado até o momento
 
@@ -591,11 +598,32 @@ Marco da V1 alcançado: criação de eventos no calendário com confirmação ex
 
 Marco da V1 alcançado: interface desktop UI-1 concluída e validada visual e tecnicamente de ponta a ponta (504 testes passando, 0 failures, 0 errors; 82 testes de interface/integração desktop). Nova interface PySide6 com tema preto e laranja, orbe de estados visuais, histórico em balões, painel compacto de confirmação com Confirmar/Cancelar, remoção do status inferior redundante e atalhos Enter/Shift+Enter. Arquitetura funcional e governança preservadas sem execução direta pela UI.
 
-Marco da V1 alcançado: IA central local-first (Marco A2) implementada e validada de ponta a ponta (547 testes passando, 0 failures, 0 errors). Provider local Ollama em loopback com proxy desabilitado, modelo candidato `qwen3:4b-instruct`, format schema estruturado e schemas fechados com endurecimento no AICore com fallback determinístico, configuração `ai.enabled=false` por padrão e injeção desktop sem inferência na inicialização. Validação manual concluída para chat, clarification e action confirmada.
+Marco da V1 alcançado: IA central local-first (Marco A2) implementada e validada de ponta a ponta (685 testes passando, 0 failures, 0 errors). Provider local Ollama em loopback com proxy desabilitado, modelo candidato `qwen3:4b-instruct`, format schema estruturado e schemas fechados com endurecimento no AICore com fallback determinístico, configuração `ai.enabled=false` por padrão e injeção desktop sem inferência na inicialização. Validação manual concluída para chat, clarification e action confirmada.
+
+Marco de governança alcançado: Camada Zero implementada e validada (5.1-B e 5.1-C aprovados, G1–G8 = 8/8 PASSA). Checkpoint Git deliberadamente adiado porque o working tree contém alterações mistas e Roadmap.md não apresentou fronteira segura para checkpoint completo da Camada Zero.
 
 Próxima etapa principal:
 
 **Sistema inicial de Skills da V1**, respeitando a governança do Segundo Cérebro.
+
+### Frentes fechadas nesta rodada
+
+- evento/pontuação: fechado
+- confirmação/cancelamento de calendário: fechado
+- recent_turns → Ollama: fechado
+- abre aquilo → obsidian: fechado
+- respostas curtas contextuais: fechado
+- tudo → aliases: fechado
+- promessa sem entrega: fechado
+- orçamento Pomodoro 4A/4B: fechado
+- estudo/Pomodoro → unknown_intent: fechado
+- warnings de "Disk full" e autenticação de calendário: simulados/controlados em testes
+
+### Riscos residuais conhecidos
+
+- Lógica `text == command` em `_extract_pomodoro_budget()` pode ignorar turnos idênticos (baixo impacto)
+- `abra o obsidian` pode ocasionalmente retornar do Ollama com `arguments={}` (comportamento pré-existente do modelo, não causado por esta rodada)
+- Working tree acumulado com 12 arquivos modificados sem commit
 
 ---
 

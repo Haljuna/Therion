@@ -45,6 +45,18 @@ class TestCalendarCreationFlow(unittest.TestCase):
         self.assertEqual(res.status, "cancelled")
         self.assertIsNone(self.orc._pending_event_draft)
 
+    def test_cancel_variations_complete_draft(self):
+        """No draft completo, cancelar/cancela/cancele cancelam sem criar evento."""
+        for cancel_word in ("cancelar", "cancela", "cancele"):
+            self.orc._reset_calendar_create_flow()
+            self.mock_adapter.reset_mock()
+            self.orc.process_command("marque reunião amanhã às 15h")
+            self.assertIsNotNone(self.orc._pending_event_draft)
+            res = self.orc.process_command(cancel_word)
+            self.assertEqual(res.status, "cancelled", msg=f"Falhou para {cancel_word}")
+            self.assertIsNone(self.orc._pending_event_draft, msg=f"Draft não limpo para {cancel_word}")
+            self.mock_adapter.create_event.assert_not_called()
+
     def test_ambiguity_keeps_state(self):
         self.orc.process_command("marque reunião amanhã às 15h")
         res = self.orc.process_command("talvez")

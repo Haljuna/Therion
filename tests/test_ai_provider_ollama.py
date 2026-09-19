@@ -340,6 +340,199 @@ class TestOllamaProviderIsolated(unittest.TestCase):
         self.assertIn("calendário hoje", system_content)
         self.assertIn("criar evento calendário", system_content)
 
+    def test_payload_empty_context_preserves_system_and_user(self):
+        """Context vazio preserva payload com apenas system + user atual."""
+        payload = self.provider._build_payload("mensagem atual", {}, [])
+        messages = payload["messages"]
+        self.assertEqual(len(messages), 2)
+        self.assertEqual(messages[0]["role"], "system")
+        self.assertEqual(messages[1]["role"], "user")
+        self.assertEqual(messages[1]["content"], "mensagem atual")
+
+    def test_payload_recent_turns_converts_therion_without_duplication(self):
+        """Histórico user/therion/user atual vira user/assistant/user sem duplicação."""
+        context = {
+            "recent_turns": [
+                {"role": "user", "text": "me dê dicas"},
+                {"role": "therion", "text": "De qual área você gostaria de dicas?"},
+                {"role": "user", "text": "estudo"},
+            ]
+        }
+        payload = self.provider._build_payload("estudo", context, [])
+        messages = payload["messages"]
+        self.assertEqual(len(messages), 4)
+        self.assertEqual(messages[0]["role"], "system")
+        self.assertEqual(messages[1], {"role": "user", "content": "me dê dicas"})
+        self.assertEqual(messages[2], {"role": "assistant", "content": "De qual área você gostaria de dicas?"})
+        self.assertEqual(messages[3], {"role": "user", "content": "estudo"})
+
+    def test_payload_recent_turns_preserves_different_last_turn(self):
+        """Último turn diferente da mensagem atual não é descartado."""
+        context = {
+            "recent_turns": [
+                {"role": "user", "text": "me dê dicas"},
+                {"role": "therion", "text": "De qual área você gostaria de dicas?"},
+            ]
+        }
+        payload = self.provider._build_payload("estudo", context, [])
+        messages = payload["messages"]
+        self.assertEqual(len(messages), 4)
+        self.assertEqual(messages[0]["role"], "system")
+        self.assertEqual(messages[1], {"role": "user", "content": "me dê dicas"})
+        self.assertEqual(messages[2], {"role": "assistant", "content": "De qual área você gostaria de dicas?"})
+        self.assertEqual(messages[3], {"role": "user", "content": "estudo"})
+
+    def test_payload_uses_only_passed_context_isolated(self):
+        """Provider consome apenas o context recebido sem acessar WorkingMemory."""
+        from unittest.mock import patch
+        context = {
+            "recent_turns": [
+                {"role": "user", "text": "olá"},
+                {"role": "therion", "text": "olá, como posso ajudar?"},
+            ]
+        }
+        with patch("therion.memory.working_memory.WorkingMemory") as mock_mem:
+            payload = self.provider._build_payload("ajuda", context, [])
+            mock_mem.assert_not_called()
+        self.assertEqual(len(payload["messages"]), 4)
+        self.assertEqual(payload["messages"][-1]["content"], "ajuda")
+
+
+class TestContextualShortResponseRule(unittest.TestCase):
+    """Testes estruturais da regra de respostas curtas contextuais no SYSTEM_PROMPT."""
+
+    def setUp(self):
+        self.provider = OllamaProvider(model="qwen3:4b-instruct", timeout=30)
+
+    def test_system_prompt_contains_contextual_short_response_rule(self):
+        """SYSTEM_PROMPT contém regra explícita de respostas curtas contextuais."""
+        payload = self.provider._build_payload("teste", {}, [])
+        system_content = payload["messages"][0]["content"]
+        self.assertIn("sim", system_content.lower())
+        self.assertIn("não", system_content.lower())
+        self.assertIn("ok", system_content.lower())
+        self.assertIn("tudo", system_content.lower())
+        self.assertIn("mensagem imediatamente anterior", system_content.lower())
+
+    def test_system_prompt_prohibits_historical_association(self):
+        """SYSTEM_PROMPT contém regra proibindo classificação por associação histórica."""
+        payload = self.provider._build_payload("teste", {}, [])
+        system_content = payload["messages"][0]["content"]
+        self.assertIn("NÃO classifique uma resposta curta como", system_content)
+        self.assertIn("associação com palavras ou exemplos do histórico", system_content.lower())
+
+    def test_system_prompt_preserves_calendar_example(self):
+        """Exemplo legítimo de calendário continua presente no SYSTEM_PROMPT."""
+        payload = self.provider._build_payload("teste", {}, [])
+        system_content = payload["messages"][0]["content"]
+        self.assertIn("O que tenho hoje?", system_content)
+        self.assertIn("calendário hoje", system_content)
+
+    def test_system_prompt_contains_contextual_example(self):
+        """SYSTEM_PROMPT contém exemplo de continuação contextual (sim como confirmação)."""
+        payload = self.provider._build_payload("teste", {}, [])
+        system_content = payload["messages"][0]["content"]
+        self.assertIn("Deseja que eu gere esse plano completo agora?", system_content)
+        self.assertIn("sim", system_content)
+        self.assertIn("Revisão de conceitos", system_content)
+        self.assertIn("Prática de exercícios", system_content)
+        self.assertNotIn("vou gerar agora", system_content.lower())
+
+    def test_system_prompt_contains_study_pomodoro_example(self):
+        """SYSTEM_PROMPT contém exemplo de frase de estudo/Pomodoro como chat."""
+        payload = self.provider._build_payload("teste", {}, [])
+        sc = payload["messages"][0]["content"]
+        self.assertIn("tenho 2 horas para estudar circuitos lógicos e quero usar pomodoro", sc)
+        self.assertIn('"type":"chat"', sc)
+        self.assertIn('"intent":null', sc)
+        self.assertIn('"arguments":{}', sc)
+        self.assertIn("Pomodoro", sc)
+
+    def test_build_payload_places_prompt_in_messages_zero(self):
+        """_build_payload() continua colocando SYSTEM_PROMPT em messages[0]['content']."""
+        payload = self.provider._build_payload("teste", {}, [])
+        messages = payload["messages"]
+        self.assertGreater(len(messages), 0)
+        self.assertEqual(messages[0]["role"], "system")
+        self.assertIsInstance(messages[0]["content"], str)
+        self.assertGreater(len(messages[0]["content"]), 100)
+
+
+class TestPomodoroBudgetTransport(unittest.TestCase):
+    """Testes do transporte do pomodoro_budget ao Ollama (Incremento 4B)."""
+
+    BUDGET = {
+        "available_minutes": 120,
+        "blocks": 4,
+        "focus_minutes": 25,
+        "break_minutes": 5,
+        "planned_minutes": 115,
+        "remaining_minutes": 5,
+    }
+
+    def setUp(self):
+        self.provider = OllamaProvider(model="qwen3:4b-instruct", timeout=30)
+
+    def test_A_budget_present_in_system_content(self) -> None:
+        """A) Budget presente: system content contém bloco formatado."""
+        context = {"pomodoro_budget": self.BUDGET}
+        payload = self.provider._build_payload("teste", context, [])
+        sc = payload["messages"][0]["content"]
+        self.assertIn("[ORÇAMENTO POMODORO]", sc)
+        self.assertIn("120", sc)
+        self.assertIn("4", sc)
+        self.assertIn("25", sc)
+        self.assertIn("5", sc)
+        self.assertIn("115", sc)
+        self.assertIn("limites factuais", sc.lower())
+
+    def test_B_only_one_system_message(self) -> None:
+        """B) Continua existindo somente uma mensagem system em messages[0]."""
+        context = {"pomodoro_budget": self.BUDGET}
+        payload = self.provider._build_payload("teste", context, [])
+        messages = payload["messages"]
+        system_msgs = [m for m in messages if m["role"] == "system"]
+        self.assertEqual(len(system_msgs), 1)
+        self.assertEqual(messages[0]["role"], "system")
+
+    def test_C_without_budget_no_dynamic_block(self) -> None:
+        """C) Sem budget: system prompt sem bloco dinâmico."""
+        payload = self.provider._build_payload("teste", {}, [])
+        sc = payload["messages"][0]["content"]
+        self.assertNotIn("[ORÇAMENTO POMODORO]", sc)
+
+    def test_D_recent_turns_preserved(self) -> None:
+        """D) recent_turns preservados: ordem, roles, sem duplicação."""
+        context = {
+            "recent_turns": [
+                {"role": "user", "text": "olá"},
+                {"role": "therion", "text": "olá!"},
+            ],
+            "pomodoro_budget": self.BUDGET,
+        }
+        payload = self.provider._build_payload("teste", context, [])
+        messages = payload["messages"]
+        self.assertEqual(len(messages), 4)
+        self.assertEqual(messages[1], {"role": "user", "content": "olá"})
+        self.assertEqual(messages[2], {"role": "assistant", "content": "olá!"})
+        self.assertEqual(messages[3], {"role": "user", "content": "teste"})
+
+    def test_E_structural_tests_still_pass(self) -> None:
+        """E) Testes estruturais anteriores continuam intactos."""
+        payload = self.provider._build_payload("teste", {}, [])
+        sc = payload["messages"][0]["content"]
+        # regra contextual
+        self.assertIn("sim", sc.lower())
+        self.assertIn("tudo", sc.lower())
+        self.assertIn("mensagem imediatamente anterior", sc.lower())
+        # exemplo contextual
+        self.assertIn("Deseja que eu gere esse plano completo agora?", sc)
+        # exemplo calendário
+        self.assertIn("O que tenho hoje?", sc)
+        # entrega imediata
+        self.assertIn("Revisão de conceitos", sc)
+        self.assertNotIn("vou gerar agora", sc.lower())
+
 
 if __name__ == "__main__":
     unittest.main()

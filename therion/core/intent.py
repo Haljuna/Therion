@@ -20,7 +20,7 @@ class IntentRecognizer:
     """Reconhecedor determinístico de intenções para a V0."""
 
     _OPEN_APP_PATTERN = re.compile(
-        r"^(?:therion[,\s]+)?(?:abra|abrir)\s+(?:o\s+)?([a-zA-Z0-9_\-\.\sàáâãéêíóôõúç]+)\s*$",
+        r"^(?:therion[,\s]+)?(?:abre|abra|abrir)\s+(?:o\s+)?([a-zA-Z0-9_\-\.\sàáâãéêíóôõúç]+)\s*$",
         re.IGNORECASE,
     )
 
@@ -88,7 +88,19 @@ class IntentRecognizer:
         r"(?:marque|marcar|agende|agendar|crie|criar)\s+"
         r"(?:um(?:a)?\s+)?"
         r"(?:evento|reunião|compromisso|calendário|agenda)"
-        r"(?:\s+(.+))?$",
+        r"(?:(?:\s*[,.:]\s*|\s+)(.*))?$",
+        re.IGNORECASE,
+    )
+
+    _ABSENCE_CLAUSES_PATTERN = re.compile(
+        r"(?:[,.:]\s*|\s+)?(?:"
+        r"mas\s+ainda\s+não\s+sei\s+o\s+horário|"
+        r"mas\s+ainda\s+não\s+sei\s+a\s+hora|"
+        r"ainda\s+não\s+sei\s+o\s+horário|"
+        r"mas\s+não\s+sei\s+o\s+horário|"
+        r"ainda\s+não\s+sei\s+a\s+hora|"
+        r"mas\s+não\s+sei\s+a\s+hora"
+        r")\s*$",
         re.IGNORECASE,
     )
 
@@ -96,6 +108,8 @@ class IntentRecognizer:
         r"^(?:um(?:a)?\s+)?(?:nota|arquivo|pasta|documento)",
         re.IGNORECASE,
     )
+
+    VAGUE_TARGETS = {"isso", "aquilo"}
 
     def _extract_event_fields(self, rest: str, entities: dict) -> str:
         """Extrai start_time, date e title do texto restante. Retorna texto residual."""
@@ -121,6 +135,12 @@ class IntentRecognizer:
 
         # remover termos genéricos do começo
         rest = re.sub(r'^(?:um\s+evento|uma\s+reunião|evento|reunião)\b\s*', '', rest, flags=re.IGNORECASE).strip()
+
+        # remover cláusulas literais de ausência de horário no trecho final
+        rest = self._ABSENCE_CLAUSES_PATTERN.sub('', rest).strip()
+
+        # limpar pontuações residuais nas bordas
+        rest = re.sub(r'^[,.:\s]+|[,.:\s]+$', '', rest).strip()
 
         return rest
 
@@ -219,7 +239,7 @@ class IntentRecognizer:
             entities = {}
             rest = self._extract_event_fields(rest, entities)
             if rest:
-                entities['title'] = rest.capitalize()
+                entities['title'] = rest.capitalize() if rest.islower() else rest
             else:
                 original_lower = natural_match.group(0).lower()
                 if 'reunião' in original_lower:
@@ -246,7 +266,7 @@ class IntentRecognizer:
             entities = {}
             rest = self._extract_event_fields(rest, entities)
             if rest:
-                entities['title'] = rest.capitalize()
+                entities['title'] = rest.capitalize() if rest.islower() else rest
             else:
                 original_rest = imperative_match.group(1).lower()
                 if 'reunião' in original_rest:

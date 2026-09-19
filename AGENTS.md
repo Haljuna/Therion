@@ -4,15 +4,62 @@ Este arquivo define o procedimento de inicialização para qualquer modelo utili
 
 ## 1. Ponto de entrada obrigatório
 
-Antes de trabalhar no projeto, consultar nesta ordem:
+Este arquivo é a Camada Zero do projeto Therion. Ele define limites não contornáveis, roteamento determinístico e referências a documentos canônicos.
 
-1. `../../90 - Sistema da IA/Entrada da IA.md`
-2. `../../90 - Sistema da IA/Constituição da IA.md`
-3. `../../90 - Sistema da IA/Autonomia e Permissões.md`
-4. `../../90 - Sistema da IA/Protocolo de Confirmação.md`
-5. `../../90 - Sistema da IA/Protocolo de Inicialização.md`
-6. `../../90 - Sistema da IA/Agentes/OpenCode.md`
-7. documentação atual do projeto Therion
+### 1.1 Perfil ativo
+
+Antes de qualquer leitura de tarefa ou processamento de ação, carregar o perfil do agente:
+
+`90 - Sistema da IA/Agentes/OpenCode.md`
+
+O perfil define identidade, função, escopo permitido, limites e referência ao contrato de permissões. Se o perfil não puder ser localizado, o agente deve informar ao usuário e permanecer bloqueado até resolução.
+
+### 1.2 Áreas protegidas
+
+Antes de aceitar ou acessar qualquer raiz de leitura, consultar:
+
+`90 - Sistema da IA/Áreas Protegidas.md`
+
+As raízes autorizadas para leitura são declaradas explicitamente em cada tarefa. A inclusão de uma área na política de áreas protegidas não concede acesso a ela.
+
+Uma área sem raiz de leitura autorizada não recebe acesso por padrão. Em caso de dúvida sobre a aplicação do escopo, o agente não acessa e solicita esclarecimento.
+
+### 1.3 Raízes de leitura
+
+As raízes autorizadas para leitura são declaradas explicitamente em cada tarefa. O agente não deve inferir autorização a partir de sua função, capacidade técnica, conhecimento de caminhos existentes ou acesso concedido em tarefas anteriores.
+
+Caminho fora das raízes autorizadas para a tarefa exige nova autorização explícita do usuário. Em caso de dúvida sobre se um caminho está autorizado, o agente não acessa e solicita esclarecimento.
+
+Autorização de leitura não concede escrita, execução, alteração de configuração ou operações Git que alterem estado. Consultas Git somente leitura continuam sujeitas à política do agente e ao escopo da tarefa.
+
+### 1.4 Documentos canônicos de governança
+
+Para consulta de governança, o agente pode carregar os seguintes documentos canônicos quando acionado por gatilho específico:
+
+| Documento | Gatilho |
+|-----------|---------|
+| `90 - Sistema da IA/Constituição da IA.md` | Quando uma ação puder afetar conhecimento oficial, decisões ou princípios |
+| `90 - Sistema da IA/Autonomia e Permissões.md` | Quando uma decisão envolver autonomia ou permissão, inclusive proposta de aumento, redução ou revogação de autonomia |
+| `90 - Sistema da IA/Protocolo de Confirmação.md` | Na transição de análise para execução |
+| `90 - Sistema da IA/Protocolo de Inicialização.md` | Quando houver conflito entre fontes; necessidade de verificar atualidade de informação recuperada; avaliação de confiabilidade de regra, fluxo ou informação recuperada; falha ou limitação na tarefa; falha ou perda de confiança que possa afetar uma decisão protegida; criação ou alteração de Skill; delegação de subtarefa; decisão sobre dados a acessar ou reter; encerramento de tarefa relevante; identificação de sobreposição estrutural; necessidade de repetir uma ação; conclusão de ação relevante que exija auditoria ou rastreabilidade; ou lidar com permissão de longa duração |
+
+O carregamento desses documentos é limitado à consulta de governança e não autoriza navegação em pastas vizinhas. Esses gatilhos não autorizam mudança automática de autonomia, não transformam falha em autorização e não substituem confirmação quando ela for exigida.
+
+### 1.5 Documento não localizado
+
+Se um documento canônico exigido por um gatilho não puder ser localizado ou carregado, o agente deve:
+
+1. parar o avanço;
+2. informar ao usuário qual documento não foi localizado;
+3. aguardar orientação antes de continuar.
+
+O agente não deve preencher lacunas por inferência nem assumir que a ausência de documento autoriza a ação.
+
+### 1.6 Verificação inicial e conclusão da inicialização
+
+Antes de avançar para execução, o agente deve confirmar que compreende o pedido, o escopo, as regras aplicáveis, as permissões, as fontes relevantes, o tipo de ação, os pontos que exigem confirmação e os riscos relevantes. Se faltar contexto para alguma dessas verificações, buscar o que for permitido ou perguntar ao usuário. Não preencher lacunas com suposições.
+
+A inicialização só se encerra quando a tarefa estiver compreendida, o escopo estiver claro, as permissões estiverem identificadas, o contexto estiver suficiente, a fonte estiver identificada, os riscos estiverem conhecidos e não houver confirmação pendente. Só então o agente avança para execução.
 
 ## 2. Contexto do projeto
 
@@ -73,16 +120,24 @@ O agente não pode promover RAS para conhecimento oficial ou criar Skill ativa s
 
 ## 6. Troca de modelo
 
+A troca de modelo não cria uma nova autoridade.
+
 Cada novo modelo utilizado no OpenCode deve:
 
-1. carregar estas instruções;
-2. verificar a governança;
-3. entender o estado atual do projeto;
-4. verificar `git status`;
-5. verificar os testes relevantes;
-6. explicar resumidamente o que entendeu antes de executar mudanças importantes.
+1. seguir a Camada Zero deste arquivo;
+2. carregar o perfil ativo (`90 - Sistema da IA/Agentes/OpenCode.md`) antes de acessar raízes da tarefa ou processar ações;
+3. verificar a governança aplicável;
+4. entender o estado atual do projeto;
+5. verificar `git status`;
+6. verificar os testes relevantes;
+7. explicar resumidamente o que entendeu antes de executar mudanças importantes.
 
 Um novo modelo não herda permissões temporárias concedidas a outro modelo.
+Também não herda intenções provisórias, sugestões antigas, tarefas não confirmadas nem autorizações pontuais da sessão ou modelo anterior.
+
+Conhecimento pode ser compartilhado.
+
+Permissões não são compartilhadas automaticamente.
 
 ## 7. Execução
 
@@ -96,6 +151,17 @@ Antes de alterações relevantes:
 - executar testes apropriados;
 - revisar o diff antes de concluir.
 
+### Tratamento de falhas
+
+Quando uma ação falhar ou deixar estado incerto, além de parar, informar e aguardar conforme §7 e §8, o agente deve:
+
+1. verificar o que foi executado antes da falha;
+2. identificar o impacto da falha;
+3. avaliar a reversibilidade das ações já realizadas;
+4. propor próximos passos antes de solicitar confirmação para ações corretivas.
+
+Uma falha não autoriza correção automática. Após uma falha, o agente deve parar, avaliar e reportar. Pode propor próximos passos, mas não deve executar correção no mesmo passo sem nova autorização aplicável.
+
 ### Transição entre análise e execução
 
 **Aprovação de plano NÃO é autorização de execução.**
@@ -104,18 +170,41 @@ Quando o agente indicar que está "aguardando autorização" ou expressão equiv
 deve encerrar sua ação naquele turno. É proibido avançar para execução sem uma nova
 mensagem clara e afirmativa do usuário.
 
-Consultar:
+Para orientar a transição, consultar:
 
-- `90 - Sistema da IA/Regras/Regras Gerais da IA.md` (Regra 13);
-- `90 - Sistema da IA/Protocolo de Confirmação.md`.
+- `90 - Sistema da IA/Protocolo de Confirmação.md`
 
-Nenhuma sessão ou modelo pode presumir autorização implícita.
+Se o protocolo exigido não puder ser localizado ou carregado, o agente deve:
+
+1. não executar a ação;
+2. informar ao usuário que o documento de referência não foi localizado;
+3. aguardar orientação antes de continuar.
+
+Nenhuma sessão ou modelo pode presumir autorização implícita. A confirmação deve seguir o protocolo, sem inferir autorização a partir de respostas vagas, comentários ou feedback sobre o plano.
 
 ## 8. Escrita no Segundo Cérebro
 
 Alterações permanentes no Segundo Cérebro continuam sujeitas às regras de Autonomia e Permissões e ao Protocolo de Confirmação.
 
 A existência de acesso técnico aos arquivos não representa autorização.
+
+Autorização de leitura não concede escrita, execução, alteração de configuração ou operações Git que alterem estado.
+
+Quando uma decisão envolver autonomia ou permissão, consultar:
+
+- `90 - Sistema da IA/Autonomia e Permissões.md`
+
+Quando uma ação exigir confirmação, consultar:
+
+- `90 - Sistema da IA/Protocolo de Confirmação.md`
+
+Se um desses documentos não puder ser localizado ou carregado, o agente deve:
+
+1. não executar a ação;
+2. informar ao usuário qual documento não foi localizado;
+3. aguardar orientação antes de continuar.
+
+O agente não deve inferir autorização a partir da ausência de documento, de acesso técnico disponível ou de respostas vagas do usuário.
 
 ---
 

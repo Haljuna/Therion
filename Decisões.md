@@ -587,6 +587,46 @@ Decisões aprovadas:
 
 ---
 
+## DEC-031 — Separação entre integrações, capacidades e Skills
+
+**Status:** Aprovada
+
+O Therion adotará progressivamente a separação conceitual:
+
+`Integração → Capacidade → Skill`, sob coordenação transversal do `Orchestrator`.
+
+Decisões aprovadas:
+
+- Uma integração conecta um serviço ou provider; uma capacidade é uma operação pequena, atômica e reutilizável; uma Skill realiza um objetivo usando uma ou mais capacidades.
+- O `Orchestrator` seleciona, autoriza, confirma quando aplicável, coordena e registra; a seleção de uma Skill não amplia autonomia.
+- Pedidos simples devem usar uma capacidade direta quando ela bastar; não criar uma Skill apenas para encapsular uma melhoria de função existente.
+- Em ambiguidade relevante, o Therion pergunta ao usuário em vez de adivinhar.
+- Skills devem declarar identidade, gatilhos, entradas, capacidades permitidas, procedimento, limites, saída esperada, testes e histórico de evolução.
+- O Registry de Skills e futuras capacidades permanece estático, local e controlado; não executa código vindo de Markdown e não toma decisões autônomas.
+- A escolha entre providers deve respeitar preferência configurada. Sem preferência, uma escolha que altere materialmente o resultado exige pergunta ao usuário. Agregação de providers é decisão distinta de seleção.
+- Contratos compatíveis de capacidades podem evoluir na mesma versão; mudanças incompatíveis devem criar nova versão enquanto houver dependentes.
+- Falhas não autorizam resultados inventados nem chamadas ocultas fora do `Orchestrator`. Repetição automática só poderá ser avaliada para leituras idempotentes, com limite explícito; ações de escrita não podem ser repetidas de modo a duplicar efeitos.
+
+O Capability Registry completo, múltiplos providers, agregação e versionamento serão avaliados após a estabilização da V1, quando houver mais de uma integração ou casos concretos que os justifiquem.
+
+---
+
+## DEC-032 — Auditoria de bootstrap e contexto em camadas
+
+**Status:** Aprovada
+
+A auditoria somente leitura dos arquivos obrigatórios carregados por agentes, seus tamanhos aproximados, sobreposições e responsabilidades foi concluída na etapa 5.1, com validação G1–G8 = 8/8 PASSA. A etapa 5.2 registrou decisão independente de não realizar checkpoint Git, por working tree misto e ausência de fronteira segura em `Roadmap.md`.
+
+Hipótese de trabalho aprovada para avaliação posterior:
+
+- uma Camada Zero mínima contém apenas identidade, limites de segurança, permissões essenciais e ponteiros para contexto sob demanda;
+- contexto adicional é carregado conforme tarefa, Skill e necessidade autorizada;
+- nenhuma remoção, compressão, expansão de raízes ou mudança de governança ocorre sem decisão posterior e autorização explícita.
+
+O objetivo é reduzir custo e ruído de bootstrap sem remover proteções necessárias.
+
+---
+
 ## Regra de manutenção
 
 Ao registrar uma nova decisão:

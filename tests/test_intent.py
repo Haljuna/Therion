@@ -72,6 +72,66 @@ class TestCreateEventParsing(unittest.TestCase):
         self.assertEqual(intent.action, "criar evento calendário")
         self.assertNotIn("title", intent.entities)
 
+    # --- Delimitadores e cláusulas de ausência de horário ---
+
+    def test_natural_evento_com_virgula_e_clausula_ausencia(self):
+        """"Quero criar um evento, mas ainda não sei a hora." entra no fluxo sem title."""
+        intent = self.ir.parse("Quero criar um evento, mas ainda não sei a hora.")
+        self.assertIsNotNone(intent)
+        self.assertEqual(intent.action, "criar evento calendário")
+        self.assertEqual(intent.entities, {})
+
+    def test_natural_evento_com_ponto(self):
+        """"Quero criar um evento." entra no fluxo sem title."""
+        intent = self.ir.parse("Quero criar um evento.")
+        self.assertIsNotNone(intent)
+        self.assertEqual(intent.action, "criar evento calendário")
+        self.assertEqual(intent.entities, {})
+
+    def test_natural_evento_virgula_com_data_e_hora(self):
+        """"Quero criar um evento, amanhã às 15h." extrai data e hora sem inventar title."""
+        intent = self.ir.parse("Quero criar um evento, amanhã às 15h.")
+        self.assertIsNotNone(intent)
+        self.assertEqual(intent.action, "criar evento calendário")
+        self.assertEqual(intent.entities["date"], "amanhã")
+        self.assertEqual(intent.entities["start_time"], "15:00")
+        self.assertNotIn("title", intent.entities)
+
+    def test_natural_evento_dois_pontos_com_titulo_data_e_hora(self):
+        """"Quero criar um evento: Prova de circuitos amanhã às 15h." preserva title."""
+        intent = self.ir.parse("Quero criar um evento: Prova de circuitos amanhã às 15h.")
+        self.assertIsNotNone(intent)
+        self.assertEqual(intent.action, "criar evento calendário")
+        self.assertEqual(intent.entities["title"], "Prova de circuitos")
+        self.assertEqual(intent.entities["date"], "amanhã")
+        self.assertEqual(intent.entities["start_time"], "15:00")
+
+    def test_natural_evento_sem_horario_preserva_titulo(self):
+        """"Quero criar um evento: Sem Horário" preserva "Sem Horário" como título."""
+        intent = self.ir.parse("Quero criar um evento: Sem Horário")
+        self.assertIsNotNone(intent)
+        self.assertEqual(intent.action, "criar evento calendário")
+        self.assertEqual(intent.entities.get("title"), "Sem Horário")
+
+    def test_natural_evento_titulo_e_clausula_ausencia(self):
+        """"Quero criar um evento Prova, mas ainda não sei a hora" preserva "Prova"."""
+        intent = self.ir.parse("Quero criar um evento Prova, mas ainda não sei a hora")
+        self.assertIsNotNone(intent)
+        self.assertEqual(intent.action, "criar evento calendário")
+        self.assertEqual(intent.entities.get("title"), "Prova")
+
+    def test_reject_eventoabc(self):
+        """"eventoabc" isolado e no fluxo natural continuam rejeitados."""
+        self.assertIsNone(self.ir.parse("eventoabc"))
+        self.assertIsNone(self.ir.parse("Quero criar um eventoabc"))
+
+    def test_imperative_preserves_eventoabc(self):
+        """"crie um eventoabc" é interpretado pelo fluxo imperativo com título "Um eventoabc"."""
+        intent = self.ir.parse("crie um eventoabc")
+        self.assertIsNotNone(intent)
+        self.assertEqual(intent.action, "criar evento calendário")
+        self.assertEqual(intent.entities.get("title"), "Um eventoabc")
+
     # --- Rejeição de artefatos não-calendário ---
 
     def test_reject_nota(self):
@@ -157,6 +217,52 @@ class TestPlanDayParsing(unittest.TestCase):
     def test_organize_sem_dia_not_recognized(self):
         """'organize minhas tarefas' não é reconhecido."""
         self.assertIsNone(self.ir.parse("organize minhas tarefas"))
+
+
+class TestOpenAppFlexion(unittest.TestCase):
+    """Valida flexão 'abre' e targets vagos no IntentRecognizer."""
+
+    def setUp(self):
+        self.ir = IntentRecognizer()
+
+    def test_abre_aquilo(self):
+        """'abre aquilo' → abrir aplicativo / Aquilo."""
+        intent = self.ir.parse("abre aquilo")
+        self.assertIsNotNone(intent)
+        self.assertEqual(intent.action, "abrir aplicativo")
+        self.assertEqual(intent.target, "Aquilo")
+
+    def test_abre_isso(self):
+        """'abre isso' → abrir aplicativo / Isso."""
+        intent = self.ir.parse("abre isso")
+        self.assertIsNotNone(intent)
+        self.assertEqual(intent.action, "abrir aplicativo")
+        self.assertEqual(intent.target, "Isso")
+
+    def test_abra_aquilo_mantido(self):
+        """'abra aquilo' continua funcionando."""
+        intent = self.ir.parse("abra aquilo")
+        self.assertIsNotNone(intent)
+        self.assertEqual(intent.action, "abrir aplicativo")
+        self.assertEqual(intent.target, "Aquilo")
+
+    def test_abrir_isso_mantido(self):
+        """'abrir isso' continua funcionando."""
+        intent = self.ir.parse("abrir isso")
+        self.assertIsNotNone(intent)
+        self.assertEqual(intent.action, "abrir aplicativo")
+        self.assertEqual(intent.target, "Isso")
+
+    def test_abre_obsidian(self):
+        """'abre Obsidian' → abrir aplicativo / Obsidian."""
+        intent = self.ir.parse("abre Obsidian")
+        self.assertIsNotNone(intent)
+        self.assertEqual(intent.action, "abrir aplicativo")
+        self.assertEqual(intent.target, "Obsidian")
+
+    def test_vague_targets_list(self):
+        """VAGUE_TARGETS contém apenas 'isso' e 'aquilo'."""
+        self.assertEqual(self.ir.VAGUE_TARGETS, {"isso", "aquilo"})
 
 
 if __name__ == "__main__":
