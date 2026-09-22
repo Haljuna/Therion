@@ -93,6 +93,46 @@ A Therion consegue ser utilizada regularmente para tarefas simples sem depender 
 
 ---
 
+## Trilha pós-V1 — Inteligência externa e integrações assistidas
+
+> Esta trilha começa somente após a estabilização da V1. Não substitui o Ollama, não autoriza integrações automaticamente e não altera a prioridade da V2 — Voz.
+
+### Objetivo
+
+Expandir a capacidade de consulta e integração da Therion mantendo-a como interface, orquestradora de contexto e responsável pelas decisões de segurança.
+
+### Princípios preservados
+
+- Ollama permanece como inteligência local padrão, priorizando privacidade, funcionamento offline e custo previsível;
+- contexto não equivale a autorização;
+- consulta externa, pesquisa e automação não podem contornar `PermissionManager` ou `ConfirmationHandler`;
+- nenhuma integração recebe permissões mais amplas do que a tarefa explicitamente autorizada;
+- ações externas sensíveis continuam exigindo confirmação específica;
+- respostas, páginas e conteúdos retornados por serviços externos são dados não confiáveis até serem validados pela Therion.
+
+### Ordem planejada
+
+1. **Política de dados externos**
+   - definir quais dados podem sair do ambiente local, quais são proibidos e como o usuário é informado;
+   - registrar provedor, finalidade, dados mínimos enviados, limites de custo e comportamento quando o serviço estiver indisponível.
+2. **Consulta externa assistida**
+   - piloto com GPT como apoio de raciocínio ou redação, nunca como executor de ferramentas;
+   - escalonamento inicialmente explícito: Therion apresenta provedor, objetivo e dados mínimos antes de pedir confirmação;
+   - não usar a regra vaga “Ollama falhou” como gatilho automático.
+3. **Pesquisa atualizada com fontes**
+   - avaliar Perplexity ou outro provedor de pesquisa para web, documentação recente e respostas com fontes;
+   - apresentar fontes e limitações; pesquisa não autoriza execução posterior.
+4. **Arquitetura de capacidades e MCP**
+   - somente após casos reais demonstrarem necessidade, evoluir Capability Registry, seleção entre providers, agregação, versionamento e MCP próprio;
+   - inicialmente, a prioridade é a Therion consumir capacidades externas controladas, não expor todas as suas capacidades a outros assistentes.
+
+### Modos de privacidade futuros
+
+- **Local:** processamento com Ollama e integrações locais autorizadas;
+- **Consulta externa assistida:** envio mínimo de dados a um provedor externo após confirmação;
+
+---
+
 ## V2 — Voz
 
 ### Objetivo
