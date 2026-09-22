@@ -627,6 +627,92 @@ O objetivo é reduzir custo e ruído de bootstrap sem remover proteções necess
 
 ---
 
+## DEC-033 — ReadScope: filtro temporário de leitura
+
+**Status:** Aprovada
+
+O Therion adotará um `ReadScope` como filtro temporário de leitura por tarefa.
+
+### 1. Definição
+
+- `ReadScope` é um value object imutável;
+- contém `task_id` + `roots`;
+- é efêmero;
+- nasce por tarefa;
+- é descartado ao fim da tarefa.
+
+### 2. Teto de segurança
+
+`roots_efetivas = scope.roots ∩ allowed_roots`
+
+- só restringe;
+- nunca amplia as raízes base;
+- nunca muta `self.allowed_roots`;
+- nunca herda roots da tarefa anterior.
+
+### 3. Ausente ≠ vazio
+
+- `scope=None` → mantém compatibilidade com as raízes estáticas atuais;
+- `scope.roots=()` → nega toda leitura;
+- apenas o segundo caso é deny-by-default efetivo.
+
+### 4. Canonicalização
+
+A interseção deve ser calculada por chamada usando:
+
+`normcase(abspath(realpath(...)))`
+
+nos dois lados.
+
+### 5. Não-grant
+
+- `ReadScope` não concede permissão;
+- não substitui PermissionManager;
+- não substitui confirmação;
+- não concede escrita;
+- leitura não deriva escrita;
+- ampliar `allowed_roots` base exige decisão/configuração própria, não ReadScope.
+
+### 6. Declaração canônica
+
+Forma primária:
+
+`raízes: <relativa-ao-vault>[, ...] :: <comando>`
+
+- somente caminhos relativos ao vault;
+- menção informal de caminho não cria escopo;
+- fluxo conversacional pode apenas confirmar uma lista normalizada e explícita;
+- roots rejeitadas devem ser reportadas, não descartadas silenciosamente.
+
+### 7. Rastreabilidade
+
+Auditoria futura deve registrar:
+
+- `task_id`;
+- roots declaradas/autorizadas;
+- roots efetivas usadas;
+- `context_queries` relacionadas.
+
+### 8. Skills
+
+- Skills só recebem scope derivado e igual ou mais restrito que o da tarefa;
+- nunca recebem autoridade adicional pelo descriptor;
+- SKILL-002 não muda nesta decisão.
+
+### 9. Limites desta DEC
+
+Esta DEC NÃO autoriza:
+
+- implementação de código;
+- GPT;
+- Perplexity;
+- MCP;
+- automações;
+- Capability Registry executável;
+- escrita no Segundo Cérebro.
+
+---
+
 ## Regra de manutenção
 
 Ao registrar uma nova decisão:
