@@ -4,6 +4,8 @@ import os
 from dataclasses import dataclass
 from typing import List, Optional
 
+from therion.context.read_scope import ReadScope, effective_roots
+
 
 @dataclass
 class ReadResult:
@@ -57,7 +59,9 @@ class SecondBrainReader:
         except ValueError:
             return False
 
-    def resolve_and_validate(self, requested_path: str) -> str:
+    def resolve_and_validate(
+        self, requested_path: str, scope: Optional[ReadScope] = None
+    ) -> str:
         """Normaliza e valida o caminho, aplicando as regras de contenção e tipo."""
         clean_path = requested_path.strip()
 
@@ -88,8 +92,15 @@ class SecondBrainReader:
                 candidate = candidate_vault
 
         # 3. Verificação de contenção dentro de uma das raízes autorizadas
+        if scope is None:
+            roots = self.allowed_roots
+            validated_path = candidate
+        else:
+            roots = effective_roots(scope, self.allowed_roots)
+            validated_path = os.path.realpath(candidate)
+
         if not any(
-            self._is_subpath(candidate, root) for root in self.allowed_roots
+            self._is_subpath(validated_path, root) for root in roots
         ):
             raise PermissionError(
                 f"Acesso negado: o caminho '{clean_path}' está fora das raízes autorizadas do Segundo Cérebro."
@@ -97,10 +108,12 @@ class SecondBrainReader:
 
         return candidate
 
-    def read_note(self, requested_path: str) -> ReadResult:
+    def read_note(
+        self, requested_path: str, scope: Optional[ReadScope] = None
+    ) -> ReadResult:
         """Lê o conteúdo de uma nota Markdown dentro do escopo autorizado."""
         try:
-            canonical_path = self.resolve_and_validate(requested_path)
+            canonical_path = self.resolve_and_validate(requested_path, scope)
         except (ValueError, PermissionError) as err:
             return ReadResult(
                 success=False,
@@ -148,6 +161,7 @@ class SecondBrainReader:
         term: str,
         max_results: int = 5,
         snippet_length: int = 200,
+        scope: Optional[ReadScope] = None,
     ) -> List[SearchResult]:
         """Busca termo em nomes e conteúdo de arquivos .md dentro das raízes autorizadas.
 
@@ -161,7 +175,12 @@ class SecondBrainReader:
         term_lower = cleaned.lower()
         results: List[SearchResult] = []
 
-        for root in self.allowed_roots:
+        if scope is None:
+            roots = self.allowed_roots
+        else:
+            roots = effective_roots(scope, self.allowed_roots)
+
+        for root in roots:
             if len(results) >= max_results:
                 break
             for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
@@ -175,7 +194,11 @@ class SecondBrainReader:
 
                     file_path = os.path.join(dirpath, filename)
 
-                    if not self._is_subpath(file_path, root):
+                    if scope is None:
+                        checked_path = file_path
+                    else:
+                        checked_path = os.path.realpath(file_path)
+                    if not self._is_subpath(checked_path, root):
                         continue
 
                     relative_path = os.path.relpath(file_path, self.vault_root).replace("\\", "/")
