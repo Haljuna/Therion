@@ -552,7 +552,7 @@ Teste simbólico:
 
 ### V1 — Assistente utilizável
 
-**Status: Fase ativa / Em preparação (decisões técnicas aprovadas)**
+**Status: Concluída (SKILL-002 permanece Em teste)**
 
 - interface de texto (PySide6);
 - execução em segundo plano;

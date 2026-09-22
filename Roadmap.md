@@ -58,7 +58,7 @@ A V0 é concluída quando o fluxo principal funcionar de ponta a ponta de forma 
 
 ## V1 — Assistente utilizável
 
-### Status: **Fase ativa — Em andamento**
+### Status: **Concluída**
 
 ### Objetivo
 
@@ -269,7 +269,7 @@ Não fazem parte da V0:
 
 ## Próxima meta
 
-**Concluir e validar as funcionalidades restantes da V1.**
+**Iniciar a V2 — Voz.**
 
 Primeiro marco técnico (V0 concluída):
 
@@ -277,10 +277,13 @@ Primeiro marco técnico (V0 concluída):
 Therion recebe um comando de texto e consegue abrir o Obsidian após confirmação, verificar o resultado e responder corretamente.
 ```
 
-Próxima etapa funcional:
-- **Auditar o bootstrap e o custo de contexto**, antes de alterar documentos obrigatórios ou ampliar fontes de conhecimento.
+Marco aceite da V1:
 
-Em seguida, a V1 deve definir explicitamente a fonte pessoal autorizada de tarefas e evoluir a SKILL-002 sem ampliar permissões automaticamente.
+Therion é utilizável regularmente para tarefas simples sem depender de ambiente de desenvolvimento aberto.
+
+A V1 está encerrada. SKILL-002 permanece Em teste e não bloqueia o fechamento.
+
+Pendências pós-V1, como fonte de tarefas, evolução da SKILL-002 e busca natural, seguem pela trilha pós-V1 e não alteram o escopo da V2.
 
 ### Evolução de Skills e capacidades — ordem aprovada
 

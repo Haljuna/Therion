@@ -13,7 +13,7 @@ Detalhes técnicos ficam em [[Arquitetura]].
 
 ## Status geral
 
-**Fase atual:** V1 — Em andamento
+**Fase atual:** V1 — Concluída (fase pós-V1)
 
 O conceito do Therion teve seu ciclo básico implementado e validado com sucesso no Windows através do teste simbólico de abertura do Obsidian de ponta a ponta (V0 concluída).
 
@@ -504,14 +504,13 @@ Todas as etapas previstas da V0 foram concluídas.
 
 ### Próxima meta principal
 
-**Concluir e validar as funcionalidades restantes da V1.**
+**Iniciar a V2 — Voz.**
 
 Próxima etapa funcional principal:
-- **Sistema inicial de Skills da V1**, respeitando a governança do Segundo Cérebro.
+- **V2 — Voz.**
 
-Funcionalidades da V1 ainda não implementadas (conforme Roadmap):
-
-- sistema inicial de Skills.
+Funcionalidade da V1 encerrada como pendência controlada:
+- SKILL-002 — Planejar meu dia: integrada, estado Em teste e não bloqueia o fechamento.
 
 Ainda NÃO implementados:
 
@@ -574,7 +573,7 @@ Decisões técnicas principais da V1 aprovadas: Interface (PySide6), Processo pe
 
 Próxima etapa principal:
 
-**Implementar e validar a V1.**
+**V1 encerrada. Próxima etapa principal: V2 — Voz.**
 
 Marco da V1 alcançado: fluxo de alvo desconhecido implementado e validado com 212 testes automatizados (212/212 passando). SKILL-001 aplicada e avaliada positivamente em seu primeiro uso prático formal; permanece em estado Em teste.
 
@@ -604,7 +603,7 @@ Marco de governança alcançado: Camada Zero implementada e validada (5.1-B e 5.
 
 Próxima etapa principal:
 
-**Sistema inicial de Skills da V1**, respeitando a governança do Segundo Cérebro.
+**V2 — Voz**, mantendo SKILL-002 em Em teste e a trilha pós-V1 condicionada a decisão própria.
 
 ### Frentes fechadas nesta rodada
 
