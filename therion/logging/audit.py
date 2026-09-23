@@ -5,7 +5,7 @@ import os
 import re
 import sys
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, cast
 
 
 class AuditLogger:
@@ -88,6 +88,12 @@ class AuditLogger:
             )
         return sanitized_queries
 
+    def _sanitize_roots(self, roots: Optional[List[str]]) -> Optional[List[str]]:
+        """Preserva None e a ordem das roots sem modificar a lista original."""
+        if roots is None:
+            return None
+        return [cast(str, self.sanitize(root)) for root in roots]
+
     def log_task(self, task_context: Any) -> bool:
         """Grava uma entrada de auditoria estruturada referente a uma tarefa concluída ou encerrada."""
         if not task_context:
@@ -119,6 +125,18 @@ class AuditLogger:
                 "task_status": getattr(task_context, "task_status", "desconhecido"),
                 "context_queries": self.sanitize_context_queries(
                     getattr(task_context, "context_queries", [])
+                ),
+                "declared_roots": self._sanitize_roots(
+                    getattr(task_context, "declared_roots", None)
+                ),
+                "accepted_roots": self._sanitize_roots(
+                    getattr(task_context, "accepted_roots", None)
+                ),
+                "effective_roots": self._sanitize_roots(
+                    getattr(task_context, "effective_roots", None)
+                ),
+                "used_roots": self._sanitize_roots(
+                    getattr(task_context, "used_roots", None)
                 ),
             }
 

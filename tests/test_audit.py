@@ -333,6 +333,85 @@ class TestAuditLogger(unittest.TestCase):
         self.assertNotIn("C:\\Users", record["target"])
         self.assertNotIn("Minha Pasta", record["target"])
 
+    def test_26_read_scope_roots_without_declaration_are_null(self) -> None:
+        """As quatro chaves existem e mantêm None como JSON null."""
+        self.assertTrue(self.logger.log_task(TaskContext()))
+        record = self._read_logged_records()[0]
+        for field in (
+            "declared_roots",
+            "accepted_roots",
+            "effective_roots",
+            "used_roots",
+        ):
+            self.assertIn(field, record)
+            self.assertIsNone(record[field])
+
+    def test_27_empty_and_invalid_read_scope_roots(self) -> None:
+        """Scope vazio e scope inv�lido preservam a distin��o []/null."""
+        self.assertTrue(
+            self.logger.log_task(
+                TaskContext(
+                    declared_roots=[], accepted_roots=[], effective_roots=[], used_roots=[]
+                )
+            )
+        )
+        self.assertTrue(self.logger.log_task(TaskContext(used_roots=[])))
+        empty, invalid = self._read_logged_records()
+        for field in (
+            "declared_roots",
+            "accepted_roots",
+            "effective_roots",
+            "used_roots",
+        ):
+            self.assertEqual(empty[field], [])
+        for field in ("declared_roots", "accepted_roots", "effective_roots"):
+            self.assertIsNone(invalid[field])
+        self.assertEqual(invalid["used_roots"], [])
+
+    def test_28_read_scope_roots_keep_order_and_original_lists(self) -> None:
+        """Roots relativas preservam grafia e ordem; o log n�o altera TaskContext."""
+        declared = ["10 - Projetos/Therion", "90 - Sistema da IA"]
+        accepted = ["90 - sistema da ia", "10 - projetos/therion"]
+        task = TaskContext(
+            declared_roots=declared,
+            accepted_roots=accepted,
+            effective_roots=list(accepted),
+            used_roots=list(reversed(accepted)),
+        )
+        self.assertTrue(self.logger.log_task(task))
+        record = self._read_logged_records()[0]
+        self.assertEqual(record["declared_roots"], declared)
+        self.assertEqual(record["accepted_roots"], accepted)
+        self.assertEqual(record["effective_roots"], accepted)
+        self.assertEqual(record["used_roots"], list(reversed(accepted)))
+        self.assertEqual(task.declared_roots, declared)
+        self.assertEqual(task.accepted_roots, accepted)
+        self.assertEqual(task.effective_roots, accepted)
+        self.assertEqual(task.used_roots, list(reversed(accepted)))
+
+    def test_29_read_scope_roots_redact_absolute_paths_and_secrets(self) -> None:
+        """Sanitiza cada item sem expor path absoluto nem segredo inesperado."""
+        absolute = "C:\\Users\\Nome\\Minha Pasta\\a.md"
+        unc = "\\\\servidor\\share\\nota.md"
+        task = TaskContext(
+            declared_roots=["10 - Projetos/Therion", absolute, "token=valor123"],
+            accepted_roots=[unc],
+            effective_roots=["10 - projetos/therion"],
+            used_roots=[absolute],
+        )
+        self.assertTrue(self.logger.log_task(task))
+        record = self._read_logged_records()[0]
+        marker = "[CAMINHO ABSOLUTO REDIGIDO]"
+        self.assertEqual(
+            record["declared_roots"],
+            ["10 - Projetos/Therion", marker, "token: [REDACTED]"],
+        )
+        self.assertEqual(record["accepted_roots"], [marker])
+        self.assertEqual(record["effective_roots"], ["10 - projetos/therion"])
+        self.assertEqual(record["used_roots"], [marker])
+        self.assertEqual(task.declared_roots[1], absolute)
+        self.assertEqual(task.accepted_roots[0], unc)
+
 
 if __name__ == "__main__":
     unittest.main()
