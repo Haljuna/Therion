@@ -2,8 +2,8 @@
 
 from pathlib import Path
 
-from therion.context.read_scope import ReadScope
-from therion.context.second_brain import SecondBrainReader
+from therion.context.read_scope import ReadScope, effective_roots
+from therion.context.second_brain import SearchTrace, SecondBrainReader
 
 
 def _make_reader(tmp_path: Path) -> tuple[SecondBrainReader, Path, Path]:
@@ -58,7 +58,27 @@ def test_intersection_restricts_to_scope_root(tmp_path: Path) -> None:
     out_of_scope = reader.read_note(str(allowed / "nota.md"), scope=scoped)
 
     assert in_scope.success is True
+    assert in_scope.matched_root == effective_roots(scoped, reader.allowed_roots)[0]
     assert out_of_scope.success is False
+    assert out_of_scope.matched_root is None
+
+
+def test_overlapping_roots_report_first_match(tmp_path: Path) -> None:
+    reader, allowed, _protected = _make_reader(tmp_path)
+    docs = allowed / "docs"
+    docs.mkdir()
+    note = docs / "inside.md"
+    note.write_text("conteúdo", encoding="utf-8")
+    reader.allowed_roots = [str(allowed), str(docs)]
+
+    parent_first = reader.read_note(str(note))
+    reader.allowed_roots = [str(docs), str(allowed)]
+    child_first = reader.read_note(str(note))
+
+    assert parent_first.success is True
+    assert parent_first.matched_root == str(allowed)
+    assert child_first.success is True
+    assert child_first.matched_root == str(docs)
 
 
 def test_root_outside_allowed_does_not_amplify(tmp_path: Path) -> None:
@@ -69,7 +89,19 @@ def test_root_outside_allowed_does_not_amplify(tmp_path: Path) -> None:
     search = reader.search_notes("termo_privado", scope=outside_root)
 
     assert read.success is False
+    assert read.matched_root is None
     assert search == []
+
+
+def test_search_trace_records_only_started_roots(tmp_path: Path) -> None:
+    reader, allowed, protected = _make_reader(tmp_path)
+    reader.allowed_roots = [str(allowed), str(protected)]
+    trace = SearchTrace()
+
+    results = reader.search_notes("termo_", trace=trace)
+
+    assert len(results) == 2
+    assert trace.used_roots == [str(allowed), str(protected)]
 
 
 def test_allowed_roots_not_mutated_by_scope(tmp_path: Path) -> None:

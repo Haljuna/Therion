@@ -1,7 +1,7 @@
 """Camada de acesso e leitura seletiva do Segundo Cérebro para a V0."""
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import List, Optional
 
 from therion.context.read_scope import ReadScope, effective_roots
@@ -16,6 +16,7 @@ class ReadResult:
     canonical_path: Optional[str] = None
     content: Optional[str] = None
     error: Optional[str] = None
+    matched_root: Optional[str] = None
 
 
 @dataclass
@@ -24,6 +25,13 @@ class SearchResult:
 
     path: str
     snippet: str
+
+
+@dataclass
+class SearchTrace:
+    """Registro passivo das raízes cuja varredura foi iniciada nesta busca."""
+
+    used_roots: List[str] = field(default_factory=list)
 
 
 class SecondBrainReader:
@@ -62,7 +70,14 @@ class SecondBrainReader:
     def resolve_and_validate(
         self, requested_path: str, scope: Optional[ReadScope] = None
     ) -> str:
-        """Normaliza e valida o caminho, aplicando as regras de contenção e tipo."""
+        """Mantém a API de resolução e validação que retorna apenas o caminho."""
+        candidate, _matched_root = self._resolve_and_match_root(requested_path, scope)
+        return candidate
+
+    def _resolve_and_match_root(
+        self, requested_path: str, scope: Optional[ReadScope] = None
+    ) -> tuple[str, str]:
+        """Valida o caminho e identifica a primeira raiz efetiva que o autoriza."""
         clean_path = requested_path.strip()
 
         # 1. Validação estrita de extensão permitida (somente .md)
@@ -99,21 +114,25 @@ class SecondBrainReader:
             roots = effective_roots(scope, self.allowed_roots)
             validated_path = os.path.realpath(candidate)
 
-        if not any(
-            self._is_subpath(validated_path, root) for root in roots
-        ):
+        matched_root = next(
+            (root for root in roots if self._is_subpath(validated_path, root)),
+            None,
+        )
+        if matched_root is None:
             raise PermissionError(
                 f"Acesso negado: o caminho '{clean_path}' está fora das raízes autorizadas do Segundo Cérebro."
             )
 
-        return candidate
+        return candidate, matched_root
 
     def read_note(
         self, requested_path: str, scope: Optional[ReadScope] = None
     ) -> ReadResult:
         """Lê o conteúdo de uma nota Markdown dentro do escopo autorizado."""
         try:
-            canonical_path = self.resolve_and_validate(requested_path, scope)
+            canonical_path, matched_root = self._resolve_and_match_root(
+                requested_path, scope
+            )
         except (ValueError, PermissionError) as err:
             return ReadResult(
                 success=False,
@@ -147,6 +166,7 @@ class SecondBrainReader:
                 path=requested_path,
                 canonical_path=canonical_path,
                 content=content,
+                matched_root=matched_root,
             )
         except Exception as err:
             return ReadResult(
@@ -162,6 +182,7 @@ class SecondBrainReader:
         max_results: int = 5,
         snippet_length: int = 200,
         scope: Optional[ReadScope] = None,
+        trace: Optional[SearchTrace] = None,
     ) -> List[SearchResult]:
         """Busca termo em nomes e conteúdo de arquivos .md dentro das raízes autorizadas.
 
@@ -183,6 +204,8 @@ class SecondBrainReader:
         for root in roots:
             if len(results) >= max_results:
                 break
+            if trace is not None:
+                trace.used_roots.append(root)
             for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
                 if len(results) >= max_results:
                     break

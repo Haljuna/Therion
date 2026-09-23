@@ -4,7 +4,7 @@ import os
 import tempfile
 import unittest
 
-from therion.context.second_brain import ReadResult, SecondBrainReader
+from therion.context.second_brain import ReadResult, SearchTrace, SecondBrainReader
 from therion.core.orchestrator import Orchestrator
 
 
@@ -60,6 +60,7 @@ class TestSecondBrainReader(unittest.TestCase):
         self.assertTrue(res.success)
         self.assertEqual(res.content, "# Estado Atual Therion")
         self.assertIsNone(res.error)
+        self.assertEqual(res.matched_root, self.therion_dir)
 
     def test_2_read_success_in_sistema_ia_dir(self) -> None:
         """2. Leitura bem-sucedida de um .md dentro de 90 - Sistema da IA."""
@@ -73,6 +74,7 @@ class TestSecondBrainReader(unittest.TestCase):
         self.assertFalse(res_pessoal.success)
         self.assertIn("fora das raízes autorizadas", res_pessoal.error)
         self.assertIsNone(res_pessoal.content)
+        self.assertIsNone(res_pessoal.matched_root)
 
         res_outro = self.reader.read_note("10 - Projetos/OutroProjeto/Plano.md")
         self.assertFalse(res_outro.success)
@@ -100,6 +102,18 @@ class TestSecondBrainReader(unittest.TestCase):
         res = self.reader.read_note("10 - Projetos/Therion/Inexistente.md")
         self.assertFalse(res.success)
         self.assertIn("Arquivo não encontrado", res.error)
+        self.assertIsNone(res.matched_root)
+
+    def test_read_error_has_no_matched_root(self) -> None:
+        """Uma falha ao abrir a nota não registra uma root como usada."""
+        unreadable = os.path.join(self.therion_dir, "Invalido.md")
+        with open(unreadable, "wb") as f:
+            f.write(b"\x80\x81")
+
+        res = self.reader.read_note(unreadable)
+
+        self.assertFalse(res.success)
+        self.assertIsNone(res.matched_root)
 
     def test_7_read_only_preserves_files(self) -> None:
         """7. Nenhuma escrita em disco: verifica integridade dos arquivos lidos."""
@@ -316,6 +330,32 @@ class TestSearchNotes(unittest.TestCase):
                 f.write(f"# Extra\nConteudo Aetherion {i}")
         results = self.reader.search_notes("Aetherion", max_results=5)
         self.assertLessEqual(len(results), 5)
+
+    def test_trace_records_all_roots_when_search_has_no_results(self) -> None:
+        """Busca sem resultado registra todas as varreduras iniciadas."""
+        trace = SearchTrace()
+
+        results = self.reader.search_notes("InexistenteXYZ", trace=trace)
+
+        self.assertEqual(results, [])
+        self.assertEqual(trace.used_roots, self.reader.allowed_roots)
+
+    def test_trace_stops_before_root_blocked_by_max_results(self) -> None:
+        """Limite atingido na primeira root não registra a segunda."""
+        trace = SearchTrace()
+
+        results = self.reader.search_notes("Aetherion", max_results=1, trace=trace)
+
+        self.assertEqual(len(results), 1)
+        self.assertEqual(trace.used_roots, [self.reader.allowed_roots[0]])
+
+    def test_search_without_trace_keeps_list_return(self) -> None:
+        """Chamada legada continua retornando a lista de SearchResult."""
+        results = self.reader.search_notes("Aetherion")
+
+        self.assertIsInstance(results, list)
+        self.assertTrue(results)
+        self.assertEqual(results[0].__class__.__name__, "SearchResult")
 
     def test_search_no_results(self) -> None:
         """Nenhum resultado retorna lista vazia."""
