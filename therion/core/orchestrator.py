@@ -10,8 +10,8 @@ from therion.actions.executor import ActionExecutor
 from therion.actions.verifier import ActionVerifier
 from therion.calendar.adapter import CalendarAdapter, CalendarError
 from therion.config import AliasManager
-from therion.context.read_scope import ReadScope
-from therion.context.second_brain import ReadResult, SecondBrainReader
+from therion.context.read_scope import ReadScope, effective_roots
+from therion.context.second_brain import ReadResult, SearchTrace, SecondBrainReader
 from therion.core.ai_core import AICore
 from therion.core.intent import Intent, IntentRecognizer
 from therion.core.planner import Plan, Planner
@@ -250,6 +250,21 @@ class Orchestrator:
             error=result.error,
         )
         return result
+
+    def _audit_relative_root(self, root: str) -> Optional[str]:
+        """Converte uma root absoluta validada para forma relativa ao vault."""
+        if not os.path.isabs(root):
+            return None
+        vault = os.path.normcase(
+            os.path.abspath(os.path.realpath(self.second_brain.vault_root))
+        )
+        canonical = os.path.normcase(os.path.abspath(os.path.realpath(root)))
+        try:
+            if os.path.commonpath([vault, canonical]) != vault:
+                return None
+        except ValueError:
+            return None
+        return os.path.relpath(canonical, vault).replace("\\", "/")
 
     def _resolve_scope_roots(self, roots: tuple[str, ...]) -> _ScopeRoots:
         if not roots:
@@ -1099,6 +1114,19 @@ class Orchestrator:
                 task_id=self.memory.current_task.task_id,
                 roots=scope_roots.accepted,
             )
+        if scope_syntax.malformed or (scope_roots is not None and scope_roots.invalid):
+            self.memory.record_read_scope(None, None, None, [])
+        elif scope is not None:
+            declared = [os.path.normpath(root).replace("\\", "/") for root in scope_syntax.roots]
+            accepted = [self._audit_relative_root(root) for root in scope_roots.accepted]
+            effective = [
+                self._audit_relative_root(root)
+                for root in effective_roots(scope, self.second_brain.allowed_roots)
+            ]
+            if any(root is None for root in accepted + effective):
+                self.memory.record_read_scope(None, None, None, [])
+            else:
+                self.memory.record_read_scope(declared, accepted, effective, [])
         if scope_syntax.malformed:
             self.memory.record_error(
                 "Declaração de raízes inválida: "
@@ -1267,6 +1295,10 @@ class Orchestrator:
         # Tratamento especial para consulta ao Segundo Cérebro (somente leitura)
         if intent.action == "consultar segundo cérebro":
             result = self.read_context(intent.target, scope)
+            if result.success and result.matched_root is not None:
+                used_root = self._audit_relative_root(result.matched_root)
+                if used_root is not None:
+                    self.memory.add_used_root(used_root)
             self._complete_task()
             if result.success:
                 orchestration_result = OrchestrationResult(
@@ -1285,7 +1317,12 @@ class Orchestrator:
 
         # Tratamento especial para busca no Segundo Cérebro (somente leitura)
         if intent.action == "buscar segundo cérebro":
-            results = self.second_brain.search_notes(intent.target, scope=scope)
+            trace = SearchTrace()
+            results = self.second_brain.search_notes(intent.target, scope=scope, trace=trace)
+            for root in trace.used_roots:
+                used_root = self._audit_relative_root(root)
+                if used_root is not None:
+                    self.memory.add_used_root(used_root)
             self._complete_task()
             if not results:
                 orchestration_result = OrchestrationResult(
