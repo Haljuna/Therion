@@ -134,6 +134,106 @@ class TestWorkingMemory(unittest.TestCase):
         self.assertEqual(orchestrator.memory.history[1].command, "Therion, comando invalido")
 
 
+class TestReadScopeMemory(unittest.TestCase):
+    """Campos de auditoria do ReadScope permanecem isolados por tarefa."""
+
+    def setUp(self) -> None:
+        self.memory = WorkingMemory()
+
+    def test_roots_default_to_none_without_declaration(self) -> None:
+        task = self.memory.start_task("sem declaração")
+
+        self.assertIsNone(task.declared_roots)
+        self.assertIsNone(task.accepted_roots)
+        self.assertIsNone(task.effective_roots)
+        self.assertIsNone(task.used_roots)
+
+    def test_valid_empty_scope_keeps_four_empty_lists(self) -> None:
+        task = self.memory.start_task("scope vazio")
+        self.memory.record_read_scope([], [], [], [])
+
+        self.assertEqual(task.declared_roots, [])
+        self.assertEqual(task.accepted_roots, [])
+        self.assertEqual(task.effective_roots, [])
+        self.assertEqual(task.used_roots, [])
+
+    def test_malformed_scope_keeps_three_none_and_used_empty(self) -> None:
+        task = self.memory.start_task("scope malformado")
+        self.memory.record_read_scope(None, None, None, [])
+
+        self.assertIsNone(task.declared_roots)
+        self.assertIsNone(task.accepted_roots)
+        self.assertIsNone(task.effective_roots)
+        self.assertEqual(task.used_roots, [])
+
+    def test_record_read_scope_replaces_with_defensive_copies(self) -> None:
+        task = self.memory.start_task("scope declarado")
+        declared = ["10 - Projetos/Therion"]
+        accepted = ["10 - Projetos/Therion"]
+        effective = ["10 - Projetos/Therion"]
+        used = ["10 - Projetos/Therion"]
+        self.memory.record_read_scope(declared, accepted, effective, used)
+        for roots in (declared, accepted, effective, used):
+            roots.append("90 - Sistema da IA")
+
+        for roots in (
+            task.declared_roots,
+            task.accepted_roots,
+            task.effective_roots,
+            task.used_roots,
+        ):
+            self.assertEqual(roots, ["10 - Projetos/Therion"])
+
+        self.memory.record_read_scope([], [], [], [])
+        self.assertEqual(task.declared_roots, [])
+        self.assertEqual(task.accepted_roots, [])
+        self.assertEqual(task.effective_roots, [])
+        self.assertEqual(task.used_roots, [])
+
+    def test_add_used_root_deduplicates_in_first_seen_order(self) -> None:
+        task = self.memory.start_task("scope declarado")
+        self.memory.record_read_scope([], [], [], [])
+
+        self.assertTrue(self.memory.add_used_root("10 - Projetos/Therion"))
+        self.assertTrue(self.memory.add_used_root("90 - Sistema da IA"))
+        self.assertFalse(self.memory.add_used_root("10 - Projetos/Therion"))
+        self.assertEqual(
+            task.used_roots,
+            ["10 - Projetos/Therion", "90 - Sistema da IA"],
+        )
+
+    def test_add_used_root_does_not_create_list_from_none(self) -> None:
+        task = self.memory.start_task("sem declaração")
+
+        self.assertFalse(self.memory.add_used_root("10 - Projetos/Therion"))
+        self.assertIsNone(task.used_roots)
+
+    def test_new_task_does_not_inherit_root_audit(self) -> None:
+        previous = self.memory.start_task("primeira")
+        self.memory.record_read_scope(["10 - Projetos/Therion"], [], [], [])
+        self.memory.complete_task()
+        current = self.memory.start_task("segunda")
+
+        self.assertIsNone(current.declared_roots)
+        self.assertIsNone(current.accepted_roots)
+        self.assertIsNone(current.effective_roots)
+        self.assertIsNone(current.used_roots)
+        self.assertEqual(previous.declared_roots, ["10 - Projetos/Therion"])
+
+    def test_to_dict_does_not_expose_root_audit_fields(self) -> None:
+        task = self.memory.start_task("scope declarado")
+        self.memory.record_read_scope([], [], [], [])
+
+        record = task.to_dict()
+        for field in (
+            "declared_roots",
+            "accepted_roots",
+            "effective_roots",
+            "used_roots",
+        ):
+            self.assertNotIn(field, record)
+
+
 class TestWorkingMemorySession(unittest.TestCase):
     """Testes da memória de sessão (V1): turnos e contexto operacional."""
 

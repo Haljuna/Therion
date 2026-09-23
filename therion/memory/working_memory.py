@@ -22,6 +22,10 @@ class TaskContext:
     error: Optional[str] = None
     task_status: str = "pendente"  # "iniciada", "aguardando_confirmacao", "concluido", "falhou", "cancelado"
     context_queries: List[Dict[str, Any]] = field(default_factory=list)
+    declared_roots: Optional[List[str]] = None
+    accepted_roots: Optional[List[str]] = None
+    effective_roots: Optional[List[str]] = None
+    used_roots: Optional[List[str]] = None
 
     def to_dict(self) -> Dict[str, Any]:
         """Retorna representação em dicionário em memória para inspeção e depuração."""
@@ -132,6 +136,33 @@ class WorkingMemory:
                     "error": error,
                 }
             )
+
+    def record_read_scope(
+        self,
+        declared_roots: Optional[List[str]],
+        accepted_roots: Optional[List[str]],
+        effective_roots: Optional[List[str]],
+        used_roots: Optional[List[str]],
+    ) -> None:
+        """Substitui os dados de auditoria do escopo, sem conceder acesso."""
+        if self.current_task:
+            declared = None if declared_roots is None else list(declared_roots)
+            accepted = None if accepted_roots is None else list(accepted_roots)
+            effective = None if effective_roots is None else list(effective_roots)
+            used = None if used_roots is None else list(used_roots)
+            self.current_task.declared_roots = declared
+            self.current_task.accepted_roots = accepted
+            self.current_task.effective_roots = effective
+            self.current_task.used_roots = used
+
+    def add_used_root(self, root: str) -> bool:
+        """Registra uma root usada uma única vez, preservando a ordem."""
+        if self.current_task is None or self.current_task.used_roots is None:
+            return False
+        if root in self.current_task.used_roots:
+            return False
+        self.current_task.used_roots.append(root)
+        return True
 
     def record_error(self, error: str) -> None:
         """Registra um erro na tarefa atual e marca seu status como falha."""
