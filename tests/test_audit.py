@@ -173,6 +173,166 @@ class TestAuditLogger(unittest.TestCase):
         """14. Testes usam diretório temporário isolado."""
         self.assertTrue(self.log_dir.startswith(tempfile.gettempdir()))
 
+    def test_15_absolute_path_backslash_redacted(self) -> None:
+        """15. Caminho absoluto Windows com barra invertida é redigido em command."""
+        task = TaskContext(
+            command="Therion, leia no Segundo Cérebro C:\\Users\\fulano\\nota.md"
+        )
+        self.logger.log_task(task)
+        record = self._read_logged_records()[0]
+        self.assertNotIn("C:\\Users", record["command"])
+        self.assertIn("[CAMINHO ABSOLUTO REDIGIDO]", record["command"])
+
+    def test_16_absolute_path_forward_slash_redacted(self) -> None:
+        """16. Caminho absoluto Windows com barra normal é redigido."""
+        task = TaskContext(
+            command="Therion, leia C:/Users/fulano/nota.md",
+            error="Falha ao ler C:/Users/fulano/outro.md",
+        )
+        self.logger.log_task(task)
+        record = self._read_logged_records()[0]
+        self.assertNotIn("C:/Users", record["command"])
+        self.assertIn("[CAMINHO ABSOLUTO REDIGIDO]", record["command"])
+        self.assertNotIn("C:/Users", record["error"])
+        self.assertIn("[CAMINHO ABSOLUTO REDIGIDO]", record["error"])
+
+    def test_17_unc_path_redacted(self) -> None:
+        """17. Caminho UNC (\\\\servidor\\...) é redigido."""
+        task = TaskContext(
+            command="Therion, leia \\\\servidor\\compartilhada\\nota.md"
+        )
+        self.logger.log_task(task)
+        record = self._read_logged_records()[0]
+        self.assertNotIn("servidor", record["command"])
+        self.assertIn("[CAMINHO ABSOLUTO REDIGIDO]", record["command"])
+
+    def test_18_path_redacted_in_all_four_fields(self) -> None:
+        """18. Redação de path cobre command, error, target e context_queries.path."""
+        task = TaskContext(
+            command="leia D:\\Docs\\a.md",
+            error="negado: E:\\Privado\\b.md",
+            target="F:/Pessoal/c.md",
+            context_queries=[
+                {
+                    "path": "\\\\srv\\dados\\d.md",
+                    "success": False,
+                    "error": "Acesso negado: G:\\Restrito\\e.md",
+                }
+            ],
+        )
+        self.logger.log_task(task)
+        record = self._read_logged_records()[0]
+        self.assertNotIn("D:\\Docs", record["command"])
+        self.assertNotIn("E:\\Privado", record["error"])
+        self.assertNotIn("F:/Pessoal", record["target"])
+        self.assertNotIn("srv", record["context_queries"][0]["path"])
+        self.assertNotIn("G:\\Restrito", record["context_queries"][0]["error"])
+        for field in ("command", "error", "target"):
+            self.assertIn("[CAMINHO ABSOLUTO REDIGIDO]", record[field])
+        self.assertIn(
+            "[CAMINHO ABSOLUTO REDIGIDO]", record["context_queries"][0]["path"]
+        )
+
+    def test_19_relative_paths_preserved(self) -> None:
+        """19. Paths relativos permanecem intactos em command, target e queries."""
+        rel = "10 - Projetos/Therion/Estado Atual.md"
+        task = TaskContext(
+            command=f"Therion, leia no Segundo Cérebro {rel}",
+            target=rel,
+            context_queries=[{"path": rel, "success": True, "error": None}],
+        )
+        self.logger.log_task(task)
+        record = self._read_logged_records()[0]
+        self.assertEqual(record["command"], f"Therion, leia no Segundo Cérebro {rel}")
+        self.assertEqual(record["target"], rel)
+        self.assertEqual(record["context_queries"][0]["path"], rel)
+
+    def test_20_secrets_still_redacted_with_paths(self) -> None:
+        """20. Regressão: segredos continuam redigidos mesmo com paths no mesmo campo."""
+        task = TaskContext(
+            command="abrir C:\\Users\\a\\b.md com token: secret_token_12345",
+            error="password = super_secret_pass em C:\\Temp\\x.md",
+        )
+        self.logger.log_task(task)
+        with open(self.logger.log_path, "r", encoding="utf-8") as f:
+            raw_log = f.read()
+        self.assertNotIn("secret_token_12345", raw_log)
+        self.assertNotIn("super_secret_pass", raw_log)
+        self.assertIn("[REDACTED]", raw_log)
+        self.assertIn("[CAMINHO ABSOLUTO REDIGIDO]", raw_log)
+
+    def test_21_quoted_paths_with_spaces_preserve_sentence(self) -> None:
+        """Caminhos citados são redigidos sem apagar o restante da frase."""
+        task = TaskContext(
+            command='Leia "C:\\Minha Pasta\\nota.md" durante a revisão',
+            error="Falha em 'D:/Outra Pasta/arquivo.md' durante leitura",
+        )
+        self.logger.log_task(task)
+        record = self._read_logged_records()[0]
+        self.assertEqual(
+            record["command"],
+            'Leia "[CAMINHO ABSOLUTO REDIGIDO]" durante a revisão',
+        )
+        self.assertEqual(
+            record["error"],
+            "Falha em '[CAMINHO ABSOLUTO REDIGIDO]' durante leitura",
+        )
+
+    def test_22_unquoted_paths_with_spaces_over_redact(self) -> None:
+        """O limite ambíguo de path sem aspas é o fim do campo/linha."""
+        task = TaskContext(
+            command="Leia C:\\Minha Pasta\\nota.md durante a revisão",
+            error="Falha em \\\\servidor\\Minha Pasta\\nota.md durante leitura\nPróxima linha preservada",
+        )
+        self.logger.log_task(task)
+        record = self._read_logged_records()[0]
+        marker = "[CAMINHO ABSOLUTO REDIGIDO]"
+        self.assertEqual(record["command"], f"Leia {marker}")
+        self.assertEqual(record["error"], f"Falha em {marker}\nPróxima linha preservada")
+
+    def test_23_target_and_query_paths_with_mixed_text(self) -> None:
+        """Valor absoluto inteiro e path embutido usam o mesmo marcador."""
+        task = TaskContext(
+            target="C:\\Minha Pasta\\nota.md",
+            context_queries=[
+                {
+                    "path": "Arquivo em D:/Outra Pasta/nota.md durante leitura",
+                    "success": False,
+                }
+            ],
+        )
+        self.logger.log_task(task)
+        record = self._read_logged_records()[0]
+        marker = "[CAMINHO ABSOLUTO REDIGIDO]"
+        self.assertEqual(record["target"], marker)
+        self.assertEqual(record["context_queries"][0]["path"], f"Arquivo em {marker}")
+
+    def test_24_quoted_path_does_not_cross_line_and_secret_stays_redacted(self) -> None:
+        """Aspas não atravessam linha; segredos continuam mascarados."""
+        task = TaskContext(
+            command='Leia "C:\\Pasta com Espaços\\nota.md" e token: valor123',
+            error='Falha em "C:\\Pasta com Espaços\\nota.md\nlinha seguinte',
+        )
+        self.logger.log_task(task)
+        record = self._read_logged_records()[0]
+        self.assertEqual(
+            record["command"],
+            'Leia "[CAMINHO ABSOLUTO REDIGIDO]" e token: [REDACTED]',
+        )
+        self.assertEqual(
+            record["error"],
+            'Falha em "[CAMINHO ABSOLUTO REDIGIDO]\nlinha seguinte',
+        )
+
+    def test_25_target_with_mixed_text_redacts_absolute_path(self) -> None:
+        """Target misto preserva o prefixo sem expor o caminho absoluto."""
+        task = TaskContext(target="erro em C:\\Users\\Nome\\Minha Pasta\\a.md")
+        self.logger.log_task(task)
+        record = self._read_logged_records()[0]
+        self.assertEqual(record["target"], "erro em [CAMINHO ABSOLUTO REDIGIDO]")
+        self.assertNotIn("C:\\Users", record["target"])
+        self.assertNotIn("Minha Pasta", record["target"])
+
 
 if __name__ == "__main__":
     unittest.main()

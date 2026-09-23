@@ -34,6 +34,16 @@ class AuditLogger:
             "[REDACTED]",
         ),
     ]
+    _PATH_REDACTION = "[CAMINHO ABSOLUTO REDIGIDO]"
+    # Uma raiz Windows absoluta começa por letra de drive + separador ou por
+    # servidor UNC + separador. Caminhos relativos não casam esses prefixos.
+    _PATH_PREFIX = r"(?:[A-Za-z]:[\\/]|\\\\[^\\/\s]+[\\/])"
+    _QUOTED_PATH = re.compile(
+        r"(['\"])" + _PATH_PREFIX + r"[^\r\n]*?\1"
+    )
+    _UNQUOTED_PATH = re.compile(
+        r"(?<![A-Za-z0-9])" + _PATH_PREFIX + r"[^\r\n]*"
+    )
 
     def __init__(
         self, log_dir: Optional[str] = None, log_file: str = "audit.jsonl"
@@ -43,13 +53,23 @@ class AuditLogger:
         self.log_path = os.path.join(self.log_dir, self.log_file)
 
     def sanitize(self, text: Optional[str]) -> Optional[str]:
-        """Mascara segredos conhecidos, senhas e tokens para evitar vazamento em logs."""
+        """Mascara segredos e caminhos absolutos Windows antes de serializar."""
         if text is None:
             return None
 
         sanitized = text
         for pattern, replacement in self._SENSITIVE_PATTERNS:
             sanitized = pattern.sub(replacement, sanitized)
+
+        # Entre aspas, a mesma aspa delimita o caminho e o restante da frase
+        # permanece. O padrão nunca cruza uma quebra de linha.
+        sanitized = self._QUOTED_PATH.sub(
+            lambda match: match.group(1) + self._PATH_REDACTION + match.group(1),
+            sanitized,
+        )
+        # Sem aspas, espaços tornam o fim do caminho ambíguo. Redigir até o
+        # fim da linha evita deixar fragmentos do caminho no audit log.
+        sanitized = self._UNQUOTED_PATH.sub(self._PATH_REDACTION, sanitized)
 
         return sanitized
 
@@ -61,7 +81,7 @@ class AuditLogger:
         for q in queries:
             sanitized_queries.append(
                 {
-                    "path": q.get("path"),
+                    "path": self.sanitize(q.get("path")),
                     "success": q.get("success"),
                     "error": self.sanitize(q.get("error")),
                 }
@@ -81,7 +101,7 @@ class AuditLogger:
                 "task_id": getattr(task_context, "task_id", "unknown"),
                 "command": self.sanitize(getattr(task_context, "command", "")),
                 "intent": getattr(task_context, "intent", None),
-                "target": getattr(task_context, "target", None),
+                "target": self.sanitize(getattr(task_context, "target", None)),
                 "plan": getattr(task_context, "plan_steps", []),
                 "confirmation_status": getattr(
                     task_context, "confirmation_status", "nao_requerida"
