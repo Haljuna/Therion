@@ -228,6 +228,7 @@ Aproximar o sistema da visão completa de IA pessoal.
 - proatividade controlada;
 - integração com dispositivos;
 - futuras automações residenciais.
+- portabilidade segura como ideia de longo prazo, a avaliar somente quando o Therion estiver estável e funcionalmente completo.
 
 ### Papel
 
