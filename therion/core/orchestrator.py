@@ -1,5 +1,6 @@
 """Módulo central de orquestração da V0 com integração à memória de trabalho."""
 
+import os
 import re
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
@@ -9,6 +10,7 @@ from therion.actions.executor import ActionExecutor
 from therion.actions.verifier import ActionVerifier
 from therion.calendar.adapter import CalendarAdapter, CalendarError
 from therion.config import AliasManager
+from therion.context.read_scope import ReadScope
 from therion.context.second_brain import ReadResult, SecondBrainReader
 from therion.core.ai_core import AICore
 from therion.core.intent import Intent, IntentRecognizer
@@ -145,6 +147,39 @@ class OrchestrationResult:
     message: str = ""
 
 
+@dataclass(frozen=True)
+class _ScopeSyntax:
+    present: bool
+    malformed: bool
+    reason: str
+    command: str
+    roots: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class _ScopeRoots:
+    accepted: tuple[str, ...]
+    rejected: tuple[tuple[str, str], ...]
+    invalid: tuple[tuple[str, str], ...]
+
+
+def _parse_scope_syntax(command: str) -> _ScopeSyntax:
+    stripped = command.strip()
+    if not stripped.startswith("raízes:"):
+        return _ScopeSyntax(False, False, "", command, ())
+    rest = stripped[len("raízes:"):]
+    if " :: " not in rest:
+        return _ScopeSyntax(True, True, "falta o separador ' :: '", command, ())
+    left, right = rest.split(" :: ", 1)
+    left = left.strip()
+    if not left:
+        return _ScopeSyntax(True, False, "", right.strip(), ())
+    roots = tuple(part.strip() for part in left.split(","))
+    if any(not part for part in roots):
+        return _ScopeSyntax(True, True, "root vazia na lista", command, ())
+    return _ScopeSyntax(True, False, "", right.strip(), roots)
+
+
 class Orchestrator:
     """Orquestrador do ciclo básico da V0 integrado à memória de trabalho da sessão."""
 
@@ -192,6 +227,7 @@ class Orchestrator:
         self._open_app_flow_active: bool = False
         self._pending_open_app_target: Optional[str] = None
         self._pending_open_app_result: Optional[Intent] = None
+        self._scope_note: str = ""
 
     def _complete_task(self) -> None:
         """Conclui a tarefa na memória de trabalho e audita o registro."""
@@ -203,15 +239,55 @@ class Orchestrator:
                 sys.stderr.write(f"[AVISO] Falha ao registrar log de auditoria: {err}\n")
             self.memory.complete_task()
 
-    def read_context(self, path: str) -> ReadResult:
+    def read_context(
+        self, path: str, scope: Optional[ReadScope] = None
+    ) -> ReadResult:
         """Lê seletivamente uma nota autorizada do Segundo Cérebro e registra na memória."""
-        result = self.second_brain.read_note(path)
+        result = self.second_brain.read_note(path, scope=scope)
         self.memory.record_context_query(
             path=path,
             success=result.success,
             error=result.error,
         )
         return result
+
+    def _resolve_scope_roots(self, roots: tuple[str, ...]) -> _ScopeRoots:
+        if not roots:
+            return _ScopeRoots((), (), ())
+        vault_root = self.second_brain.vault_root
+        vault_canon = os.path.normcase(os.path.abspath(os.path.realpath(vault_root)))
+        allowed_canon = [
+            os.path.normcase(os.path.abspath(os.path.realpath(root)))
+            for root in self.second_brain.allowed_roots
+        ]
+        accepted: list[str] = []
+        rejected: list[tuple[str, str]] = []
+        invalid: list[tuple[str, str]] = []
+        for root in roots:
+            if os.path.isabs(root):
+                invalid.append((root, "caminho absoluto"))
+                continue
+            if os.path.splitdrive(root)[0]:
+                invalid.append((root, "drive-relative"))
+                continue
+            segments = root.replace("/", "\\").split("\\")
+            if any(segment == ".." for segment in segments):
+                invalid.append((root, "segmento '..'"))
+                continue
+            joined = os.path.normpath(os.path.join(vault_root, root))
+            canon = os.path.normcase(os.path.abspath(os.path.realpath(joined)))
+            if canon != vault_canon and not canon.startswith(vault_canon + os.sep):
+                rejected.append((root, "fora do vault"))
+                continue
+            within_ceiling = any(
+                canon == allowed or canon.startswith(allowed + os.sep)
+                for allowed in allowed_canon
+            )
+            if not within_ceiling:
+                rejected.append((root, "fora do teto permitido"))
+                continue
+            accepted.append(canon)
+        return _ScopeRoots(tuple(accepted), tuple(rejected), tuple(invalid))
 
     def _reset_alias_flow(self) -> None:
         """Limpa o estado do fluxo de adicionar alias."""
@@ -341,12 +417,18 @@ class Orchestrator:
 
     def _finalize_session_result(self, result: OrchestrationResult) -> None:
         """Registra turno do Therion e atualiza contexto operacional na sessão."""
+        if self._scope_note:
+            if result.message:
+                result.message = f"{result.message}\n\n{self._scope_note}"
+            else:
+                result.message = self._scope_note
         self.memory.add_turn("therion", result.message)
         self.memory.last_result = result.message
         self.memory.last_status = result.status
         if result.intent is not None:
             self.memory.last_intent = result.intent.action
             self.memory.last_target = result.intent.target
+        self._scope_note = ""
 
     def _handle_replace_alias_flow(self, command: str) -> Optional[OrchestrationResult]:
         """Processa o fluxo conversacional de substituir alias.
@@ -998,9 +1080,54 @@ class Orchestrator:
 
     def process_command(self, command: str) -> OrchestrationResult:
         """Processa um comando textual registrando todas as etapas na memória de trabalho."""
+        self._scope_note = ""
         mode = "simulado" if self.simulate else "real"
+        scope_syntax = _parse_scope_syntax(command)
+        scope: Optional[ReadScope] = None
+        scope_roots: Optional[_ScopeRoots] = None
+        if scope_syntax.present and not scope_syntax.malformed:
+            scope_roots = self._resolve_scope_roots(scope_syntax.roots)
+            command = scope_syntax.command
+            if scope_roots.rejected and not scope_roots.invalid:
+                self._scope_note = "Raízes rejeitadas: " + "; ".join(
+                    f"{root} ({reason})" for root, reason in scope_roots.rejected
+                )
         self.memory.start_task(command=command, execution_mode=mode)
         self.memory.add_turn("user", command)
+        if scope_syntax.present and not scope_syntax.malformed:
+            scope = ReadScope(
+                task_id=self.memory.current_task.task_id,
+                roots=scope_roots.accepted,
+            )
+        if scope_syntax.malformed:
+            self.memory.record_error(
+                "Declaração de raízes inválida: "
+                f"{scope_syntax.reason}. "
+                "Formato esperado: raízes: <relativa-ao-vault>[, ...] :: <comando>"
+            )
+            self._complete_task()
+            result = OrchestrationResult(
+                status="invalid_scope",
+                message=(
+                    "Declaração de raízes inválida: "
+                    f"{scope_syntax.reason}. "
+                    "Formato esperado: raízes: <relativa-ao-vault>[, ...] :: <comando>"
+                ),
+            )
+            self._finalize_session_result(result)
+            return result
+        if scope_roots is not None and scope_roots.invalid:
+            details = "; ".join(
+                f"{root} ({reason})" for root, reason in scope_roots.invalid
+            )
+            self.memory.record_error(f"Declaração de raízes inválida: {details}")
+            self._complete_task()
+            result = OrchestrationResult(
+                status="invalid_scope",
+                message=f"Declaração de raízes inválida: {details}",
+            )
+            self._finalize_session_result(result)
+            return result
 
         # Primeiro verifica se está no fluxo conversacional de substituir alias
         replace_alias_flow_result = self._handle_replace_alias_flow(command)
@@ -1139,7 +1266,7 @@ class Orchestrator:
 
         # Tratamento especial para consulta ao Segundo Cérebro (somente leitura)
         if intent.action == "consultar segundo cérebro":
-            result = self.read_context(intent.target)
+            result = self.read_context(intent.target, scope)
             self._complete_task()
             if result.success:
                 orchestration_result = OrchestrationResult(
@@ -1158,7 +1285,7 @@ class Orchestrator:
 
         # Tratamento especial para busca no Segundo Cérebro (somente leitura)
         if intent.action == "buscar segundo cérebro":
-            results = self.second_brain.search_notes(intent.target)
+            results = self.second_brain.search_notes(intent.target, scope=scope)
             self._complete_task()
             if not results:
                 orchestration_result = OrchestrationResult(
