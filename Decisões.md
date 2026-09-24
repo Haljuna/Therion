@@ -713,6 +713,26 @@ Esta DEC NÃO autoriza:
 
 ---
 
+## DEC-034 — E1: planos conversacionais efêmeros
+
+**Status:** Aprovada
+
+A E1 define planos conversacionais gerados e recuperados de forma efêmera na sessão.
+
+- **Finalidade:** permitir geração e recuperação de planos conversacionais na sessão, sem efeito executável e sem memória persistente.
+- `plan_request` e `plan_reference` são rotas não executáveis: nunca geram plano executável nem passam por confirmação de ação.
+- A geração dirigida de plano é separada do chat.
+- ACK ocorre somente após a exibição do plano.
+- Registro e recuperação são efêmeros e verbatim: `plan_reference` devolve o texto integral exibido, sem nova geração.
+- Há no máximo 1 candidato pendente.
+- Limites por sessão: máximo de 5 planos, 6.000 caracteres por plano e 15.000 caracteres somados, contando o texto integral entregue.
+- Sem truncamento, descarte ou renumeração de planos.
+- O ACK retorna `registered(plan_id)` ou `displayed_not_registered(reason)`.
+- Rejeição por limite é terminal e limpa `current_plan_id`.
+- Registro não concede autoridade, permissão nem acesso.
+
+---
+
 ## Regra de manutenção
 
 Ao registrar uma nova decisão:
