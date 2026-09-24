@@ -62,6 +62,8 @@ _AI_FAILURE_DIAGNOSTICS: dict[str, tuple[str, str]] = {
     ),
 }
 
+_PENDING_CLARIFICATION_MAX = 500
+
 
 def _parse_duration_minutes(text: str) -> Optional[int]:
     """Extrai duração em minutos de um texto V1 (formatos inequívocos)."""
@@ -251,6 +253,7 @@ class Orchestrator:
         self._pending_open_app_target: Optional[str] = None
         self._pending_open_app_result: Optional[Intent] = None
         self._scope_note: str = ""
+        self._pending_clarification: Optional[str] = None
 
     def _complete_task(self) -> None:
         """Conclui a tarefa na memória de trabalho e audita o registro."""
@@ -360,6 +363,16 @@ class Orchestrator:
         self._open_app_flow_active = False
         self._pending_open_app_target = None
         self._pending_open_app_result = None
+
+    def _set_pending_clarification(self, question: str) -> None:
+        """Armazena a pergunta de clarification pendente, limitada a 500 caracteres."""
+        cleaned = question.strip()
+        self._pending_clarification = cleaned[:_PENDING_CLARIFICATION_MAX]
+
+    def clear_session(self) -> None:
+        """Limpa a clarification pendente e o contexto de sessão da memória."""
+        self._pending_clarification = None
+        self.memory.clear_session()
 
     def _parse_event_datetimes(self, draft: dict) -> tuple[datetime, datetime]:
         """Converte data/hora do rascunho em datetimes timezone-aware.
@@ -1085,6 +1098,8 @@ class Orchestrator:
         budget = _extract_pomodoro_budget(command, recent)
         if budget is not None:
             ctx["pomodoro_budget"] = budget
+        if self._pending_clarification is not None:
+            ctx["pending_clarification"] = self._pending_clarification
         return ctx
 
     def _ai_response_to_intent(self, response) -> Intent:
@@ -1180,6 +1195,14 @@ class Orchestrator:
             self._finalize_session_result(result)
             return result
 
+        # Cancelamento explícito consome a clarification pendente antes da IA
+        if (
+            self._pending_clarification is not None
+            and command.strip().lower()
+            in ("não", "nao", "cancelar", "cancele", "cancela", "no")
+        ):
+            self._pending_clarification = None
+
         # Primeiro verifica se está no fluxo conversacional de substituir alias
         replace_alias_flow_result = self._handle_replace_alias_flow(command)
         if replace_alias_flow_result is not None:
@@ -1230,6 +1253,8 @@ class Orchestrator:
         else:
             # --- IntentRecognizer primeiro (determinístico) ---
             intent = self.intent_recognizer.parse(command)
+            if intent is not None:
+                self._pending_clarification = None
 
         if intent is None and self.ai_core is not None:
             # Intent não reconhecida → consulta AICore/Ollama (diagnóstico detalhado)
@@ -1238,9 +1263,14 @@ class Orchestrator:
             ai_response = outcome.response
 
             if ai_response is not None and ai_response.type == "action":
+                self._pending_clarification = None
                 intent = self._ai_response_to_intent(ai_response)
                 self.memory.record_intent(intent.action, intent.target)
             elif ai_response is not None and ai_response.type in ("chat", "clarification"):
+                if ai_response.type == "clarification":
+                    self._set_pending_clarification(ai_response.message)
+                else:
+                    self._pending_clarification = None
                 self._complete_task()
                 result = OrchestrationResult(
                     status="success",
