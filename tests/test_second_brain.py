@@ -433,6 +433,43 @@ class TestSearchIntent(unittest.TestCase):
         self.assertIsNotNone(intent)
         self.assertEqual(intent.action, "consultar segundo cérebro")
 
+    def test_search_present_indicative_variations(self) -> None:
+        """Reconhece procura, busca e pesquisa no segundo cérebro."""
+        cases = [
+            "procura no segundo cérebro tarefas pendentes",
+            "busca no segundo cérebro tarefas pendentes",
+            "pesquisa no segundo cérebro tarefas pendentes",
+        ]
+        for cmd in cases:
+            with self.subTest(cmd=cmd):
+                intent = self.recognizer.parse(cmd)
+                self.assertIsNotNone(intent)
+                self.assertEqual(intent.action, "buscar segundo cérebro")
+                self.assertEqual(intent.target, "tarefas pendentes")
+                self.assertFalse(intent.requires_confirmation)
+
+    def test_search_regression_forms_still_accepted(self) -> None:
+        """Regressão: formas atuais continuam reconhecidas."""
+        cases = [
+            "procure no segundo cérebro Aetherion",
+            "procurar no segundo cérebro Aetherion",
+            "busque no segundo cérebro Aetherion",
+            "buscar no segundo cérebro Aetherion",
+            "pesquise no segundo cérebro Aetherion",
+            "pesquisar no segundo cérebro Aetherion",
+        ]
+        for cmd in cases:
+            with self.subTest(cmd=cmd):
+                intent = self.recognizer.parse(cmd)
+                self.assertIsNotNone(intent)
+                self.assertEqual(intent.action, "buscar segundo cérebro")
+                self.assertEqual(intent.target, "Aetherion")
+
+    def test_search_negative_busca_em_sites_not_recognized(self) -> None:
+        """'busca em sites' sem 'segundo cérebro' continua não reconhecido."""
+        intent = self.recognizer.parse("busca em sites")
+        self.assertIsNone(intent)
+
 
 class TestSearchOrchestrator(unittest.TestCase):
     """Testes de integracao: busca no Segundo Cerebro via Orchestrator."""

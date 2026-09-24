@@ -52,7 +52,7 @@ class IntentRecognizer:
     )
 
     _SEARCH_CONTEXT_PATTERN = re.compile(
-        r"^(?:therion[,\s]+)?(?:procure|procurar|busque|buscar|pesquise|pesquisar)\s+"
+        r"^(?:therion[,\s]+)?(?:procure|procurar|procura|busque|buscar|busca|pesquise|pesquisar|pesquisa)\s+"
         r"(?:no\s+)?(?:segundo\s+cérebro|2º?\s*cérebro)\s+"
         r"(.+)$",
         re.IGNORECASE,
