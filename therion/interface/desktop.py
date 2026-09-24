@@ -70,6 +70,9 @@ _ORBE_STATUS_MAP: dict[str, str] = {
     "forbidden": "error",
     "execution_failed": "error",
     "verification_failed": "error",
+    "ai_unavailable": "error",
+    "ai_timeout": "error",
+    "ai_invalid_response": "error",
 }
 
 _ORBE_STATES: dict[str, tuple[str, str]] = {

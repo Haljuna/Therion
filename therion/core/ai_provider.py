@@ -5,6 +5,18 @@ from dataclasses import dataclass, field
 from typing import Literal, Optional
 
 
+class ProviderTransportError(RuntimeError):
+    """Falha de transporte ou indisponibilidade do provedor de IA."""
+
+
+class ProviderTimeoutError(RuntimeError):
+    """Timeout na chamada ao provedor de IA."""
+
+
+class ProviderResponseError(ValueError):
+    """Resposta malformada ou inválida do provedor de IA."""
+
+
 @dataclass(frozen=True)
 class AIResponse:
     """Resposta estruturada de um AIProvider."""

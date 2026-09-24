@@ -351,7 +351,7 @@ class TestAICoreOrchestratorIntegration(unittest.TestCase):
         core = AICore(provider=provider, available_intents=["calendário hoje"])
         orch = Orchestrator(simulate=True, ai_core=core)
         result = orch.process_command("some texto qualquer")
-        self.assertEqual(result.status, "unknown_intent")
+        self.assertEqual(result.status, "ai_invalid_response")
 
     def test_F_pending_flow_priority(self):
         orch_no_ai = Orchestrator(simulate=True, ai_core=None)

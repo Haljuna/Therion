@@ -39,6 +39,29 @@ _AMBIGUOUS_SUFFIX_RE = re.compile(
 
 _STUDY_SIGNALS = ("estudar", "estudo", "pomodoro")
 
+_AI_INVALID_RESPONSE_STATUS = "ai_invalid_response"
+_AI_INVALID_RESPONSE_MESSAGE = "A resposta da IA auxiliar não pôde ser validada."
+
+# Motivo interno (ClassifyOutcome.failure) → status externo + mensagem não técnica.
+_AI_FAILURE_DIAGNOSTICS: dict[str, tuple[str, str]] = {
+    "provider_unavailable": (
+        "ai_unavailable",
+        "O serviço de IA auxiliar está indisponível no momento.",
+    ),
+    "provider_timeout": (
+        "ai_timeout",
+        "O serviço de IA auxiliar demorou demais para responder.",
+    ),
+    "invalid_response": (
+        _AI_INVALID_RESPONSE_STATUS,
+        _AI_INVALID_RESPONSE_MESSAGE,
+    ),
+    "rejected_by_policy": (
+        _AI_INVALID_RESPONSE_STATUS,
+        _AI_INVALID_RESPONSE_MESSAGE,
+    ),
+}
+
 
 def _parse_duration_minutes(text: str) -> Optional[int]:
     """Extrai duração em minutos de um texto V1 (formatos inequívocos)."""
@@ -1209,9 +1232,10 @@ class Orchestrator:
             intent = self.intent_recognizer.parse(command)
 
         if intent is None and self.ai_core is not None:
-            # Intent não reconhecida → consulta AICore/Ollama
+            # Intent não reconhecida → consulta AICore/Ollama (diagnóstico detalhado)
             ai_context = self._build_ai_context(command)
-            ai_response = self.ai_core.classify(command, ai_context)
+            outcome = self.ai_core.classify_detailed(command, ai_context)
+            ai_response = outcome.response
 
             if ai_response is not None and ai_response.type == "action":
                 intent = self._ai_response_to_intent(ai_response)
@@ -1224,7 +1248,21 @@ class Orchestrator:
                 )
                 self._finalize_session_result(result)
                 return result
+            elif outcome.failure is not None:
+                ai_status, ai_message = _AI_FAILURE_DIAGNOSTICS.get(
+                    outcome.failure,
+                    (_AI_INVALID_RESPONSE_STATUS, _AI_INVALID_RESPONSE_MESSAGE),
+                )
+                self.memory.record_error(ai_message)
+                self._complete_task()
+                result = OrchestrationResult(
+                    status=ai_status,
+                    message=ai_message,
+                )
+                self._finalize_session_result(result)
+                return result
         if not intent:
+            # unknown_intent: somente recognizer sem match e sem diagnóstico de IA
             msg = "Não consegui identificar a intenção no comando recebido."
             self.memory.record_error(msg)
             self._complete_task()

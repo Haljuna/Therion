@@ -5,7 +5,13 @@ import urllib.error
 import urllib.request
 from typing import Any
 
-from therion.core.ai_provider import AIProvider, AIResponse
+from therion.core.ai_provider import (
+    AIProvider,
+    AIResponse,
+    ProviderResponseError,
+    ProviderTimeoutError,
+    ProviderTransportError,
+)
 
 ENDPOINT = "http://127.0.0.1:11434/api/chat"
 
@@ -163,32 +169,40 @@ class OllamaProvider(AIProvider):
             with self._opener.open(req, timeout=self.timeout) as response:
                 status = getattr(response, "status", getattr(response, "code", None))
                 if status != 200:
-                    raise RuntimeError(f"HTTP status não-200: {status}")
+                    raise ProviderTransportError(f"HTTP status não-200: {status}")
                 body = response.read().decode("utf-8")
         except urllib.error.HTTPError as e:
-            raise RuntimeError(f"Erro HTTP {e.code}: {e.reason}") from e
+            raise ProviderTransportError(f"Erro HTTP {e.code}: {e.reason}") from e
         except urllib.error.URLError as e:
-            raise RuntimeError(f"Erro de transporte: {e.reason}") from e
+            if isinstance(e.reason, TimeoutError):
+                raise ProviderTimeoutError(
+                    f"Timeout na requisição ao Ollama: {e.reason}"
+                ) from e
+            raise ProviderTransportError(f"Erro de transporte: {e.reason}") from e
+        except TimeoutError as e:
+            raise ProviderTimeoutError(f"Timeout na requisição ao Ollama: {e}") from e
         except RuntimeError:
             raise
         except Exception as e:
-            raise RuntimeError(f"Falha na requisição ao Ollama: {e}") from e
+            raise ProviderTransportError(
+                f"Falha na requisição ao Ollama: {e}"
+            ) from e
 
         try:
             res_json = json.loads(body)
         except Exception as e:
-            raise ValueError("Resposta externa não é JSON válido") from e
+            raise ProviderResponseError("Resposta externa não é JSON válido") from e
 
         if not isinstance(res_json, dict):
-            raise ValueError("Resposta externa deve ser um objeto JSON")
+            raise ProviderResponseError("Resposta externa deve ser um objeto JSON")
 
         msg = res_json.get("message")
         if not isinstance(msg, dict):
-            raise ValueError("Resposta externa sem campo message válido")
+            raise ProviderResponseError("Resposta externa sem campo message válido")
 
         content = msg.get("content")
         if not isinstance(content, str):
-            raise ValueError("Campo message.content não é string")
+            raise ProviderResponseError("Campo message.content não é string")
 
         return content
 
@@ -197,30 +211,32 @@ class OllamaProvider(AIProvider):
         try:
             parsed = json.loads(raw_content)
         except Exception as e:
-            raise ValueError("Conteúdo bruto não é JSON válido") from e
+            raise ProviderResponseError("Conteúdo bruto não é JSON válido") from e
 
         if not isinstance(parsed, dict):
-            raise ValueError("Conteúdo analisado não é um objeto JSON")
+            raise ProviderResponseError("Conteúdo analisado não é um objeto JSON")
 
         required_keys = {"type", "message", "intent", "arguments"}
         if set(parsed.keys()) != required_keys:
-            raise ValueError(f"Chaves raiz devem ser exatamente {required_keys}")
+            raise ProviderResponseError(
+                f"Chaves raiz devem ser exatamente {required_keys}"
+            )
 
         res_type = parsed["type"]
         if res_type not in ("chat", "clarification", "action"):
-            raise ValueError(f"Tipo inválido: {res_type}")
+            raise ProviderResponseError(f"Tipo inválido: {res_type}")
 
         msg = parsed["message"]
         if not isinstance(msg, str) or not msg.strip():
-            raise ValueError("Campo message deve ser string não vazia")
+            raise ProviderResponseError("Campo message deve ser string não vazia")
 
         intent = parsed["intent"]
         if intent is not None and not isinstance(intent, str):
-            raise ValueError("Campo intent deve ser string ou null")
+            raise ProviderResponseError("Campo intent deve ser string ou null")
 
         arguments = parsed["arguments"]
         if not isinstance(arguments, dict):
-            raise ValueError("Campo arguments deve ser dicionário")
+            raise ProviderResponseError("Campo arguments deve ser dicionário")
 
         return AIResponse(
             type=res_type,

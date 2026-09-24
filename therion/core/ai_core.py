@@ -4,9 +4,29 @@ Recebe mensagem + contexto, pede inferência ao AIProvider,
 valida deterministicamente a resposta e devolve AIResponse ou None.
 """
 
+from dataclasses import dataclass
 from typing import Optional
 
-from therion.core.ai_provider import AIProvider, AIResponse
+from therion.core.ai_provider import (
+    AIProvider,
+    AIResponse,
+    ProviderResponseError,
+    ProviderTimeoutError,
+    ProviderTransportError,
+)
+
+FAILURE_PROVIDER_UNAVAILABLE = "provider_unavailable"
+FAILURE_PROVIDER_TIMEOUT = "provider_timeout"
+FAILURE_INVALID_RESPONSE = "invalid_response"
+FAILURE_REJECTED_BY_POLICY = "rejected_by_policy"
+
+
+@dataclass(frozen=True)
+class ClassifyOutcome:
+    """Resultado detalhado da classificação: resposta válida OU motivo de falha."""
+
+    response: Optional[AIResponse] = None
+    failure: Optional[str] = None
 
 
 class AICore:
@@ -34,10 +54,20 @@ class AICore:
         message: str,
         context: dict,
     ) -> Optional[AIResponse]:
-        """Classifica a mensagem do usuário.
+        """Compatibilidade: devolve a resposta válida ou None em falha controlada."""
+        return self.classify_detailed(message, context).response
+
+    def classify_detailed(
+        self,
+        message: str,
+        context: dict,
+    ) -> ClassifyOutcome:
+        """Classifica a mensagem preservando o motivo interno de falha.
 
         Returns:
-            AIResponse validada, ou None em falha controlada (fallback seguro).
+            ClassifyOutcome com response válida OU failure com um dos motivos:
+            provider_unavailable, provider_timeout, invalid_response,
+            rejected_by_policy.
         """
         try:
             raw = self._provider.generate(
@@ -45,12 +75,21 @@ class AICore:
                 context=context,
                 available_intents=self._available_intents,
             )
+        except ProviderTimeoutError:
+            return ClassifyOutcome(failure=FAILURE_PROVIDER_TIMEOUT)
+        except ProviderTransportError:
+            return ClassifyOutcome(failure=FAILURE_PROVIDER_UNAVAILABLE)
+        except ProviderResponseError:
+            return ClassifyOutcome(failure=FAILURE_INVALID_RESPONSE)
         except Exception:
-            return None
+            return ClassifyOutcome(failure=FAILURE_PROVIDER_UNAVAILABLE)
+
+        if raw is None:
+            return ClassifyOutcome(failure=FAILURE_INVALID_RESPONSE)
 
         if not self._validate(raw):
-            return None
-        return raw
+            return ClassifyOutcome(failure=FAILURE_REJECTED_BY_POLICY)
+        return ClassifyOutcome(response=raw)
 
     def _validate(self, response: Optional[AIResponse]) -> bool:
         """Validação determinística da resposta do provider."""
