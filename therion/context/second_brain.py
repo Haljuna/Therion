@@ -1,6 +1,7 @@
 """Camada de acesso e leitura seletiva do Segundo Cérebro para a V0."""
 
 import os
+import re
 from dataclasses import dataclass, field
 from typing import List, Optional
 
@@ -184,9 +185,10 @@ class SecondBrainReader:
         scope: Optional[ReadScope] = None,
         trace: Optional[SearchTrace] = None,
     ) -> List[SearchResult]:
-        """Busca termo em nomes e conteúdo de arquivos .md dentro das raízes autorizadas.
+        """Busca termo por palavra inteira em nomes e conteúdo de arquivos .md dentro das raízes autorizadas.
 
-        Busca literal e case-insensitive. Retorna no máximo max_results resultados.
+        Busca case-insensitive com limite de palavra (não casa dentro de outras palavras).
+        Retorna no máximo max_results resultados.
         Interrrompe varredura assim que max_results são encontrados.
         """
         cleaned = term.strip()
@@ -194,6 +196,9 @@ class SecondBrainReader:
             return []
 
         term_lower = cleaned.lower()
+        word_pattern = re.compile(
+            r"(?<!\w)" + re.escape(term_lower) + r"(?!\w)"
+        )
         results: List[SearchResult] = []
 
         if scope is None:
@@ -234,10 +239,11 @@ class SecondBrainReader:
                         continue
 
                     content_lower = content.lower()
-                    content_idx = content_lower.find(term_lower)
+                    content_match = word_pattern.search(content_lower)
 
                     # Match no conteudo (prioridade)
-                    if content_idx != -1:
+                    if content_match is not None:
+                        content_idx = content_match.start()
                         snippet = self._build_snippet(content, content_idx, len(cleaned))
                         results.append(
                             SearchResult(path=relative_path, snippet=snippet)
@@ -245,7 +251,7 @@ class SecondBrainReader:
                         continue
 
                     # Match somente no nome do arquivo (fallback)
-                    if term_lower in filename.lower():
+                    if word_pattern.search(filename.lower()) is not None:
                         results.append(
                             SearchResult(
                                 path=relative_path,

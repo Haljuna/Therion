@@ -390,6 +390,53 @@ class TestSearchNotes(unittest.TestCase):
         self.assertTrue(any("Therion" in p for p in paths))
         self.assertTrue(any("Sistema da IA" in p for p in paths))
 
+    def test_search_prova_nao_casa_dentro_de_aprovado(self) -> None:
+        """'prova' nao casa dentro de 'aprovado' (conteudo) nem em 'Aprovado.md' (nome)."""
+        conteudo = os.path.join(self.therion_dir, "Status.md")
+        with open(conteudo, "w", encoding="utf-8") as f:
+            f.write("# Status\nDocumento aprovado pela equipe.")
+        nome = os.path.join(self.therion_dir, "Aprovado.md")
+        with open(nome, "w", encoding="utf-8") as f:
+            f.write("# Outro\nConteudo sem o termo.")
+        results = self.reader.search_notes("prova")
+        self.assertEqual(results, [])
+
+    def test_search_prova_nao_casa_dentro_de_aprovacao(self) -> None:
+        """'prova' nao casa dentro de 'aprovacao'."""
+        path = os.path.join(self.therion_dir, "Tramite.md")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("# Tramite\nA aprovacao esta pendente.")
+        results = self.reader.search_notes("prova")
+        self.assertEqual(results, [])
+
+    def test_search_prova_nao_casa_dentro_de_comprovacao(self) -> None:
+        """'prova' nao casa dentro de 'comprovacao'."""
+        path = os.path.join(self.therion_dir, "Evidencia.md")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("# Evidencia\nFalta comprovacao do resultado.")
+        results = self.reader.search_notes("prova")
+        self.assertEqual(results, [])
+
+    def test_search_prova_isolada_no_conteudo_casa(self) -> None:
+        """'prova' como palavra isolada no conteudo continua casando."""
+        path = os.path.join(self.therion_dir, "Notas.md")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("# Notas\nIsto e uma prova real do sistema.")
+        results = self.reader.search_notes("prova")
+        paths = [r.path for r in results]
+        self.assertIn("10 - Projetos/Therion/Notas.md", paths)
+
+    def test_search_prova_isolada_no_nome_casa(self) -> None:
+        """'prova' como palavra isolada no nome do arquivo continua casando."""
+        path = os.path.join(self.therion_dir, "Prova.md")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("# Indice\nConteudo sem o termo aqui.")
+        results = self.reader.search_notes("prova")
+        paths = [r.path for r in results]
+        self.assertIn("10 - Projetos/Therion/Prova.md", paths)
+        nome_results = [r for r in results if "Prova.md" in r.path]
+        self.assertIn("nome do arquivo", nome_results[0].snippet)
+
 
 class TestSearchIntent(unittest.TestCase):
     """Testes de reconhecimento de intencao para busca no Segundo Cerebro."""
