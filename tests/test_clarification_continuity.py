@@ -35,6 +35,9 @@ class _FakeProvider(AIProvider):
             raise item
         return item
 
+    def generate_plan(self, message, context):
+        raise NotImplementedError
+
 
 def _make_orch(responses):
     provider = _FakeProvider(responses)

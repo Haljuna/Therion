@@ -10,6 +10,12 @@ from typing import Optional
 from therion.core.ai_provider import (
     AIProvider,
     AIResponse,
+    NON_EXECUTABLE_TYPES,
+    PLAN_REFERENCE,
+    PLAN_REFERENCE_SELECTORS,
+    PLAN_REQUEST,
+    PlanContent,
+    PlanSection,
     ProviderResponseError,
     ProviderTimeoutError,
     ProviderTransportError,
@@ -19,6 +25,39 @@ FAILURE_PROVIDER_UNAVAILABLE = "provider_unavailable"
 FAILURE_PROVIDER_TIMEOUT = "provider_timeout"
 FAILURE_INVALID_RESPONSE = "invalid_response"
 FAILURE_REJECTED_BY_POLICY = "rejected_by_policy"
+
+
+def validate_plan_content(plan: object) -> bool:
+    """Validação estrutural determinística de PlanContent (E1/M1).
+
+    Regras:
+    - plan deve ser PlanContent;
+    - sections deve ter pelo menos 1 item;
+    - cada item deve ser PlanSection;
+    - heading: str não vazia após strip;
+    - body: str não vazia após strip;
+    - title pode ser None; se presente, deve ser str;
+    - não usa campo complete;
+    - não valida limite de tamanho (posteriores à M1).
+    """
+    if not isinstance(plan, PlanContent):
+        return False
+
+    if not isinstance(plan.sections, list) or len(plan.sections) < 1:
+        return False
+
+    for section in plan.sections:
+        if not isinstance(section, PlanSection):
+            return False
+        if not isinstance(section.heading, str) or not section.heading.strip():
+            return False
+        if not isinstance(section.body, str) or not section.body.strip():
+            return False
+
+    if plan.title is not None and not isinstance(plan.title, str):
+        return False
+
+    return True
 
 
 @dataclass(frozen=True)
@@ -36,7 +75,7 @@ class AICore:
     Texto gerado pela IA nunca é executado diretamente.
     """
 
-    VALID_TYPES = {"chat", "action", "clarification"}
+    VALID_TYPES = {"chat", "action", "clarification"} | set(NON_EXECUTABLE_TYPES)
     ACTION_ALLOWLIST = {
         "abrir aplicativo",
         "listar aliases",
@@ -91,6 +130,37 @@ class AICore:
             return ClassifyOutcome(failure=FAILURE_REJECTED_BY_POLICY)
         return ClassifyOutcome(response=raw)
 
+    def generate_plan_detailed(
+        self,
+        message: str,
+        context: dict,
+    ) -> tuple[Optional[PlanContent], Optional[str]]:
+        """Gera plano dirigido preservando o motivo interno de falha.
+
+        Returns:
+            Tupla (plan, failure): sucesso = (PlanContent válido por
+            validate_plan_content, None); falha = (None, uma das
+            constantes FAILURE_* existentes).
+        """
+        try:
+            plan = self._provider.generate_plan(message=message, context=context)
+        except ProviderTimeoutError:
+            return None, FAILURE_PROVIDER_TIMEOUT
+        except ProviderTransportError:
+            return None, FAILURE_PROVIDER_UNAVAILABLE
+        except ProviderResponseError:
+            return None, FAILURE_INVALID_RESPONSE
+        except Exception:
+            return None, FAILURE_PROVIDER_UNAVAILABLE
+
+        if plan is None:
+            return None, FAILURE_INVALID_RESPONSE
+
+        if not validate_plan_content(plan):
+            return None, FAILURE_REJECTED_BY_POLICY
+
+        return plan, None
+
     def _validate(self, response: Optional[AIResponse]) -> bool:
         """Validação determinística da resposta do provider."""
         if response is None:
@@ -120,7 +190,34 @@ class AICore:
             if response.arguments != {}:
                 return False
 
+        if response.type in NON_EXECUTABLE_TYPES:
+            if response.intent is not None:
+                return False
+            if not isinstance(response.arguments, dict):
+                return False
+            if response.type == PLAN_REQUEST:
+                if response.arguments != {}:
+                    return False
+            elif response.type == PLAN_REFERENCE:
+                if not self._validate_plan_reference_arguments(response.arguments):
+                    return False
+
         return True
+
+    def _validate_plan_reference_arguments(self, args: dict) -> bool:
+        """Validação da referência fechada a plano existente (E1/M2).
+
+        Regras:
+        - arguments deve ter exatamente a chave "reference";
+        - o valor deve ser uma string do conjunto fechado:
+          first, second, last, previous, same.
+        """
+        if set(args.keys()) != {"reference"}:
+            return False
+        selector = args["reference"]
+        if not isinstance(selector, str):
+            return False
+        return selector in PLAN_REFERENCE_SELECTORS
 
     def _validate_action_arguments(self, intent: str, args: dict) -> bool:
         """Validação de arguments contra o schema fechado da intent."""

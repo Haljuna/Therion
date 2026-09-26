@@ -3,7 +3,8 @@
 import unittest
 from unittest.mock import MagicMock, patch
 
-from therion.core.orchestrator import Orchestrator
+from therion.core.ai_provider import PlanContent, PlanSection
+from therion.core.orchestrator import Orchestrator, OrchestrationResult
 
 
 class TestSessionMemoryIntegration(unittest.TestCase):
@@ -769,6 +770,319 @@ class TestPomodoroBudget(unittest.TestCase):
         self.assertEqual(b["break_minutes"], 5)
         self.assertEqual(b["planned_minutes"], 115)
         self.assertEqual(b["remaining_minutes"], 5)
+
+
+class TestAckPlanDisplayed(unittest.TestCase):
+    """ACK de plano exibido via ack_plan_displayed (E1/M5c)."""
+
+    def test_correct_candidate_registers(self) -> None:
+        orch = Orchestrator(simulate=True)
+        text = "Plano verbatim\n  com acentuação e espaços  "
+        candidate_id = orch._plan_state.set_candidate(text)
+        result = orch.ack_plan_displayed(candidate_id)
+        self.assertEqual(result.status, "registered")
+        self.assertIsNotNone(result.plan_id)
+        self.assertEqual(orch._plan_state.get_plan(result.plan_id).text, text)
+        self.assertEqual(orch._plan_state.current_plan_id, result.plan_id)
+
+    def test_wrong_id_keeps_candidate_and_registers_nothing(self) -> None:
+        orch = Orchestrator(simulate=True)
+        candidate_id = orch._plan_state.set_candidate("Candidato real")
+        result = orch.ack_plan_displayed("id-errado")
+        self.assertEqual(result.status, "displayed_not_registered")
+        self.assertEqual(result.reason, "candidate_mismatch")
+        self.assertIsNotNone(orch._plan_state.candidate)
+        self.assertEqual(orch._plan_state.candidate.candidate_id, candidate_id)
+        self.assertEqual(orch._plan_state.order, ())
+        self.assertIsNone(orch._plan_state.current_plan_id)
+
+    def test_clear_session_clears_plan_state(self) -> None:
+        orch = Orchestrator(simulate=True)
+        candidate_id = orch._plan_state.set_candidate("Pendente")
+        orch.clear_session()
+        result = orch.ack_plan_displayed(candidate_id)
+        self.assertEqual(result.status, "displayed_not_registered")
+        self.assertEqual(result.reason, "candidate_missing")
+        self.assertIsNone(orch._plan_state.candidate)
+        self.assertEqual(orch._plan_state.order, ())
+        self.assertIsNone(orch._plan_state.current_plan_id)
+
+    def test_ack_registered_plan_updates_current(self) -> None:
+        orch = Orchestrator(simulate=True)
+        id_one = orch._plan_state.set_candidate("Primeiro plano")
+        plan_one = orch._plan_state.register_candidate(id_one).plan_id
+        id_two = orch._plan_state.set_candidate("Segundo plano")
+        plan_two = orch._plan_state.register_candidate(id_two).plan_id
+        self.assertEqual(orch._plan_state.current_plan_id, plan_two)
+        order_before = orch._plan_state.order
+        plans_before = {
+            p: orch._plan_state.get_plan(p).text for p in orch._plan_state.order
+        }
+
+        ok = orch.ack_registered_plan_displayed(plan_one)
+
+        self.assertTrue(ok)
+        self.assertEqual(orch._plan_state.current_plan_id, plan_one)
+        self.assertEqual(orch._plan_state.order, order_before)
+        self.assertEqual(
+            {p: orch._plan_state.get_plan(p).text for p in orch._plan_state.order},
+            plans_before,
+        )
+        self.assertEqual(len(orch._plan_state.order), 2)
+
+    def test_ack_registered_plan_missing_id_keeps_state(self) -> None:
+        orch = Orchestrator(simulate=True)
+        id_one = orch._plan_state.set_candidate("Plano A")
+        plan_one = orch._plan_state.register_candidate(id_one).plan_id
+        current_before = orch._plan_state.current_plan_id
+        order_before = orch._plan_state.order
+        plans_before = {
+            p: orch._plan_state.get_plan(p).text for p in orch._plan_state.order
+        }
+
+        ok = orch.ack_registered_plan_displayed("id-inexistente")
+
+        self.assertFalse(ok)
+        self.assertEqual(orch._plan_state.current_plan_id, current_before)
+        self.assertEqual(orch._plan_state.order, order_before)
+        self.assertEqual(
+            {p: orch._plan_state.get_plan(p).text for p in orch._plan_state.order},
+            plans_before,
+        )
+        self.assertEqual(orch._plan_state.get_plan(plan_one).text, "Plano A")
+
+
+class TestRenderPlanContent(unittest.TestCase):
+    """Renderização determinística PlanContent -> texto (E1/M5c3)."""
+
+    def test_title_with_two_sections(self) -> None:
+        plan = PlanContent(
+            title="Meu plano",
+            sections=[
+                PlanSection(heading="Bloco 1", body="Conteúdo do bloco 1."),
+                PlanSection(heading="Bloco 2", body="Conteúdo do bloco 2."),
+            ],
+        )
+        expected = (
+            "Meu plano\n\n"
+            "Bloco 1\nConteúdo do bloco 1.\n\n"
+            "Bloco 2\nConteúdo do bloco 2."
+        )
+        self.assertEqual(Orchestrator._render_plan_content(plan), expected)
+
+    def test_title_none_starts_with_first_section(self) -> None:
+        plan = PlanContent(
+            title=None,
+            sections=[
+                PlanSection(heading="Bloco 1", body="Corpo um."),
+                PlanSection(heading="Bloco 2", body="Corpo dois."),
+            ],
+        )
+        expected = "Bloco 1\nCorpo um.\n\nBloco 2\nCorpo dois."
+        self.assertEqual(Orchestrator._render_plan_content(plan), expected)
+
+    def test_empty_title_omitted(self) -> None:
+        plan = PlanContent(
+            title="",
+            sections=[
+                PlanSection(heading="Bloco 1", body="Corpo um."),
+                PlanSection(heading="Bloco 2", body="Corpo dois."),
+            ],
+        )
+        expected = "Bloco 1\nCorpo um.\n\nBloco 2\nCorpo dois."
+        self.assertEqual(Orchestrator._render_plan_content(plan), expected)
+
+    def test_whitespace_preserved_exactly(self) -> None:
+        plan = PlanContent(
+            title="  título com espaços  ",
+            sections=[
+                PlanSection(heading="  H  ", body="  corpo  "),
+                PlanSection(heading="H2", body="corpo2"),
+            ],
+        )
+        expected = (
+            "  título com espaços  \n\n"
+            "  H  \n  corpo  \n\n"
+            "H2\ncorpo2"
+        )
+        self.assertEqual(Orchestrator._render_plan_content(plan), expected)
+
+
+class TestPlanRequestBranch(unittest.TestCase):
+    """Ramo plan_request em process_command (E1/M5c3d)."""
+
+    _COMMAND = "gere um plano de estudo sobre proporções"
+
+    def _make_orch(self):
+        from therion.core.ai_core import AICore
+        from therion.core.ai_provider import AIResponse
+
+        fake_provider = MagicMock()
+        fake_provider.generate.return_value = AIResponse(
+            type="plan_request",
+            intent=None,
+            arguments={},
+            message="Gerar plano.",
+        )
+        ai_core = AICore(
+            provider=fake_provider,
+            available_intents=["listar aliases"],
+        )
+        orch = Orchestrator(simulate=True, ai_core=ai_core)
+        return orch, fake_provider
+
+    @staticmethod
+    def _valid_plan() -> PlanContent:
+        return PlanContent(
+            title="Plano de Estudo",
+            sections=[
+                PlanSection(heading="Bloco 1", body="Corpo um."),
+                PlanSection(heading="Bloco 2", body="Corpo dois."),
+            ],
+        )
+
+    def test_success_registers_candidate_and_returns_text(self) -> None:
+        orch, fake_provider = self._make_orch()
+        fake_provider.generate_plan.return_value = self._valid_plan()
+
+        result = orch.process_command(self._COMMAND)
+
+        self.assertEqual(result.status, "success")
+        self.assertIsNone(result.intent)
+        self.assertIsNone(result.plan)
+        self.assertIsNotNone(result.plan_candidate_id)
+        self.assertIsNotNone(orch._plan_state.candidate)
+        self.assertEqual(result.message, orch._plan_state.candidate.text)
+        self.assertEqual(
+            result.message,
+            "Plano de Estudo\n\nBloco 1\nCorpo um.\n\nBloco 2\nCorpo dois.",
+        )
+
+    def test_pending_candidate_blocks_generation(self) -> None:
+        orch, fake_provider = self._make_orch()
+        orch._plan_state.set_candidate("Pendente antigo")
+        fake_provider.generate_plan.return_value = self._valid_plan()
+
+        result = orch.process_command(self._COMMAND)
+
+        fake_provider.generate_plan.assert_not_called()
+        self.assertEqual(result.status, "success")
+        self.assertIsNone(result.plan_candidate_id)
+        self.assertIsNotNone(orch._plan_state.candidate)
+        self.assertEqual(orch._plan_state.candidate.text, "Pendente antigo")
+
+    def test_generation_failure_reuses_diagnostics(self) -> None:
+        from therion.core.ai_provider import ProviderTimeoutError
+
+        orch, fake_provider = self._make_orch()
+        fake_provider.generate_plan.side_effect = ProviderTimeoutError()
+
+        result = orch.process_command(self._COMMAND)
+
+        self.assertEqual(result.status, "ai_timeout")
+        self.assertEqual(
+            result.message,
+            "O serviço de IA auxiliar demorou demais para responder.",
+        )
+        self.assertIsNone(result.plan_candidate_id)
+        self.assertIsNone(orch._plan_state.candidate)
+        self.assertEqual(orch._plan_state.order, ())
+
+    def test_planner_and_confirm_not_called(self) -> None:
+        orch, fake_provider = self._make_orch()
+        fake_provider.generate_plan.return_value = self._valid_plan()
+        orch.planner.create_plan = MagicMock()
+        orch.confirm_and_execute = MagicMock()
+
+        result = orch.process_command(self._COMMAND)
+
+        orch.planner.create_plan.assert_not_called()
+        orch.confirm_and_execute.assert_not_called()
+        self.assertEqual(result.status, "success")
+
+
+class TestOrchestrationResultRegisteredPlanId(unittest.TestCase):
+    """Campo opcional registered_plan_id (E1/M6e2)."""
+
+    def test_default_registered_plan_id_is_none(self) -> None:
+        result = OrchestrationResult(status="success")
+        self.assertIsNone(result.registered_plan_id)
+        self.assertIsNone(result.plan_candidate_id)
+
+    def test_explicit_registered_plan_id_keeps_fields_independent(self) -> None:
+        result = OrchestrationResult(
+            status="success",
+            registered_plan_id="plan-123",
+        )
+        self.assertEqual(result.registered_plan_id, "plan-123")
+        self.assertIsNone(result.plan_candidate_id)
+
+
+class TestPlanReferenceBranch(unittest.TestCase):
+    """Ramo plan_reference em process_command (E1/M8b2)."""
+
+    _COMMAND = "gere um plano de estudo sobre proporções"
+    _UNAVAILABLE_MESSAGE = (
+        "Não há um plano disponível nesta sessão para essa referência."
+    )
+
+    @staticmethod
+    def _make_orch(reference: str):
+        from therion.core.ai_core import AICore
+        from therion.core.ai_provider import AIResponse
+
+        fake_provider = MagicMock()
+        fake_provider.generate.return_value = AIResponse(
+            type="plan_reference",
+            intent=None,
+            arguments={"reference": reference},
+            message="Referência a plano.",
+        )
+        ai_core = AICore(
+            provider=fake_provider,
+            available_intents=["listar aliases"],
+        )
+        return Orchestrator(simulate=True, ai_core=ai_core)
+
+    @staticmethod
+    def _register_plans(orch, texts) -> tuple:
+        plan_ids = []
+        for text in texts:
+            candidate_id = orch._plan_state.set_candidate(text)
+            result = orch._plan_state.register_candidate(candidate_id)
+            plan_ids.append(result.plan_id)
+        return tuple(plan_ids)
+
+    def test_resolved_reference_returns_registered_text(self) -> None:
+        orch = self._make_orch("first")
+        texts = (
+            "Plano A\nBloco 1\n  fim  ",
+            "Plano B texto",
+            "Plano C texto",
+        )
+        plan_ids = self._register_plans(orch, texts)
+        current_before = orch._plan_state.current_plan_id
+
+        result = orch.process_command(self._COMMAND)
+
+        self.assertEqual(result.status, "success")
+        self.assertEqual(result.message, texts[0])
+        self.assertEqual(result.registered_plan_id, plan_ids[0])
+        self.assertIsNone(result.plan_candidate_id)
+        self.assertEqual(orch._plan_state.current_plan_id, current_before)
+
+    def test_unavailable_reference_reports_unavailable(self) -> None:
+        orch = self._make_orch("second")
+        self._register_plans(orch, ["Plano único"])
+        current_before = orch._plan_state.current_plan_id
+
+        result = orch.process_command(self._COMMAND)
+
+        self.assertEqual(result.status, "plan_reference_unavailable")
+        self.assertEqual(result.message, self._UNAVAILABLE_MESSAGE)
+        self.assertIsNone(result.registered_plan_id)
+        self.assertIsNone(result.plan_candidate_id)
+        self.assertEqual(orch._plan_state.current_plan_id, current_before)
 
 
 if __name__ == "__main__":

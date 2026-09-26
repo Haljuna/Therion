@@ -12,6 +12,14 @@ def run_interaction(user_input: str, confirm_input: str, simulate: bool = True) 
     result = orchestrator.process_command(user_input)
     print(result.message)
 
+    if result.registered_plan_id is not None:
+        orchestrator.ack_registered_plan_displayed(result.registered_plan_id)
+
+    if result.plan_candidate_id is not None:
+        ack = orchestrator.ack_plan_displayed(result.plan_candidate_id)
+        if ack.status == "displayed_not_registered":
+            print("Este plano foi exibido, mas não pôde ser registrado nesta sessão. Por isso, ele não poderá ser recuperado depois por referências como “mesmo plano”, “plano anterior” ou “primeiro plano”.")
+
     if result.status == "awaiting_confirmation" and result.plan:
         print(f"\nUsuário:\n{confirm_input}\n")
         confirmed = orchestrator.confirmation_handler.evaluate_response(confirm_input)
@@ -41,6 +49,14 @@ def main() -> None:
         print("\nTherion:")
         result = orchestrator.process_command(command)
         print(result.message)
+
+        if result.registered_plan_id is not None:
+            orchestrator.ack_registered_plan_displayed(result.registered_plan_id)
+
+        if result.plan_candidate_id is not None:
+            ack = orchestrator.ack_plan_displayed(result.plan_candidate_id)
+            if ack.status == "displayed_not_registered":
+                print("Este plano foi exibido, mas não pôde ser registrado nesta sessão. Por isso, ele não poderá ser recuperado depois por referências como “mesmo plano”, “plano anterior” ou “primeiro plano”.")
 
         if result.status == "awaiting_confirmation" and result.plan:
             resp = input("\n").strip()

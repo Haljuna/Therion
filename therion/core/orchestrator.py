@@ -13,7 +13,9 @@ from therion.config import AliasManager
 from therion.context.read_scope import ReadScope, effective_roots
 from therion.context.second_brain import ReadResult, SearchTrace, SecondBrainReader
 from therion.core.ai_core import AICore
+from therion.core.ai_provider import PlanContent
 from therion.core.intent import Intent, IntentRecognizer
+from therion.core.plan_state import PlanAckResult, PlanSessionState
 from therion.core.planner import Plan, Planner
 from therion.governance.confirmation import ConfirmationHandler
 from therion.governance.permissions import PermissionManager
@@ -170,6 +172,8 @@ class OrchestrationResult:
     intent: Optional[Intent] = None
     plan: Optional[Plan] = None
     message: str = ""
+    plan_candidate_id: Optional[str] = None
+    registered_plan_id: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -254,6 +258,8 @@ class Orchestrator:
         self._pending_open_app_result: Optional[Intent] = None
         self._scope_note: str = ""
         self._pending_clarification: Optional[str] = None
+        # Estado efêmero de planos da sessão (E1/M5)
+        self._plan_state = PlanSessionState()
 
     def _complete_task(self) -> None:
         """Conclui a tarefa na memória de trabalho e audita o registro."""
@@ -373,6 +379,7 @@ class Orchestrator:
         """Limpa a clarification pendente e o contexto de sessão da memória."""
         self._pending_clarification = None
         self.memory.clear_session()
+        self._plan_state.clear_session()
 
     def _parse_event_datetimes(self, draft: dict) -> tuple[datetime, datetime]:
         """Converte data/hora do rascunho em datetimes timezone-aware.
@@ -1266,6 +1273,75 @@ class Orchestrator:
                 self._pending_clarification = None
                 intent = self._ai_response_to_intent(ai_response)
                 self.memory.record_intent(intent.action, intent.target)
+            elif ai_response is not None and ai_response.type == "plan_request":
+                pending_msg = "Já existe um plano pendente nesta sessão."
+                if self._plan_state.candidate is not None:
+                    self._complete_task()
+                    result = OrchestrationResult(
+                        status="success",
+                        message=pending_msg,
+                    )
+                    self._finalize_session_result(result)
+                    return result
+                plan, failure = self.ai_core.generate_plan_detailed(
+                    command, ai_context
+                )
+                if failure is not None:
+                    ai_status, ai_message = _AI_FAILURE_DIAGNOSTICS.get(
+                        failure,
+                        (_AI_INVALID_RESPONSE_STATUS, _AI_INVALID_RESPONSE_MESSAGE),
+                    )
+                    self.memory.record_error(ai_message)
+                    self._complete_task()
+                    result = OrchestrationResult(
+                        status=ai_status,
+                        message=ai_message,
+                    )
+                    self._finalize_session_result(result)
+                    return result
+                texto = self._render_plan_content(plan)
+                candidate_id = self._plan_state.set_candidate(texto)
+                if candidate_id is None:
+                    self._complete_task()
+                    result = OrchestrationResult(
+                        status="success",
+                        message=pending_msg,
+                    )
+                    self._finalize_session_result(result)
+                    return result
+                self._complete_task()
+                result = OrchestrationResult(
+                    status="success",
+                    intent=None,
+                    plan=None,
+                    message=texto,
+                    plan_candidate_id=candidate_id,
+                )
+                self._finalize_session_result(result)
+                return result
+            elif ai_response is not None and ai_response.type == "plan_reference":
+                reference = ai_response.arguments["reference"]
+                plan_id = self._plan_state.resolve_plan_reference(reference)
+                self._complete_task()
+                if plan_id is None:
+                    result = OrchestrationResult(
+                        status="plan_reference_unavailable",
+                        message=(
+                            "Não há um plano disponível nesta sessão para essa "
+                            "referência."
+                        ),
+                        registered_plan_id=None,
+                    )
+                    self._finalize_session_result(result)
+                    return result
+                registered_plan = self._plan_state.get_plan(plan_id)
+                result = OrchestrationResult(
+                    status="success",
+                    message=registered_plan.text,
+                    registered_plan_id=plan_id,
+                )
+                self._finalize_session_result(result)
+                return result
             elif ai_response is not None and ai_response.type in ("chat", "clarification"):
                 if ai_response.type == "clarification":
                     self._set_pending_clarification(ai_response.message)
@@ -1577,6 +1653,24 @@ class Orchestrator:
         result = self.confirm_and_execute(plan, confirmed=True)
         self._finalize_session_result(result)
         return result
+
+    @staticmethod
+    def _render_plan_content(plan: PlanContent) -> str:
+        """Converte PlanContent em texto final, sem alterar nem truncar."""
+        parts: list[str] = []
+        if plan.title is not None and plan.title != "":
+            parts.append(plan.title)
+        for section in plan.sections:
+            parts.append(section.heading + "\n" + section.body)
+        return "\n\n".join(parts)
+
+    def ack_plan_displayed(self, candidate_id: str) -> PlanAckResult:
+        """Registra o candidate exibido como plano da sessão (ACK)."""
+        return self._plan_state.register_candidate(candidate_id)
+
+    def ack_registered_plan_displayed(self, plan_id: str) -> bool:
+        """Reconhece a exibição de um plano já registrado (ACK M6)."""
+        return self._plan_state.ack_registered_plan_displayed(plan_id)
 
     def confirm_and_execute(
         self, plan: Plan, confirmed: bool, simulate: Optional[bool] = None

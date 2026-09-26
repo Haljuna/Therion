@@ -41,6 +41,9 @@ class _FakeProvider(AIProvider):
             raise self._error
         return self._response
 
+    def generate_plan(self, message, context):
+        raise NotImplementedError
+
 
 class _FakeHTTP:
     def __init__(self, body: bytes, status: int = 200):

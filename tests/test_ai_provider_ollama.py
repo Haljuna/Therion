@@ -6,10 +6,17 @@ import urllib.error
 import urllib.request
 from unittest.mock import patch
 
-from therion.core.ai_provider import AIResponse
+from therion.core.ai_provider import (
+    AIResponse,
+    PlanContent,
+    PlanSection,
+    ProviderResponseError,
+)
 from therion.core.ai_provider_ollama import (
     ENDPOINT,
     OllamaProvider,
+    PLAN_FORMAT_SCHEMA,
+    PLAN_SYSTEM_PROMPT,
 )
 
 
@@ -70,7 +77,10 @@ class TestOllamaProviderIsolated(unittest.TestCase):
         self.assertEqual(fmt["type"], "object")
         self.assertFalse(fmt["additionalProperties"])
         self.assertEqual(fmt["required"], ["type", "message", "intent", "arguments"])
-        self.assertEqual(fmt["properties"]["type"]["enum"], ["chat", "clarification", "action"])
+        self.assertEqual(
+            fmt["properties"]["type"]["enum"],
+            ["chat", "clarification", "action", "plan_request", "plan_reference"],
+        )
 
     def test_chat_valid_returns_ai_response(self):
         """Chat válido retorna AIResponse correspondente."""
@@ -109,6 +119,52 @@ class TestOllamaProviderIsolated(unittest.TestCase):
         self.assertEqual(result.message, "Abrindo Obsidian")
         self.assertEqual(result.intent, "abrir aplicativo")
         self.assertEqual(result.arguments, {"target": "Obsidian"})
+
+    def test_plan_request_valid_returns_ai_response(self):
+        """Plan request válido retorna AIResponse correspondente."""
+        raw_inner = json.dumps({
+            "type": "plan_request",
+            "message": "Vou montar o plano de estudo.",
+            "intent": None,
+            "arguments": {},
+        })
+        external_body = {"message": {"content": raw_inner}}
+
+        with patch.object(self.provider._opener, "open", return_value=_make_http_response(external_body)):
+            result = self.provider.generate("monte um plano de estudo", {}, [])
+
+        self.assertIsInstance(result, AIResponse)
+        self.assertEqual(result.type, "plan_request")
+        self.assertEqual(result.message, "Vou montar o plano de estudo.")
+        self.assertIsNone(result.intent)
+        self.assertEqual(result.arguments, {})
+
+    def test_plan_reference_valid_returns_ai_response(self):
+        """Plan reference válido retorna AIResponse correspondente."""
+        raw_inner = json.dumps({
+            "type": "plan_reference",
+            "message": "Aqui está o primeiro plano gerado:",
+            "intent": None,
+            "arguments": {"reference": "first"},
+        })
+        external_body = {"message": {"content": raw_inner}}
+
+        with patch.object(self.provider._opener, "open", return_value=_make_http_response(external_body)):
+            result = self.provider.generate("mostre o primeiro plano", {}, [])
+
+        self.assertIsInstance(result, AIResponse)
+        self.assertEqual(result.type, "plan_reference")
+        self.assertEqual(result.message, "Aqui está o primeiro plano gerado:")
+        self.assertIsNone(result.intent)
+        self.assertEqual(result.arguments, {"reference": "first"})
+
+    def test_payload_contains_plan_reference_mandatory_reference_instruction(self):
+        """Payload deve instruir que arguments para plan_reference nunca pode ser vazio e exige reference."""
+        payload = self.provider._build_payload("teste", {}, [])
+        system_content = payload["messages"][0]["content"]
+        self.assertIn("plan_reference", system_content)
+        self.assertIn("NUNCA pode ser vazio ({})", system_content)
+        self.assertIn('"reference"', system_content)
 
     def test_raw_json_invalid_rejected(self):
         """JSON bruto inválido deve lançar ValueError."""
@@ -532,6 +588,90 @@ class TestPomodoroBudgetTransport(unittest.TestCase):
         # entrega imediata
         self.assertIn("Revisão de conceitos", sc)
         self.assertNotIn("vou gerar agora", sc.lower())
+
+
+class TestGeneratePlan(unittest.TestCase):
+    """Testes focados do gerador dirigido generate_plan (E1/M4)."""
+
+    def setUp(self):
+        self.provider = OllamaProvider(model="qwen3:4b-instruct", timeout=30)
+
+    def _generate_with_content(self, content: str) -> PlanContent:
+        external_body = {"message": {"content": content}}
+        with patch.object(
+            self.provider._opener,
+            "open",
+            return_value=_make_http_response(external_body),
+        ):
+            return self.provider.generate_plan("monte um plano de estudo", {})
+
+    def test_directed_payload_uses_plan_prompt_schema_and_user_message(self):
+        payload = self.provider._build_plan_payload("monte um plano de estudo", {})
+        self.assertEqual(payload["format"], PLAN_FORMAT_SCHEMA)
+        self.assertFalse(payload["stream"])
+        self.assertEqual(payload["model"], "qwen3:4b-instruct")
+        messages = payload["messages"]
+        self.assertEqual(
+            messages[0], {"role": "system", "content": PLAN_SYSTEM_PROMPT}
+        )
+        self.assertEqual(
+            messages[1], {"role": "user", "content": "monte um plano de estudo"}
+        )
+
+    def test_valid_json_returns_plan_content(self):
+        content = json.dumps({
+            "title": "Plano de estudo",
+            "sections": [
+                {"heading": "Bloco 1", "body": "Conteudo integral do bloco 1."},
+                {"heading": "Bloco 2", "body": "Conteudo integral do bloco 2."},
+            ],
+        })
+        result = self._generate_with_content(content)
+        self.assertIsInstance(result, PlanContent)
+        self.assertEqual(result.title, "Plano de estudo")
+        self.assertEqual(len(result.sections), 2)
+        self.assertIsInstance(result.sections[0], PlanSection)
+        self.assertEqual(result.sections[0].heading, "Bloco 1")
+        self.assertEqual(result.sections[0].body, "Conteudo integral do bloco 1.")
+        self.assertIsInstance(result.sections[1], PlanSection)
+        self.assertEqual(result.sections[1].heading, "Bloco 2")
+        self.assertEqual(result.sections[1].body, "Conteudo integral do bloco 2.")
+
+    def test_invalid_json_raises_provider_response_error(self):
+        with self.assertRaises(ProviderResponseError):
+            self._generate_with_content("{ json invalido sem fechar")
+
+    def test_sections_missing_or_not_list_raises_provider_response_error(self):
+        with self.assertRaises(ProviderResponseError):
+            self._generate_with_content(json.dumps({"title": "Plano"}))
+        with self.assertRaises(ProviderResponseError):
+            self._generate_with_content(json.dumps({"sections": "nao e lista"}))
+
+    def test_section_missing_fields_or_wrong_types_raises_provider_response_error(
+        self,
+    ):
+        with self.assertRaises(ProviderResponseError):
+            self._generate_with_content(
+                json.dumps({"sections": [{"heading": "Bloco 1"}]})
+            )
+        with self.assertRaises(ProviderResponseError):
+            self._generate_with_content(
+                json.dumps({"sections": [{"heading": 123, "body": "texto"}]})
+            )
+
+    def test_generate_plan_reuses_send_request(self):
+        content = json.dumps({
+            "title": "Plano",
+            "sections": [{"heading": "Bloco", "body": "Corpo"}],
+        })
+        with patch.object(
+            self.provider, "_send_request", return_value=content
+        ) as mock_send:
+            result = self.provider.generate_plan("monte um plano", {})
+        mock_send.assert_called_once()
+        payload = mock_send.call_args[0][0]
+        self.assertEqual(payload["format"], PLAN_FORMAT_SCHEMA)
+        self.assertIsInstance(result, PlanContent)
 
 
 if __name__ == "__main__":

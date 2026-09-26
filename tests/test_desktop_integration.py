@@ -561,6 +561,118 @@ class TestDesktopOrchestratorIntegration(unittest.TestCase):
         window._send_command()
         window._orchestrator.process_command.assert_not_called()
 
+    def test_ack_registered_after_display(self) -> None:
+        window = self._create_window()
+        window._input.toPlainText.return_value = "gere um plano de estudo"
+        window._orchestrator.process_command.return_value = MagicMock(
+            status="success",
+            message="Texto do plano exibido.",
+            plan=None,
+            plan_candidate_id="abc123",
+        )
+        events = []
+
+        def _record_append(sender, text):
+            events.append(("append", sender, text))
+
+        def _record_ack(candidate_id):
+            events.append(("ack", candidate_id))
+            return MagicMock(status="registered")
+
+        window._append.side_effect = _record_append
+        window._orchestrator.ack_plan_displayed.side_effect = _record_ack
+
+        window._send_command()
+
+        window._orchestrator.ack_plan_displayed.assert_called_once_with("abc123")
+        self.assertEqual(
+            events,
+            [
+                ("append", "Você", "gere um plano de estudo"),
+                ("append", "Therion", "Texto do plano exibido."),
+                ("ack", "abc123"),
+            ],
+        )
+
+    def test_ack_rejected_shows_second_bubble(self) -> None:
+        window = self._create_window()
+        window._input.toPlainText.return_value = "gere um plano de estudo"
+        window._orchestrator.process_command.return_value = MagicMock(
+            status="success",
+            message="Texto do plano exibido.",
+            plan=None,
+            plan_candidate_id="abc123",
+        )
+        window._orchestrator.ack_plan_displayed.return_value = MagicMock(
+            status="displayed_not_registered"
+        )
+
+        window._send_command()
+
+        window._orchestrator.ack_plan_displayed.assert_called_once_with("abc123")
+        self.assertEqual(window._append.call_args_list[1].args, ("Therion", "Texto do plano exibido."))
+        self.assertEqual(
+            window._append.call_args_list[2].args,
+            (
+                "Therion",
+                "Este plano foi exibido, mas não pôde ser registrado nesta sessão. Por isso, ele não poderá ser recuperado depois por referências como “mesmo plano”, “plano anterior” ou “primeiro plano”.",
+            ),
+        )
+        self.assertEqual(window._append.call_count, 3)
+
+    def test_no_candidate_id_skips_ack(self) -> None:
+        window = self._create_window()
+        window._input.toPlainText.return_value = "gere um plano de estudo"
+        window._orchestrator.process_command.return_value = MagicMock(
+            status="success",
+            message="Resposta comum.",
+            plan=None,
+            plan_candidate_id=None,
+        )
+
+        window._send_command()
+
+        window._orchestrator.ack_plan_displayed.assert_not_called()
+        self.assertEqual(window._append.call_count, 2)
+        self.assertEqual(window._append.call_args_list[1].args, ("Therion", "Resposta comum."))
+
+    def test_registered_plan_ack_after_display(self) -> None:
+        window = self._create_window()
+        window._input.toPlainText.return_value = "mostrar o plano registrado"
+        window._orchestrator.process_command.return_value = MagicMock(
+            status="success",
+            message="Texto do plano registrado.",
+            plan=None,
+            plan_candidate_id=None,
+            registered_plan_id="plan-123",
+        )
+        events = []
+
+        def _record_append(sender, text):
+            events.append(("append", sender, text))
+
+        def _record_ack(plan_id):
+            events.append(("ack_registered", plan_id))
+            return True
+
+        window._append.side_effect = _record_append
+        window._orchestrator.ack_registered_plan_displayed.side_effect = _record_ack
+
+        window._send_command()
+
+        window._orchestrator.ack_registered_plan_displayed.assert_called_once_with(
+            "plan-123"
+        )
+        window._orchestrator.ack_plan_displayed.assert_not_called()
+        self.assertEqual(
+            events,
+            [
+                ("append", "Você", "mostrar o plano registrado"),
+                ("append", "Therion", "Texto do plano registrado."),
+                ("ack_registered", "plan-123"),
+            ],
+        )
+
 
 class TestDesktopOrbe(unittest.TestCase):
     """Testes do orbe visual e mapeamento de estados."""

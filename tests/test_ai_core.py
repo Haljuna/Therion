@@ -3,8 +3,27 @@
 import unittest
 from typing import Optional
 
-from therion.core.ai_core import AICore
-from therion.core.ai_provider import AIProvider, AIResponse
+from therion.core.ai_core import (
+    AICore,
+    FAILURE_INVALID_RESPONSE,
+    FAILURE_PROVIDER_TIMEOUT,
+    FAILURE_PROVIDER_UNAVAILABLE,
+    FAILURE_REJECTED_BY_POLICY,
+    validate_plan_content,
+)
+from therion.core.ai_provider import (
+    AIProvider,
+    AIResponse,
+    NON_EXECUTABLE_TYPES,
+    PLAN_REFERENCE,
+    PLAN_REFERENCE_SELECTORS,
+    PLAN_REQUEST,
+    PlanContent,
+    PlanSection,
+    ProviderResponseError,
+    ProviderTimeoutError,
+    ProviderTransportError,
+)
 from therion.core.orchestrator import Orchestrator
 
 
@@ -26,6 +45,9 @@ class FakeAIProvider(AIProvider):
         if self._response is None:
             raise RuntimeError("Sem resposta configurada")
         return self._response
+
+    def generate_plan(self, message, context):
+        raise NotImplementedError
 
 
 class TestAICoreValidation(unittest.TestCase):
@@ -384,3 +406,259 @@ class TestAICoreOrchestratorIntegration(unittest.TestCase):
         self.assertIn("last_status", ctx)
         self.assertIn("last_result_summary", ctx)
         self.assertLessEqual(len(ctx["recent_turns"]), 5)
+
+
+class TestValidatePlanContent(unittest.TestCase):
+
+    def test_valid_without_title(self):
+        plan = PlanContent(
+            sections=[PlanSection(heading="Bloco 1", body="Conteudo do bloco.")],
+        )
+        self.assertTrue(validate_plan_content(plan))
+
+    def test_valid_with_title(self):
+        plan = PlanContent(
+            sections=[PlanSection(heading="Bloco 1", body="Conteudo do bloco.")],
+            title="Plano de estudo",
+        )
+        self.assertTrue(validate_plan_content(plan))
+
+    def test_non_plancontent_rejected(self):
+        self.assertFalse(validate_plan_content("não é plano"))
+        self.assertFalse(validate_plan_content(None))
+        self.assertFalse(validate_plan_content({}))
+
+    def test_empty_sections_rejected(self):
+        plan = PlanContent(sections=[])
+        self.assertFalse(validate_plan_content(plan))
+
+    def test_tuple_sections_rejected(self):
+        plan = PlanContent(
+            sections=(PlanSection(heading="Bloco 1", body="Conteudo"),)
+        )
+        self.assertFalse(validate_plan_content(plan))
+
+    def test_non_plansection_item_rejected(self):
+        plan = PlanContent(sections=["não é seção"])
+        self.assertFalse(validate_plan_content(plan))
+
+    def test_blank_heading_rejected(self):
+        plan = PlanContent(
+            sections=[PlanSection(heading="   ", body="Conteudo")],
+        )
+        self.assertFalse(validate_plan_content(plan))
+
+    def test_non_string_heading_rejected(self):
+        plan = PlanContent(
+            sections=[PlanSection(heading=123, body="Conteudo")],
+        )
+        self.assertFalse(validate_plan_content(plan))
+
+    def test_blank_body_rejected(self):
+        plan = PlanContent(
+            sections=[PlanSection(heading="Bloco 1", body="  \n ")],
+        )
+        self.assertFalse(validate_plan_content(plan))
+
+    def test_non_string_body_rejected(self):
+        plan = PlanContent(
+            sections=[PlanSection(heading="Bloco 1", body=42)],
+        )
+        self.assertFalse(validate_plan_content(plan))
+
+    def test_non_string_title_rejected(self):
+        plan = PlanContent(
+            sections=[PlanSection(heading="Bloco 1", body="Conteudo")],
+            title=123,
+        )
+        self.assertFalse(validate_plan_content(plan))
+
+class TestPlanRouteClassification(unittest.TestCase):
+
+    def setUp(self):
+        self.intents = [
+            "abrir aplicativo",
+            "listar aliases",
+            "buscar segundo cérebro",
+            "calendário hoje",
+            "criar evento calendário",
+        ]
+        self.provider = FakeAIProvider()
+        self.core = AICore(provider=self.provider, available_intents=self.intents)
+
+    def test_non_executable_types_constant(self):
+        self.assertEqual(NON_EXECUTABLE_TYPES, {PLAN_REQUEST, PLAN_REFERENCE})
+        self.assertIn(PLAN_REQUEST, AICore.VALID_TYPES)
+        self.assertIn(PLAN_REFERENCE, AICore.VALID_TYPES)
+
+    def test_closed_reference_set(self):
+        self.assertEqual(
+            PLAN_REFERENCE_SELECTORS,
+            {"first", "second", "last", "previous", "same"},
+        )
+
+    def test_plan_request_valid(self):
+        self.provider._response = AIResponse(
+            type=PLAN_REQUEST, message="Vou montar um plano."
+        )
+        result = self.core.classify("monte um plano de estudo", {})
+        self.assertIsNotNone(result)
+        self.assertEqual(result.type, PLAN_REQUEST)
+        self.assertIsNone(result.intent)
+        self.assertEqual(result.arguments, {})
+
+    def test_plan_request_with_intent_rejected(self):
+        self.provider._response = AIResponse(
+            type=PLAN_REQUEST,
+            intent="abrir aplicativo",
+            arguments={"target": "Obsidian"},
+            message="Plano.",
+        )
+        self.assertIsNone(self.core.classify("plano", {}))
+
+    def test_plan_request_with_nonempty_arguments_rejected(self):
+        self.provider._response = AIResponse(
+            type=PLAN_REQUEST, arguments={"reference": "first"}, message="Plano."
+        )
+        self.assertIsNone(self.core.classify("plano", {}))
+
+    def test_plan_request_with_nondict_arguments_rejected(self):
+        self.provider._response = AIResponse(
+            type=PLAN_REQUEST, arguments="first", message="Plano."
+        )
+        self.assertIsNone(self.core.classify("plano", {}))
+
+    def test_plan_request_without_message_rejected(self):
+        self.provider._response = AIResponse(type=PLAN_REQUEST)
+        self.assertIsNone(self.core.classify("plano", {}))
+
+    def test_plan_reference_valid_for_each_selector(self):
+        for selector in PLAN_REFERENCE_SELECTORS:
+            with self.subTest(selector=selector):
+                self.provider._response = AIResponse(
+                    type=PLAN_REFERENCE,
+                    arguments={"reference": selector},
+                    message="Aqui esta o plano.",
+                )
+                result = self.core.classify("mostre o plano", {})
+                self.assertIsNotNone(result)
+                self.assertEqual(result.type, PLAN_REFERENCE)
+                self.assertIsNone(result.intent)
+                self.assertEqual(result.arguments, {"reference": selector})
+
+    def test_plan_reference_invalid_selector_rejected(self):
+        for selector in ("third", "1", "FIRST", "previous plan", "", "all"):
+            with self.subTest(selector=selector):
+                self.provider._response = AIResponse(
+                    type=PLAN_REFERENCE,
+                    arguments={"reference": selector},
+                    message="Plano.",
+                )
+                self.assertIsNone(self.core.classify("plano", {}))
+
+    def test_plan_reference_missing_key_rejected(self):
+        self.provider._response = AIResponse(
+            type=PLAN_REFERENCE, arguments={}, message="Plano."
+        )
+        self.assertIsNone(self.core.classify("plano", {}))
+
+    def test_plan_reference_extra_key_rejected(self):
+        self.provider._response = AIResponse(
+            type=PLAN_REFERENCE,
+            arguments={"reference": "first", "extra": 1},
+            message="Plano.",
+        )
+        self.assertIsNone(self.core.classify("plano", {}))
+
+    def test_plan_reference_non_string_selector_rejected(self):
+        self.provider._response = AIResponse(
+            type=PLAN_REFERENCE, arguments={"reference": 1}, message="Plano."
+        )
+        self.assertIsNone(self.core.classify("plano", {}))
+
+    def test_plan_reference_nondict_arguments_rejected(self):
+        self.provider._response = AIResponse(
+            type=PLAN_REFERENCE, arguments="first", message="Plano."
+        )
+        self.assertIsNone(self.core.classify("plano", {}))
+
+    def test_plan_reference_with_intent_rejected(self):
+        self.provider._response = AIResponse(
+            type=PLAN_REFERENCE,
+            intent="criar evento calendário",
+            arguments={"reference": "last"},
+            message="Plano.",
+        )
+        self.assertIsNone(self.core.classify("plano", {}))
+
+
+class _PlanProvider(AIProvider):
+    """Fake de provider para testar generate_plan_detailed."""
+
+    def __init__(self, plan=None, error=None):
+        self._plan = plan
+        self._error = error
+
+    def generate(self, message, context, available_intents):
+        raise AssertionError("generate nao deve ser chamado aqui")
+
+    def generate_plan(self, message, context):
+        if self._error is not None:
+            raise self._error
+        return self._plan
+
+
+def _valid_plan() -> PlanContent:
+    return PlanContent(
+        sections=[PlanSection(heading="Bloco 1", body="Conteudo do bloco.")]
+    )
+
+
+class TestGeneratePlanDetailed(unittest.TestCase):
+
+    def _core(self, provider: _PlanProvider) -> AICore:
+        return AICore(provider=provider, available_intents=[])
+
+    def test_valid_plan_returns_plan_and_none(self):
+        plan = _valid_plan()
+        result, failure = self._core(_PlanProvider(plan=plan)).generate_plan_detailed(
+            "monte um plano", {}
+        )
+        self.assertIs(result, plan)
+        self.assertIsNone(failure)
+
+    def test_timeout_maps_to_provider_timeout(self):
+        provider = _PlanProvider(error=ProviderTimeoutError())
+        result, failure = self._core(provider).generate_plan_detailed("plano", {})
+        self.assertIsNone(result)
+        self.assertEqual(failure, FAILURE_PROVIDER_TIMEOUT)
+
+    def test_transport_maps_to_provider_unavailable(self):
+        provider = _PlanProvider(error=ProviderTransportError())
+        result, failure = self._core(provider).generate_plan_detailed("plano", {})
+        self.assertIsNone(result)
+        self.assertEqual(failure, FAILURE_PROVIDER_UNAVAILABLE)
+
+    def test_response_error_maps_to_invalid_response(self):
+        provider = _PlanProvider(error=ProviderResponseError())
+        result, failure = self._core(provider).generate_plan_detailed("plano", {})
+        self.assertIsNone(result)
+        self.assertEqual(failure, FAILURE_INVALID_RESPONSE)
+
+    def test_none_response_maps_to_invalid_response(self):
+        provider = _PlanProvider(plan=None)
+        result, failure = self._core(provider).generate_plan_detailed("plano", {})
+        self.assertIsNone(result)
+        self.assertEqual(failure, FAILURE_INVALID_RESPONSE)
+
+    def test_invalid_structure_maps_to_rejected_by_policy(self):
+        provider = _PlanProvider(plan=PlanContent(sections=[]))
+        result, failure = self._core(provider).generate_plan_detailed("plano", {})
+        self.assertIsNone(result)
+        self.assertEqual(failure, FAILURE_REJECTED_BY_POLICY)
+
+    def test_generic_exception_maps_to_provider_unavailable(self):
+        provider = _PlanProvider(error=RuntimeError("boom"))
+        result, failure = self._core(provider).generate_plan_detailed("plano", {})
+        self.assertIsNone(result)
+        self.assertEqual(failure, FAILURE_PROVIDER_UNAVAILABLE)

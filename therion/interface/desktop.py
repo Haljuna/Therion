@@ -483,6 +483,19 @@ class MainWindow(QMainWindow):
 
         self._append("Therion", result.message)
 
+        if result.registered_plan_id is not None:
+            self._orchestrator.ack_registered_plan_displayed(
+                result.registered_plan_id
+            )
+
+        if result.plan_candidate_id is not None:
+            ack = self._orchestrator.ack_plan_displayed(result.plan_candidate_id)
+            if ack.status == "displayed_not_registered":
+                self._append(
+                    "Therion",
+                    "Este plano foi exibido, mas não pôde ser registrado nesta sessão. Por isso, ele não poderá ser recuperado depois por referências como “mesmo plano”, “plano anterior” ou “primeiro plano”.",
+                )
+
         if result.status == "awaiting_confirmation" and result.plan is not None:
             self._pending_plan = result.plan
             self._update_orbe("awaiting_confirmation")
