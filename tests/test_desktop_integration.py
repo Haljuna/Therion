@@ -398,7 +398,7 @@ class TestDesktopOrchestratorIntegration(unittest.TestCase):
         window._clear_conversation()
         window._clear_conversation.assert_called_once()
 
-    def test_clear_conversation_clears_history_only(self) -> None:
+    def test_clear_conversation_clears_history(self) -> None:
         from therion.interface.desktop import MainWindow
         mock_app = MagicMock()
         with patch.object(MainWindow, '_setup_ui'):
@@ -407,6 +407,19 @@ class TestDesktopOrchestratorIntegration(unittest.TestCase):
                 window._history = MagicMock()
                 window._clear_conversation()
                 window._history.clear.assert_called_once()
+
+    def test_clear_conversation_calls_orchestrator_clear_session(self) -> None:
+        """_clear_conversation deve limpar histórico visual E chamar orchestrator.clear_session() (E1/M9b)."""
+        from therion.interface.desktop import MainWindow
+        mock_app = MagicMock()
+        with patch.object(MainWindow, '_setup_ui'):
+            with patch.object(MainWindow, '_setup_tray'):
+                window = MainWindow(mock_app)
+                window._history = MagicMock()
+                window._orchestrator = MagicMock()
+                window._clear_conversation()
+                window._history.clear.assert_called_once()
+                window._orchestrator.clear_session.assert_called_once_with()
 
     def test_pending_plan_not_cleared_by_clear(self) -> None:
         from therion.interface.desktop import MainWindow

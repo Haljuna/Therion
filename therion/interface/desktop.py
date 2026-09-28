@@ -603,8 +603,9 @@ class MainWindow(QMainWindow):
         )
 
     def _clear_conversation(self) -> None:
-        """Limpa apenas o histórico visual da conversa."""
+        """Limpa o histórico visual da conversa e encerra o estado interno da sessão."""
         self._history.clear()
+        self._orchestrator.clear_session()
 
     def _update_clear_button_state(self) -> None:
         """Habilita/desabilita o botão Limpar conforme _pending_plan."""
