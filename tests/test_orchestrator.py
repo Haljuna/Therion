@@ -1001,6 +1001,118 @@ class TestPlanRequestBranch(unittest.TestCase):
         self.assertEqual(result.status, "success")
 
 
+class TestPlanTooLarge(unittest.TestCase):
+    """Teto preventivo de 5500 caracteres no ramo plan_request (E1/M10o1)."""
+
+    _COMMAND = "gere um plano de estudo sobre proporções"
+    _TOO_LARGE_MESSAGE = (
+        "O plano gerado ficou extenso demais para esta sessão. "
+        "Tente pedir um plano mais conciso."
+    )
+
+    def _make_orch(self):
+        from therion.core.ai_core import AICore
+        from therion.core.ai_provider import AIResponse
+
+        fake_provider = MagicMock()
+        fake_provider.generate.return_value = AIResponse(
+            type="plan_request",
+            intent=None,
+            arguments={},
+            message="Gerar plano.",
+        )
+        ai_core = AICore(
+            provider=fake_provider,
+            available_intents=["listar aliases"],
+        )
+        orch = Orchestrator(simulate=True, ai_core=ai_core)
+        return orch, fake_provider
+
+    @staticmethod
+    def _plan_with_rendered_len(target: int) -> PlanContent:
+        """Plano cujo texto renderizado tem exatamente `target` caracteres."""
+        return PlanContent(
+            title=None,
+            sections=[PlanSection(heading="T", body="x" * (target - 2))],
+        )
+
+    def test_plan_exactly_5500_is_accepted(self) -> None:
+        """Texto com exatamente 5500 caracteres segue o fluxo normal, integral."""
+        orch, fake_provider = self._make_orch()
+        plan = self._plan_with_rendered_len(5500)
+        rendered = Orchestrator._render_plan_content(plan)
+        self.assertEqual(len(rendered), 5500)
+        fake_provider.generate_plan.return_value = plan
+
+        result = orch.process_command(self._COMMAND)
+
+        self.assertEqual(result.status, "success")
+        self.assertIsNotNone(result.plan_candidate_id)
+        self.assertIsNotNone(orch._plan_state.candidate)
+        self.assertEqual(result.message, rendered)
+        self.assertEqual(len(result.message), 5500)
+        self.assertEqual(result.message, orch._plan_state.candidate.text)
+
+    def test_plan_5501_is_rejected_as_plan_too_large(self) -> None:
+        """Texto com 5501 caracteres é rejeitado com plan_too_large, sem candidate."""
+        orch, fake_provider = self._make_orch()
+        plan = self._plan_with_rendered_len(5501)
+        rendered = Orchestrator._render_plan_content(plan)
+        self.assertEqual(len(rendered), 5501)
+        fake_provider.generate_plan.return_value = plan
+
+        result = orch.process_command(self._COMMAND)
+
+        self.assertEqual(result.status, "plan_too_large")
+        self.assertEqual(result.message, self._TOO_LARGE_MESSAGE)
+        self.assertIsNone(result.plan_candidate_id)
+        self.assertIsNone(orch._plan_state.candidate)
+        self.assertEqual(orch._plan_state.order, ())
+        self.assertIsNone(orch._plan_state.current_plan_id)
+
+    def test_plan_too_large_preserves_existing_session_state(self) -> None:
+        """Rejeição preserva plano pré-registrado, order e current_plan_id."""
+        orch, fake_provider = self._make_orch()
+        seed_id = orch._plan_state.set_candidate("Plano anterior")
+        ack = orch.ack_plan_displayed(seed_id)
+        self.assertEqual(ack.status, "registered")
+        order_before = orch._plan_state.order
+        current_before = orch._plan_state.current_plan_id
+        self.assertIsNotNone(current_before)
+
+        plan = self._plan_with_rendered_len(5501)
+        fake_provider.generate_plan.return_value = plan
+        result = orch.process_command(self._COMMAND)
+
+        self.assertEqual(result.status, "plan_too_large")
+        self.assertEqual(result.message, self._TOO_LARGE_MESSAGE)
+        self.assertEqual(orch._plan_state.order, order_before)
+        self.assertEqual(orch._plan_state.current_plan_id, current_before)
+        self.assertIsNone(orch._plan_state.candidate)
+        registered = orch._plan_state.get_plan(current_before)
+        self.assertIsNotNone(registered)
+        self.assertEqual(registered.text, "Plano anterior")
+
+    def test_accepted_plan_is_verbatim_and_rejected_plan_is_not_truncated(self) -> None:
+        """Aceitação preserva o texto integral; rejeição não trunca para 5500."""
+        orch, fake_provider = self._make_orch()
+        plan = self._plan_with_rendered_len(5500)
+        rendered = Orchestrator._render_plan_content(plan)
+        fake_provider.generate_plan.return_value = plan
+        accepted = orch.process_command(self._COMMAND)
+        self.assertEqual(accepted.message, rendered)
+        self.assertEqual(len(accepted.message), 5500)
+
+        orch2, fake_provider2 = self._make_orch()
+        big_plan = self._plan_with_rendered_len(6000)
+        fake_provider2.generate_plan.return_value = big_plan
+        rejected = orch2.process_command(self._COMMAND)
+        self.assertEqual(rejected.status, "plan_too_large")
+        self.assertEqual(rejected.message, self._TOO_LARGE_MESSAGE)
+        self.assertNotIn("x" * 100, rejected.message)
+        self.assertIsNone(orch2._plan_state.candidate)
+
+
 class TestOrchestrationResultRegisteredPlanId(unittest.TestCase):
     """Campo opcional registered_plan_id (E1/M6e2)."""
 

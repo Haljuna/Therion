@@ -105,7 +105,7 @@ class IntentRecognizer:
     )
 
     _REJECT_ARTIFACT_PATTERN = re.compile(
-        r"^(?:um(?:a)?\s+)?(?:nota|arquivo|pasta|documento)",
+        r"^(?:um(?:a)?\s+)?(?:nota|arquivo|pasta|documento|plano|roteiro)\b",
         re.IGNORECASE,
     )
 

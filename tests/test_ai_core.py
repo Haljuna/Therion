@@ -562,6 +562,38 @@ class TestPlanRouteClassification(unittest.TestCase):
         )
         self.assertIsNone(self.core.classify("plano", {}))
 
+    def test_plan_reference_missing_key_uses_explicit_current_message(self):
+        cases = {
+            "Mostre o primeiro plano desta sessão.": "first",
+            "Mostre o segundo plano desta sessão.": "second",
+            "Exiba o último plano.": "last",
+            "Mostre o plano anterior desta sessão.": "previous",
+            "Mande esse mesmo plano inteiro novamente.": "same",
+        }
+        for message, selector in cases.items():
+            with self.subTest(message=message):
+                original = AIResponse(
+                    type=PLAN_REFERENCE, arguments={}, message="Vou consultar o plano."
+                )
+                self.provider._response = original
+                result = self.core.classify(message, {})
+                self.assertIsNotNone(result)
+                self.assertEqual(result.arguments, {"reference": selector})
+                self.assertEqual(original.arguments, {})
+
+    def test_plan_reference_missing_key_does_not_guess_from_history(self):
+        self.provider._response = AIResponse(
+            type=PLAN_REFERENCE, arguments={}, message="Vou consultar o plano."
+        )
+        context = {"recent_turns": [{"role": "user", "text": "segundo plano"}]}
+        self.assertIsNone(self.core.classify("Mostre o plano.", context))
+
+    def test_plan_reference_missing_key_rejects_multiple_selectors(self):
+        self.provider._response = AIResponse(
+            type=PLAN_REFERENCE, arguments={}, message="Vou consultar o plano."
+        )
+        self.assertIsNone(self.core.classify("Mostre o primeiro e o segundo plano.", {}))
+
     def test_plan_reference_extra_key_rejected(self):
         self.provider._response = AIResponse(
             type=PLAN_REFERENCE,

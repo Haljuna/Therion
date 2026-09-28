@@ -44,6 +44,12 @@ _STUDY_SIGNALS = ("estudar", "estudo", "pomodoro")
 _AI_INVALID_RESPONSE_STATUS = "ai_invalid_response"
 _AI_INVALID_RESPONSE_MESSAGE = "A resposta da IA auxiliar não pôde ser validada."
 
+PLAN_TEXT_MAX_CHARS = 5500
+PLAN_TOO_LARGE_MESSAGE = (
+    "O plano gerado ficou extenso demais para esta sessão. "
+    "Tente pedir um plano mais conciso."
+)
+
 # Motivo interno (ClassifyOutcome.failure) → status externo + mensagem não técnica.
 _AI_FAILURE_DIAGNOSTICS: dict[str, tuple[str, str]] = {
     "provider_unavailable": (
@@ -1300,6 +1306,14 @@ class Orchestrator:
                     self._finalize_session_result(result)
                     return result
                 texto = self._render_plan_content(plan)
+                if len(texto) > PLAN_TEXT_MAX_CHARS:
+                    self._complete_task()
+                    result = OrchestrationResult(
+                        status="plan_too_large",
+                        message=PLAN_TOO_LARGE_MESSAGE,
+                    )
+                    self._finalize_session_result(result)
+                    return result
                 candidate_id = self._plan_state.set_candidate(texto)
                 if candidate_id is None:
                     self._complete_task()

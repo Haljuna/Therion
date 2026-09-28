@@ -1,5 +1,6 @@
 """Testes unitários isolados para OllamaProvider (A2.5-R)."""
 
+import inspect
 import json
 import unittest
 import urllib.error
@@ -14,9 +15,12 @@ from therion.core.ai_provider import (
 )
 from therion.core.ai_provider_ollama import (
     ENDPOINT,
+    FORMAT_SCHEMA,
     OllamaProvider,
     PLAN_FORMAT_SCHEMA,
     PLAN_SYSTEM_PROMPT,
+    PLAN_TIMEOUT_SECONDS,
+    SYSTEM_PROMPT,
 )
 
 
@@ -65,12 +69,12 @@ class TestOllamaProviderIsolated(unittest.TestCase):
             self.assertEqual(proxy_handlers[0].proxies, {})
 
     def test_payload_contains_required_fields(self):
-        """Payload deve conter stream: false, format, temperature: 0 e num_ctx: 2048."""
+        """Payload deve conter stream: false, format, temperature: 0 e num_ctx: 4096."""
         payload = self.provider._build_payload("Olá", {}, ["calendário hoje"])
         self.assertEqual(payload["model"], "qwen3:4b-instruct")
         self.assertFalse(payload["stream"])
         self.assertEqual(payload["options"]["temperature"], 0)
-        self.assertEqual(payload["options"]["num_ctx"], 2048)
+        self.assertEqual(payload["options"]["num_ctx"], 4096)
 
         # Verificação do format schema
         fmt = payload["format"]
@@ -165,6 +169,19 @@ class TestOllamaProviderIsolated(unittest.TestCase):
         self.assertIn("plan_reference", system_content)
         self.assertIn("NUNCA pode ser vazio ({})", system_content)
         self.assertIn('"reference"', system_content)
+
+    def test_payload_keeps_second_reference_even_when_unavailable(self):
+        """A existência do segundo plano é decidida pelo Orchestrator, não pelo classificador."""
+        payload = self.provider._build_payload("Mostre o segundo plano desta sessão", {}, [])
+        system_content = payload["messages"][0]["content"]
+        self.assertIn("Não decida se o plano existe na sessão", system_content)
+        self.assertIn("O Orchestrator verifica a existência", system_content)
+        example_line = next(
+            line for line in system_content.splitlines()
+            if 'Usuário: "Mostre o segundo plano desta sessão"' in line
+        )
+        self.assertIn('"type":"plan_reference"', example_line)
+        self.assertIn('"arguments":{"reference":"second"}', example_line)
 
     def test_raw_json_invalid_rejected(self):
         """JSON bruto inválido deve lançar ValueError."""
@@ -485,13 +502,17 @@ class TestContextualShortResponseRule(unittest.TestCase):
         self.assertIn("calendário hoje", system_content)
 
     def test_system_prompt_contains_contextual_example(self):
-        """SYSTEM_PROMPT contém exemplo de continuação contextual (sim como confirmação)."""
+        """Exemplo contextual 'oferta de plano + sim' é classificado como plan_request."""
         payload = self.provider._build_payload("teste", {}, [])
         system_content = payload["messages"][0]["content"]
-        self.assertIn("Deseja que eu gere esse plano completo agora?", system_content)
-        self.assertIn("sim", system_content)
-        self.assertIn("Revisão de conceitos", system_content)
-        self.assertIn("Prática de exercícios", system_content)
+        example_line = next(
+            ln
+            for ln in system_content.splitlines()
+            if "Deseja que eu gere esse plano completo agora?" in ln
+        )
+        self.assertIn('Usuário: "sim"', example_line)
+        self.assertIn('"type":"plan_request"', example_line)
+        self.assertNotIn('"type":"chat"', example_line)
         self.assertNotIn("vou gerar agora", system_content.lower())
 
     def test_system_prompt_contains_study_pomodoro_example(self):
@@ -581,12 +602,12 @@ class TestPomodoroBudgetTransport(unittest.TestCase):
         self.assertIn("sim", sc.lower())
         self.assertIn("tudo", sc.lower())
         self.assertIn("mensagem imediatamente anterior", sc.lower())
-        # exemplo contextual
+        # exemplo contextual reclassificado como plan_request
         self.assertIn("Deseja que eu gere esse plano completo agora?", sc)
+        self.assertIn('"type":"plan_request"', sc)
         # exemplo calendário
         self.assertIn("O que tenho hoje?", sc)
-        # entrega imediata
-        self.assertIn("Revisão de conceitos", sc)
+        # message do classificador não contém o plano completo
         self.assertNotIn("vou gerar agora", sc.lower())
 
 
@@ -672,6 +693,214 @@ class TestGeneratePlan(unittest.TestCase):
         payload = mock_send.call_args[0][0]
         self.assertEqual(payload["format"], PLAN_FORMAT_SCHEMA)
         self.assertIsInstance(result, PlanContent)
+
+
+class TestPlanRequestPrecedence(unittest.TestCase):
+    """Testes estruturais da precedência de plan_request e das regras de 'sim' (M10d1)."""
+
+    def setUp(self):
+        self.provider = OllamaProvider(model="qwen3:4b-instruct", timeout=30)
+        payload = self.provider._build_payload("teste", {}, [])
+        self.sc = payload["messages"][0]["content"]
+
+    def test_system_prompt_declares_plan_request_precedence_over_chat(self):
+        """SYSTEM_PROMPT declara precedência de plan_request sobre chat para pedido explícito."""
+        self.assertIn("PRECEDÊNCIA", self.sc)
+        self.assertIn("gerar, criar, montar ou entregar", self.sc)
+        self.assertIn('prevalece sobre a classificação como "chat"', self.sc)
+        self.assertIn('classifique sempre como "plan_request"', self.sc)
+
+    def test_system_prompt_contains_natural_plan_request_example(self):
+        """Exemplo natural 'Gere um plano textual completo...' é classificado como plan_request."""
+        example_line = next(
+            ln
+            for ln in self.sc.splitlines()
+            if "Gere um plano textual completo" in ln
+            and '"type":"plan_request"' in ln
+        )
+        self.assertIn('"type":"plan_request"', example_line)
+
+    def test_system_prompt_contextual_sim_after_offer_is_plan_request(self):
+        """'sim' aceitando oferta explícita de plano do assistente é plan_request."""
+        example_line = next(
+            ln
+            for ln in self.sc.splitlines()
+            if "Deseja que eu gere esse plano completo agora?" in ln
+        )
+        self.assertIn('Usuário: "sim"', example_line)
+        self.assertIn('"type":"plan_request"', example_line)
+        self.assertIn(
+            "EXCEÇÃO: se a mensagem imediatamente anterior do assistente for uma oferta explícita",
+            self.sc,
+        )
+
+    def test_system_prompt_isolated_sim_not_promoted_to_plan_request(self):
+        """"sim" isolado, sem oferta explícita anterior, não vira plan_request automaticamente."""
+        self.assertIn('"Sim" isolado', self.sc)
+        self.assertIn("sem oferta explícita de plano", self.sc)
+        self.assertIn('NÃO vira "plan_request" automaticamente', self.sc)
+        for line in self.sc.splitlines():
+            if '"sim"' in line and '"type":"plan_request"' in line:
+                self.assertIn("Assistente", line)
+
+
+class TestPlanGenerationTimeout(unittest.TestCase):
+    """Timeout separado da geração dirigida de planos (M10j1)."""
+
+    def setUp(self):
+        self.provider = OllamaProvider(model="qwen3:4b-instruct", timeout=90)
+
+    def test_plan_timeout_constant_is_120(self):
+        """Constante de timeout da geração dirigida é 120 s."""
+        self.assertEqual(PLAN_TIMEOUT_SECONDS, 120)
+        self.assertNotEqual(PLAN_TIMEOUT_SECONDS, self.provider.timeout)
+
+    def test_classification_uses_provider_timeout_90(self):
+        """generate() envia timeout=self.timeout (90 s) para o transporte."""
+        raw = json.dumps(
+            {"type": "chat", "message": "ola", "intent": None, "arguments": {}}
+        )
+        with patch.object(self.provider, "_send_request", return_value=raw) as mock_send:
+            self.provider.generate("oi", {}, [])
+        self.assertEqual(mock_send.call_args.kwargs.get("timeout"), 90)
+
+    def test_generate_plan_uses_separate_timeout_120(self):
+        """generate_plan() envia o timeout dedicado de 120 s para o transporte."""
+        content = json.dumps(
+            {"title": "Plano", "sections": [{"heading": "Bloco", "body": "Corpo"}]}
+        )
+        with patch.object(self.provider, "_send_request", return_value=content) as mock_send:
+            self.provider.generate_plan("monte um plano", {})
+        self.assertEqual(mock_send.call_args.kwargs.get("timeout"), PLAN_TIMEOUT_SECONDS)
+        self.assertEqual(mock_send.call_args.kwargs.get("timeout"), 120)
+
+    def test_generate_plan_does_not_mutate_provider_timeout(self):
+        """generate_plan() não altera self.timeout global do provider."""
+        content = json.dumps(
+            {"title": "Plano", "sections": [{"heading": "Bloco", "body": "Corpo"}]}
+        )
+        with patch.object(self.provider, "_send_request", return_value=content):
+            self.provider.generate_plan("monte um plano", {})
+        self.assertEqual(self.provider.timeout, 90)
+
+    def test_payloads_keep_fields_and_num_ctx(self):
+        """Payloads preservam campos, options e num_ctx atuais (sem mudança semântica)."""
+        cls_payload = self.provider._build_payload("teste", {}, [])
+        plan_payload = self.provider._build_plan_payload("monte um plano", {})
+        self.assertEqual(
+            sorted(cls_payload.keys()), ["format", "messages", "model", "options", "stream"]
+        )
+        self.assertEqual(cls_payload["options"], {"temperature": 0, "num_ctx": 4096})
+        self.assertNotIn("num_predict", cls_payload["options"])
+        self.assertIs(cls_payload["format"], FORMAT_SCHEMA)
+        self.assertEqual(
+            sorted(plan_payload.keys()),
+            ["format", "messages", "model", "options", "stream"],
+        )
+        self.assertEqual(
+            plan_payload["options"],
+            {"temperature": 0, "num_ctx": 2048, "num_predict": 1536},
+        )
+        self.assertIs(plan_payload["format"], PLAN_FORMAT_SCHEMA)
+
+    def test_prompts_keep_structural_markers(self):
+        """SYSTEM_PROMPT e PLAN_SYSTEM_PROMPT mantêm marcadores estruturais."""
+        self.assertIn("PRECEDÊNCIA", SYSTEM_PROMPT)
+        self.assertIn('NÃO vira "plan_request" automaticamente', SYSTEM_PROMPT)
+        self.assertIn("Entregue o plano completo e imediato", PLAN_SYSTEM_PROMPT)
+        self.assertIn('exatamente as chaves: "title"', PLAN_SYSTEM_PROMPT)
+
+
+class TestPlanConcisenessPrompt(unittest.TestCase):
+    """Política de concisão no PLAN_SYSTEM_PROMPT (E1/M10o1)."""
+
+    def test_prompt_asks_for_concise_plan(self):
+        """PLAN_SYSTEM_PROMPT pede plano conciso, seções curtas e sem redundância."""
+        self.assertIn("conciso", PLAN_SYSTEM_PROMPT)
+        self.assertIn("curtas e objetivas", PLAN_SYSTEM_PROMPT)
+        self.assertIn("sem explicações redundantes", PLAN_SYSTEM_PROMPT)
+        self.assertIn("nem repetição do mesmo conteúdo", PLAN_SYSTEM_PROMPT)
+
+    def test_prompt_requires_covering_all_requested_topics(self):
+        """PLAN_SYSTEM_PROMPT exige cobrir todos os tópicos explicitamente pedidos."""
+        self.assertIn("todos os tópicos explicitamente pedidos", PLAN_SYSTEM_PROMPT)
+
+    def test_prompt_allows_grouping_related_topics(self):
+        """PLAN_SYSTEM_PROMPT permite agrupar tópicos relacionados."""
+        self.assertIn("Agrupe tópicos relacionados", PLAN_SYSTEM_PROMPT)
+
+    def test_prompt_has_no_rigid_section_maximum(self):
+        """PLAN_SYSTEM_PROMPT declara ausência de máximo rígido de seções."""
+        self.assertIn("Não há máximo rígido de seções", PLAN_SYSTEM_PROMPT)
+        self.assertNotRegex(PLAN_SYSTEM_PROMPT, r"máximo de \d+ seções")
+
+    def test_prompt_targets_below_5500_chars(self):
+        """PLAN_SYSTEM_PROMPT orienta manter o texto abaixo de 5500 caracteres."""
+        self.assertIn("claramente abaixo de 5500 caracteres", PLAN_SYSTEM_PROMPT)
+
+    def test_plan_format_schema_unchanged(self):
+        """PLAN_FORMAT_SCHEMA permanece intacto, sem campo complete."""
+        self.assertEqual(PLAN_FORMAT_SCHEMA["type"], "object")
+        self.assertEqual(PLAN_FORMAT_SCHEMA["required"], ["sections"])
+        self.assertFalse(PLAN_FORMAT_SCHEMA["additionalProperties"])
+        props = PLAN_FORMAT_SCHEMA["properties"]
+        self.assertEqual(set(props.keys()), {"title", "sections"})
+        self.assertEqual(props["sections"]["minItems"], 1)
+        item = props["sections"]["items"]
+        self.assertEqual(item["required"], ["heading", "body"])
+        self.assertFalse(item["additionalProperties"])
+        self.assertNotIn("complete", props)
+
+
+class TestPlanNumPredictLimit(unittest.TestCase):
+    """num_predict restrito ao payload de plano (E1/M10q1 -> M10r1)."""
+
+    def setUp(self):
+        self.provider = OllamaProvider(model="qwen3:4b-instruct", timeout=90)
+
+    def test_plan_payload_options(self):
+        """Payload de plano mantém temperature 0, num_ctx 2048 e num_predict 1536."""
+        payload = self.provider._build_plan_payload("monte um plano", {})
+        options = payload["options"]
+        self.assertEqual(options["temperature"], 0)
+        self.assertEqual(options["num_ctx"], 2048)
+        self.assertEqual(options["num_predict"], 1536)
+
+    def test_classification_payload_has_no_num_predict(self):
+        """Payload de classificação mantém temperature 0 e num_ctx 4096, sem num_predict."""
+        payload = self.provider._build_payload("oi", {}, [])
+        options = payload["options"]
+        self.assertEqual(options["temperature"], 0)
+        self.assertEqual(options["num_ctx"], 4096)
+        self.assertNotIn("num_predict", options)
+
+    def test_plan_schema_and_prompt_unchanged(self):
+        """PLAN_FORMAT_SCHEMA e PLAN_SYSTEM_PROMPT permanecem intactos."""
+        self.assertEqual(PLAN_FORMAT_SCHEMA["required"], ["sections"])
+        self.assertFalse(PLAN_FORMAT_SCHEMA["additionalProperties"])
+        self.assertEqual(
+            set(PLAN_FORMAT_SCHEMA["properties"].keys()), {"title", "sections"}
+        )
+        self.assertIn("Entregue o plano completo e imediato", PLAN_SYSTEM_PROMPT)
+
+    def test_plan_timeout_still_120(self):
+        """Timeout dedicado de geração continua 120 s."""
+        self.assertEqual(PLAN_TIMEOUT_SECONDS, 120)
+
+    def test_public_api_signatures_unchanged(self):
+        """Assinaturas públicas de generate, generate_plan e _send_request não mudaram."""
+        self.assertEqual(
+            list(inspect.signature(OllamaProvider.generate).parameters),
+            ["self", "message", "context", "available_intents"],
+        )
+        self.assertEqual(
+            list(inspect.signature(OllamaProvider.generate_plan).parameters),
+            ["self", "message", "context"],
+        )
+        self.assertEqual(
+            list(inspect.signature(OllamaProvider._send_request).parameters),
+            ["self", "payload", "timeout"],
+        )
 
 
 if __name__ == "__main__":

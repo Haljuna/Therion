@@ -4,7 +4,8 @@ Recebe mensagem + contexto, pede inferência ao AIProvider,
 valida deterministicamente a resposta e devolve AIResponse ou None.
 """
 
-from dataclasses import dataclass
+import re
+from dataclasses import dataclass, replace
 from typing import Optional
 
 from therion.core.ai_provider import (
@@ -25,6 +26,24 @@ FAILURE_PROVIDER_UNAVAILABLE = "provider_unavailable"
 FAILURE_PROVIDER_TIMEOUT = "provider_timeout"
 FAILURE_INVALID_RESPONSE = "invalid_response"
 FAILURE_REJECTED_BY_POLICY = "rejected_by_policy"
+
+_PLAN_REFERENCE_CUES = {
+    "first": re.compile(r"\bprimeir[oa]\b", re.IGNORECASE),
+    "second": re.compile(r"\bsegund[oa]\b", re.IGNORECASE),
+    "last": re.compile(r"\b[úu]ltim[oa]\b", re.IGNORECASE),
+    "previous": re.compile(r"\banterior\b", re.IGNORECASE),
+    "same": re.compile(r"\bmesm[oa]\b", re.IGNORECASE),
+}
+
+
+def _explicit_plan_reference_selector(message: str) -> Optional[str]:
+    """Devolve um seletor só quando o turno atual contém uma única pista explícita."""
+    matches = [
+        selector
+        for selector, pattern in _PLAN_REFERENCE_CUES.items()
+        if pattern.search(message)
+    ]
+    return matches[0] if len(matches) == 1 else None
 
 
 def validate_plan_content(plan: object) -> bool:
@@ -125,6 +144,11 @@ class AICore:
 
         if raw is None:
             return ClassifyOutcome(failure=FAILURE_INVALID_RESPONSE)
+
+        if raw.type == PLAN_REFERENCE and raw.intent is None and raw.arguments == {}:
+            selector = _explicit_plan_reference_selector(message)
+            if selector is not None:
+                raw = replace(raw, arguments={"reference": selector})
 
         if not self._validate(raw):
             return ClassifyOutcome(failure=FAILURE_REJECTED_BY_POLICY)

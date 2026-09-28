@@ -158,6 +158,20 @@ class TestCreateEventParsing(unittest.TestCase):
         """"criar arquivo" → None."""
         self.assertIsNone(self.ir.parse("criar arquivo"))
 
+    def test_reject_study_plan_as_calendar_event(self):
+        """Pedido de plano de estudos deve seguir para a classificação de IA."""
+        self.assertIsNone(self.ir.parse(
+            "Crie um plano de estudos de 3 dias para revisar matrizes, determinantes e sistemas lineares."
+        ))
+        self.assertIsNone(self.ir.parse("criar plano de estudos"))
+        self.assertIsNone(self.ir.parse("crie um roteiro de estudos"))
+
+    def test_explicit_calendar_event_with_plan_title_still_works(self):
+        """Keyword evento mantém o fluxo de calendário, mesmo com 'plano' no título."""
+        intent = self.ir.parse("crie um evento Plano de estudos amanhã às 15h")
+        self.assertIsNotNone(intent)
+        self.assertEqual(intent.action, "criar evento calendário")
+
     # --- Preservação de raw_command ---
 
     def test_raw_command_preserved_with_punctuation(self):
