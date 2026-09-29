@@ -22,7 +22,7 @@ from PySide6.QtWidgets import (
     QSpacerItem,
 )
 from PySide6.QtGui import QAction, QKeyEvent, QFont, QIcon
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, QThread, Signal, Slot
 
 _ICONE_PATH = Path(__file__).resolve().parent.parent / "assets" / "icone.png"
 
@@ -31,7 +31,7 @@ from therion.calendar.google_adapter import GoogleCalendarAdapter
 from therion.config import load_config
 from therion.core.ai_core import AICore
 from therion.core.ai_provider_ollama import OllamaProvider
-from therion.core.orchestrator import Orchestrator, Plan
+from therion.core.orchestrator import OrchestrationResult, Orchestrator, Plan
 from therion.governance.confirmation import ConfirmationHandler
 
 
@@ -218,6 +218,43 @@ class ConversationInput(QPlainTextEdit):
             super().keyPressEvent(event)
 
 
+class _CommandWorker(QThread):
+    """Executa somente o Orchestrator, sem acessar widgets Qt."""
+
+    def __init__(self, orchestrator: Orchestrator, command: str) -> None:
+        super().__init__()
+        self._orchestrator = orchestrator
+        self._command = command
+        self.result: OrchestrationResult | None = None
+        self.failed = False
+
+    def run(self) -> None:
+        try:
+            self.result = self._orchestrator.process_command(self._command)
+        except Exception:
+            self.failed = True
+
+
+class _ConfirmationWorker(QThread):
+    """Executa a confirmação no Orchestrator sem acessar widgets Qt."""
+
+    def __init__(self, orchestrator: Orchestrator, plan: Plan, confirmed: bool) -> None:
+        super().__init__()
+        self._orchestrator = orchestrator
+        self._plan = plan
+        self._confirmed = confirmed
+        self.result: OrchestrationResult | None = None
+        self.failed = False
+
+    def run(self) -> None:
+        try:
+            self.result = self._orchestrator.confirm_and_execute(
+                self._plan, confirmed=self._confirmed
+            )
+        except Exception:
+            self.failed = True
+
+
 class MainWindow(QMainWindow):
     """Janela principal mínima do Therion."""
 
@@ -241,6 +278,10 @@ class MainWindow(QMainWindow):
         self._orchestrator = Orchestrator(**orch_kwargs)
         self._confirmation_handler = ConfirmationHandler()
         self._pending_plan: Optional[Plan] = None
+        self._processing = False
+        self._command_worker: _CommandWorker | None = None
+        self._confirmation_worker: _ConfirmationWorker | None = None
+        self._quit_requested = False
         if not self._therion_icon.isNull():
             self.setWindowIcon(self._therion_icon)
         self._setup_ui()
@@ -461,6 +502,8 @@ class MainWindow(QMainWindow):
 
     def _send_command(self) -> None:
         """Envia o comando digitado para o Orchestrator."""
+        if self._processing:
+            return
         command = self._input.toPlainText().strip()
         if not command:
             return
@@ -474,13 +517,39 @@ class MainWindow(QMainWindow):
 
         self._update_orbe("thinking")
 
+        self._set_processing(True)
         try:
-            result = self._orchestrator.process_command(command)
+            self._start_command_worker(command)
         except Exception:
+            self._command_worker = None
             self._update_orbe("error")
             self._append("Therion", "Ocorreu um erro inesperado ao processar o comando.")
-            return
+            self._set_processing(False)
 
+    def _start_command_worker(self, command: str) -> None:
+        worker = _CommandWorker(self._orchestrator, command)
+        self._command_worker = worker
+        worker.finished.connect(self._finish_command)
+        worker.start()
+
+    @Slot()
+    def _finish_command(self) -> None:
+        """Recebe o resultado após a thread terminar; widgets ficam na thread da UI."""
+        worker = self._command_worker
+        try:
+            if worker is None or worker.failed or worker.result is None:
+                self._update_orbe("error")
+                self._append("Therion", "Ocorreu um erro inesperado ao processar o comando.")
+            else:
+                self._apply_command_result(worker.result)
+        finally:
+            self._command_worker = None
+            self._set_processing(False)
+            if self._quit_requested:
+                self._quit_application()
+
+    def _apply_command_result(self, result: OrchestrationResult) -> None:
+        """Apresenta o resultado de um comando na interface."""
         self._append("Therion", result.message)
 
         if result.registered_plan_id is not None:
@@ -509,6 +578,8 @@ class MainWindow(QMainWindow):
 
     def _handle_confirmation(self, response: str) -> None:
         """Processa resposta de confirmação."""
+        if self._processing:
+            return
         self._input.clear()
         self._append("Você", response)
 
@@ -521,21 +592,47 @@ class MainWindow(QMainWindow):
         if confirmed:
             self._update_orbe("executing")
 
+        self._set_processing(True)
         try:
-            final_result = self._orchestrator.confirm_and_execute(
-                self._pending_plan, confirmed=confirmed
-            )
+            self._start_confirmation_worker(self._pending_plan, confirmed)
         except Exception:
-            self._pending_plan = None
-            self._update_orbe("error")
-            self._append("Therion", "Ocorreu um erro inesperado ao processar a confirmação.")
-            self._update_clear_button_state()
-            self._update_confirm_panel()
-            return
+            self._confirmation_worker = None
+            self._show_confirmation_error()
+            self._set_processing(False)
 
+    def _start_confirmation_worker(self, plan: Plan, confirmed: bool) -> None:
+        worker = _ConfirmationWorker(self._orchestrator, plan, confirmed)
+        self._confirmation_worker = worker
+        worker.finished.connect(self._finish_confirmation)
+        worker.start()
+
+    @Slot()
+    def _finish_confirmation(self) -> None:
+        """Apresenta a confirmação após a thread terminar, sempre na thread da UI."""
+        worker = self._confirmation_worker
+        try:
+            if worker is None or worker.failed or worker.result is None:
+                self._show_confirmation_error()
+            else:
+                self._apply_confirmation_result(worker.result)
+        finally:
+            self._confirmation_worker = None
+            self._set_processing(False)
+            if self._quit_requested:
+                self._quit_application()
+
+    def _show_confirmation_error(self) -> None:
         self._pending_plan = None
-        self._append("Therion", final_result.message)
-        orbe_state = _ORBE_STATUS_MAP.get(final_result.status, "idle")
+        self._update_orbe("error")
+        self._append("Therion", "Ocorreu um erro inesperado ao processar a confirmação.")
+        self._update_clear_button_state()
+        self._update_confirm_panel()
+
+    def _apply_confirmation_result(self, result: OrchestrationResult) -> None:
+        """Apresenta o resultado de uma confirmação na interface."""
+        self._pending_plan = None
+        self._append("Therion", result.message)
+        orbe_state = _ORBE_STATUS_MAP.get(result.status, "idle")
         self._update_orbe(orbe_state)
         self._update_clear_button_state()
         self._update_confirm_panel()
@@ -604,12 +701,22 @@ class MainWindow(QMainWindow):
 
     def _clear_conversation(self) -> None:
         """Limpa o histórico visual da conversa e encerra o estado interno da sessão."""
+        if self._processing:
+            return
         self._history.clear()
         self._orchestrator.clear_session()
 
+    def _set_processing(self, processing: bool) -> None:
+        """Impede ações concorrentes sem bloquear a edição do campo de texto."""
+        self._processing = processing
+        for name in ("_send_button", "_btn_confirm", "_btn_cancel"):
+            if hasattr(self, name):
+                getattr(self, name).setEnabled(not processing)
+        self._update_clear_button_state()
+
     def _update_clear_button_state(self) -> None:
-        """Habilita/desabilita o botão Limpar conforme _pending_plan."""
-        self._clear_button.setEnabled(self._pending_plan is None)
+        """Habilita Limpar somente fora de processamento e confirmação."""
+        self._clear_button.setEnabled(not self._processing and self._pending_plan is None)
 
     def _on_confirm(self) -> None:
         """Botão Confirmar: reutiliza fluxo existente de confirmação."""
@@ -649,17 +756,27 @@ class MainWindow(QMainWindow):
 
     def _quit_application(self) -> None:
         """Encerra a aplicação de forma limpa (ação explícita do menu)."""
+        if self._processing:
+            if not self._quit_requested:
+                self._quit_requested = True
+                self._append("Therion", "O aplicativo será encerrado após concluir a tarefa atual.")
+            return
         self._closing = True
         if self._tray_icon:
             self._tray_icon.hide()
         self._app.quit()
 
     def closeEvent(self, event) -> None:
-        """Oculta a janela para a bandeja (não encerra a aplicação)."""
+        """Oculta na bandeja ou adia o fechamento até a operação terminar."""
         if self._closing:
             if self._tray_icon:
                 self._tray_icon.hide()
             super().closeEvent(event)
+            return
+
+        if self._processing and not (self._tray_icon and self._tray_icon.isVisible()):
+            event.ignore()
+            self._quit_application()
             return
 
         if self._tray_icon and self._tray_icon.isVisible():

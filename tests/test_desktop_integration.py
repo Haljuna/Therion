@@ -1,11 +1,227 @@
 """Testes de integracao da interface desktop com configuracao."""
 
 import sys
+import threading
+import time
 from unittest.mock import patch, MagicMock
 from pathlib import Path
 import tempfile
 import shutil
 import unittest
+
+
+def _complete_command_inline(window, command):
+    """Mantém os testes de resultado isolados do despacho em thread."""
+    worker = MagicMock()
+    try:
+        worker.result = window._orchestrator.process_command(command)
+        worker.failed = False
+    except Exception:
+        worker.result = None
+        worker.failed = True
+    window._command_worker = worker
+    window._finish_command()
+
+
+def _complete_confirmation_inline(window, plan, confirmed):
+    """Preserva os testes de resultado da confirmação sem criar uma thread."""
+    worker = MagicMock()
+    try:
+        worker.result = window._orchestrator.confirm_and_execute(
+            plan, confirmed=confirmed
+        )
+        worker.failed = False
+    except Exception:
+        worker.result = None
+        worker.failed = True
+    window._confirmation_worker = worker
+    window._finish_confirmation()
+
+
+class TestDesktopAsyncCommand(unittest.TestCase):
+    """Verifica o despacho real sem depender do Ollama ou de tempo de inferência."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        from PySide6.QtWidgets import QApplication
+
+        cls._qapp = QApplication.instance() or QApplication(sys.argv)
+
+    def test_window_remains_responsive_and_quit_waits_for_command(self) -> None:
+        from PySide6.QtCore import QTimer
+        from PySide6.QtWidgets import QApplication
+        from therion.core.orchestrator import OrchestrationResult
+        from therion.interface.desktop import MainWindow
+
+        app = MagicMock()
+        with patch.object(MainWindow, "_setup_tray"):
+            window = MainWindow(app)
+        started = threading.Event()
+        release = threading.Event()
+        ui_thread = threading.get_ident()
+        appended = []
+        original_append = window._append
+
+        def record_append(sender, message):
+            appended.append((sender, threading.get_ident()))
+            original_append(sender, message)
+
+        def process(command):
+            started.set()
+            release.wait(timeout=3)
+            return OrchestrationResult(status="success", message="Concluído.")
+
+        window._append = record_append
+        window._orchestrator = MagicMock()
+        window._orchestrator.process_command.side_effect = process
+        window._input.setPlainText("primeiro comando")
+        window._send_command()
+
+        try:
+            self.assertTrue(started.wait(timeout=1))
+            self.assertTrue(window._processing)
+            timer_fired = []
+            QTimer.singleShot(0, lambda: timer_fired.append(True))
+            QApplication.processEvents()
+            self.assertTrue(timer_fired)
+
+            window._input.setPlainText("rascunho")
+            window._send_command()
+            self.assertEqual(window._input.toPlainText(), "rascunho")
+            window._quit_application()
+            app.quit.assert_not_called()
+        finally:
+            release.set()
+            deadline = time.monotonic() + 3
+            while window._processing and time.monotonic() < deadline:
+                QApplication.processEvents()
+                time.sleep(0.005)
+            if window._command_worker is not None:
+                window._command_worker.wait(1000)
+                QApplication.processEvents()
+
+        self.assertFalse(window._processing)
+        window._orchestrator.process_command.assert_called_once_with("primeiro comando")
+        self.assertIn(("Therion", ui_thread), appended)
+        app.quit.assert_called_once()
+
+    def test_confirmation_remains_responsive_and_quit_waits(self) -> None:
+        from PySide6.QtCore import QTimer
+        from PySide6.QtWidgets import QApplication
+        from therion.core.orchestrator import OrchestrationResult
+        from therion.interface.desktop import MainWindow
+
+        app = MagicMock()
+        with patch.object(MainWindow, "_setup_tray"):
+            window = MainWindow(app)
+        started = threading.Event()
+        release = threading.Event()
+        ui_thread = threading.get_ident()
+        appended = []
+        original_append = window._append
+
+        def record_append(sender, message):
+            appended.append((sender, message, threading.get_ident()))
+            original_append(sender, message)
+
+        def confirm(plan, confirmed):
+            started.set()
+            release.wait(timeout=3)
+            return OrchestrationResult(status="executed_simulated", message="Executado.")
+
+        window._append = record_append
+        window._orchestrator = MagicMock()
+        window._orchestrator.confirm_and_execute.side_effect = confirm
+        plan = MagicMock()
+        window._pending_plan = plan
+        window._handle_confirmation("sim")
+
+        try:
+            self.assertTrue(started.wait(timeout=1))
+            self.assertTrue(window._processing)
+            timer_fired = []
+            QTimer.singleShot(0, lambda: timer_fired.append(True))
+            QApplication.processEvents()
+            self.assertTrue(timer_fired)
+
+            window._handle_confirmation("não")
+            window._clear_conversation()
+            window._orchestrator.clear_session.assert_not_called()
+            window._quit_application()
+            app.quit.assert_not_called()
+        finally:
+            release.set()
+            deadline = time.monotonic() + 3
+            while window._processing and time.monotonic() < deadline:
+                QApplication.processEvents()
+                time.sleep(0.005)
+            if window._confirmation_worker is not None:
+                window._confirmation_worker.wait(1000)
+                QApplication.processEvents()
+
+        self.assertFalse(window._processing)
+        self.assertIsNone(window._pending_plan)
+        window._orchestrator.confirm_and_execute.assert_called_once_with(
+            plan, confirmed=True
+        )
+        self.assertIn(("Therion", "Executado.", ui_thread), appended)
+        app.quit.assert_called_once()
+
+    def test_close_without_tray_waits_for_active_command(self) -> None:
+        from PySide6.QtWidgets import QApplication
+        from therion.core.orchestrator import OrchestrationResult
+        from therion.interface.desktop import MainWindow
+
+        app = MagicMock()
+        with patch.object(MainWindow, "_setup_tray"):
+            window = MainWindow(app)
+        window.show()
+        started = threading.Event()
+        release = threading.Event()
+        messages = []
+        original_append = window._append
+
+        def record_append(sender, message):
+            messages.append((sender, message))
+            original_append(sender, message)
+
+        def process(command):
+            started.set()
+            release.wait(timeout=3)
+            return OrchestrationResult(status="success", message="Concluído.")
+
+        window._append = record_append
+        window._orchestrator = MagicMock()
+        window._orchestrator.process_command.side_effect = process
+        window._input.setPlainText("comando de teste")
+        window._send_command()
+
+        try:
+            self.assertTrue(started.wait(timeout=1))
+            self.assertFalse(window.close())
+            self.assertTrue(window.isVisible())
+            self.assertFalse(window.close())
+            app.quit.assert_not_called()
+            self.assertEqual(
+                messages.count((
+                    "Therion",
+                    "O aplicativo será encerrado após concluir a tarefa atual.",
+                )),
+                1,
+            )
+        finally:
+            release.set()
+            deadline = time.monotonic() + 3
+            while window._processing and time.monotonic() < deadline:
+                QApplication.processEvents()
+                time.sleep(0.005)
+            if window._command_worker is not None:
+                window._command_worker.wait(1000)
+                QApplication.processEvents()
+            window.hide()
+
+        self.assertFalse(window._processing)
+        app.quit.assert_called_once()
 
 
 class TestDesktopIntegration(unittest.TestCase):
@@ -95,6 +311,12 @@ class TestDesktopOrchestratorIntegration(unittest.TestCase):
                 window._pending_plan = None
                 window._update_clear_button_state = MagicMock()
                 window._clear_conversation = MagicMock()
+                window._start_command_worker = lambda command: _complete_command_inline(
+                    window, command
+                )
+                window._start_confirmation_worker = lambda plan, confirmed: (
+                    _complete_confirmation_inline(window, plan, confirmed)
+                )
                 return window
 
     def test_orchestrator_instantiated(self) -> None:
@@ -162,6 +384,97 @@ class TestDesktopOrchestratorIntegration(unittest.TestCase):
         window._send_command()
         window._append.assert_any_call("Você", "liste meus aliases")
         window._append.assert_any_call("Therion", "Nenhum alias cadastrado.")
+
+    def test_processing_blocks_reentry_and_clear_without_consuming_draft(self) -> None:
+        from therion.interface.desktop import MainWindow
+
+        window = self._create_window()
+        window._input.toPlainText.return_value = "primeiro comando"
+
+        def process(command):
+            self.assertEqual(command, "primeiro comando")
+            self.assertTrue(window._processing)
+            window._input.toPlainText.return_value = "rascunho durante a espera"
+            window._send_command()
+            window._handle_confirmation("sim")
+            MainWindow._clear_conversation(window)
+            return MagicMock(
+                status="success", message="Concluído.", plan=None,
+                registered_plan_id=None, plan_candidate_id=None,
+            )
+
+        window._orchestrator.process_command.side_effect = process
+        window._send_command()
+
+        window._orchestrator.process_command.assert_called_once_with("primeiro comando")
+        window._orchestrator.confirm_and_execute.assert_not_called()
+        window._orchestrator.clear_session.assert_not_called()
+        window._history.clear.assert_not_called()
+        window._input.clear.assert_called_once()
+        window._send_button.setEnabled.assert_any_call(False)
+        window._send_button.setEnabled.assert_any_call(True)
+        self.assertFalse(window._processing)
+
+    def test_confirmation_processing_blocks_reentry(self) -> None:
+        from therion.interface.desktop import MainWindow
+
+        window = self._create_window()
+        plan = MagicMock()
+        window._pending_plan = plan
+        window._input.toPlainText.return_value = "sim"
+        window._confirmation_handler.evaluate_response.return_value = True
+
+        def confirm(current_plan, confirmed):
+            self.assertIs(current_plan, plan)
+            self.assertTrue(confirmed)
+            self.assertTrue(window._processing)
+            window._handle_confirmation("não")
+            MainWindow._clear_conversation(window)
+            return MagicMock(status="success", message="Executado.")
+
+        window._orchestrator.confirm_and_execute.side_effect = confirm
+        window._send_command()
+
+        window._orchestrator.confirm_and_execute.assert_called_once_with(
+            plan, confirmed=True
+        )
+        window._orchestrator.clear_session.assert_not_called()
+        window._input.clear.assert_called_once()
+        self.assertFalse(window._processing)
+
+    def test_processing_is_released_after_command_error(self) -> None:
+        window = self._create_window()
+        window._input.toPlainText.return_value = "comando"
+        window._orchestrator.process_command.side_effect = RuntimeError("falha")
+
+        window._send_command()
+
+        self.assertFalse(window._processing)
+        window._send_button.setEnabled.assert_called_with(True)
+
+    def test_processing_is_released_after_confirmation_error(self) -> None:
+        window = self._create_window()
+        window._pending_plan = MagicMock()
+        window._input.toPlainText.return_value = "sim"
+        window._confirmation_handler.evaluate_response.return_value = True
+        window._orchestrator.confirm_and_execute.side_effect = RuntimeError("falha")
+
+        window._send_command()
+
+        self.assertFalse(window._processing)
+        window._send_button.setEnabled.assert_called_with(True)
+
+    def test_clear_button_disabled_during_processing(self) -> None:
+        from therion.interface.desktop import MainWindow
+
+        window = self._create_window()
+        window._processing = True
+        MainWindow._update_clear_button_state(window)
+        window._clear_button.setEnabled.assert_called_with(False)
+
+        window._processing = False
+        MainWindow._update_clear_button_state(window)
+        window._clear_button.setEnabled.assert_called_with(True)
 
     def test_enter_sends_command(self) -> None:
         window = self._create_window()
@@ -706,6 +1019,12 @@ class TestDesktopOrbe(unittest.TestCase):
         window = MainWindow(mock_app)
         window._orchestrator = MagicMock()
         window._confirmation_handler = MagicMock()
+        window._start_command_worker = lambda command: _complete_command_inline(
+            window, command
+        )
+        window._start_confirmation_worker = lambda plan, confirmed: (
+            _complete_confirmation_inline(window, plan, confirmed)
+        )
         return window
 
     def test_update_orbe_idle(self) -> None:
@@ -906,6 +1225,12 @@ class TestDesktopConfirmPanel(unittest.TestCase):
         window._history = MagicMock()
         window._clear_button = MagicMock()
         window._pending_plan = None
+        window._start_command_worker = lambda command: _complete_command_inline(
+            window, command
+        )
+        window._start_confirmation_worker = lambda plan, confirmed: (
+            _complete_confirmation_inline(window, plan, confirmed)
+        )
         return window
 
     def test_panel_hidden_initially(self) -> None:
