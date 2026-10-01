@@ -633,6 +633,7 @@ Próxima etapa principal:
 - `Estado Atual.md`, `Roadmap.md`, `.opencode/` e notas de retomada/referência ainda compõem trabalho local separado; não incluí-los automaticamente em um checkpoint de código
 - Pedido de plano muito extenso continua sem solução integrada; bug de esclarecimento após nome de aplicativo digitado incorretamente e rascunho de calendário ao Limpar são pendências separadas
 - Consumo de RAM do aplicativo Therion: usuário observou picos ao abrir e usar o app, enquanto o piloto isolado da V2 permaneceu quase estável durante horas. É uma hipótese de problema no app, não um vazamento ou causa confirmados. Ao retomar, medir por processo a RAM ao abrir, após comandos e após alguns minutos ocioso, registrando qual ação antecede cada aumento; investigar separadamente do piloto de voz.
+- 30/09/2026 — Falha real ao tentar criar um evento no Google Calendar: a renovação da credencial OAuth retornou `invalid_grant` (`Token has been expired or revoked`) e o Therion informou que é necessária reautenticação. A criação do evento não foi confirmada; verificar no calendário antes de repetir o pedido. A causa específica ainda não foi diagnosticada. Conferir o estado da tela de consentimento OAuth (inclusive se está em `Testing`) e a configuração da credencial, sem expor segredos. Não há evidência de que o erro esteja relacionado a cobrança. Não reautenticar nem alterar tokens automaticamente.
 
 ---
 
