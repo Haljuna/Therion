@@ -135,6 +135,8 @@ Expandir a capacidade de consulta e integração da Therion mantendo-a como inte
 
 ## V2 — Voz
 
+**Estado em 29/09/2026:** política conceitual registrada; V2.1 em piloto isolado de transcrição local, ainda sem integração ao Therion. O teste ao vivo mostrou boa latência e memória, mas precisão parcial em verbos de comando. Próximo passo: verificar revisão e cancelamento antes de decidir implementação. A resposta falada/TTS pertence a etapa posterior.
+
 ### Objetivo
 
 Adicionar interação natural por voz.
@@ -270,7 +272,7 @@ Não fazem parte da V0:
 
 ## Próxima meta
 
-**Iniciar a V2 — Voz.**
+**Prosseguir com a V2.1 — entrada por voz segura.** E1 concluída para planos de tamanho normal (M10 manual e M11 auditoria, checkpoint `001e2d4`) e interface responsiva checkpointada em `3333cc2`. A V2.1 está em piloto isolado; nenhuma integração de voz ao Therion foi feita. Planos muito extensos permanecem adiados.
 
 Primeiro marco técnico (V0 concluída):
 
@@ -297,11 +299,12 @@ Pendências pós-V1, como fonte de tarefas, evolução da SKILL-002 e busca natu
 ### Melhorias de usabilidade registradas em validação manual
 
 - normalizar respostas de cancelamento em fluxos de evento, aceitando pontuação terminal como `cancele.` e `não.`;
-- adicionar continuidade conversacional limitada à sessão, sem memória permanente nem autorização implícita;
+- continuidade conversacional limitada à sessão, sem memória permanente nem autorização implícita: E1 / DEC-034 concluída para planos de tamanho normal; implementação principal em `fe0f1e4`, Limpar em `6c78343`, M10 validada manualmente e M11 auditada antes do checkpoint `001e2d4`. Planos muito extensos seguem em frente futura;
 - distinguir compromissos em andamento do próximo compromisso na SKILL-002;
 - permitir raízes de leitura explicitamente autorizadas por tarefa para consultas ao Segundo Cérebro, sem acesso permanente;
 - evoluir a busca natural somente após a definição segura das raízes autorizadas;
 - melhorar a resposta controlada quando a IA local/Ollama não estiver disponível.
+- bloqueio da interface durante comandos demorados: corrigido com workers Qt e trava de reentrada, checkpoint `3333cc2`, antes da V2. Cancelamento de inferência em andamento não faz parte desse checkpoint;
 - adicionar status e saúde das integrações, exibindo capacidades disponíveis e problemas de conexão sem expor segredos.
 
 O Capability Registry, a seleção entre múltiplos providers, agregação, versionamento de capacidades, MCP e Skills que dependem de contexto amplo ficam **após a estabilização da V1**. Eles não são pré-requisitos para a SKILL-002 atual.

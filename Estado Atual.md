@@ -26,12 +26,19 @@ As decisões técnicas principais da V1 foram aprovadas (interface PySide6, proc
 - ✅ Calendário — criação com confirmação
 - ✅ IA central local-first (Marco A2 concluído)
 - 🧪 SKILL-002 — Planejar meu dia integrada, validada manualmente e Em teste (panorama read-only da agenda)
+- ✅ E1 — Planos conversacionais efêmeros na sessão (DEC-034): M9 validada, M10 aprovada manualmente para planos de tamanho normal e M11 auditada; checkpoints `fe0f1e4`, `6c78343` e `001e2d4`. Planos muito extensos seguem adiados em nota própria.
+- ✅ Interface responsiva durante comandos demorados: checkpoint `3333cc2`; envio e confirmação usam workers Qt, sem segundo envio durante o processamento. Validada manualmente; 206 testes focados passaram na validação anterior ao commit.
+- 🧪 V2.1 — Voz: piloto isolado de transcrição local em andamento, ainda sem integração ao Therion.
 
 ### Prioridade arquitetural atual
 
-A auditoria read-only do bootstrap dos agentes e do custo de contexto foi concluída (5.1-B e 5.1-C aprovados, G1–G8 = 8/8 PASSA). O checkpoint Git foi deliberadamente adiado porque o working tree contém alterações mistas e Roadmap.md não apresentou fronteira segura.
+A auditoria read-only do bootstrap dos agentes e do custo de contexto foi concluída (5.1-B e 5.1-C aprovados, G1–G8 = 8/8 PASSA). O checkpoint Git principal da E1 foi realizado em `fe0f1e4`.
 
-O próximo passo é o usuário escolher explicitamente uma pasta ou nota pessoal como fonte autorizada de tarefas. A SKILL-002 somente voltará a consultar o Segundo Cérebro após essa decisão e autorização.
+Ressalva de integridade da baseline: o repositório ainda possui falha preexistente em `read_scope`, portanto NÃO deve ser declarado globalmente verde.
+
+A V2 — Voz entrou em avaliação prática isolada. `Planejamento da V2 - Voz.md` registra a política conceitual; nenhum caminho de voz foi integrado ao Therion. O piloto com microfone teve boa latência, mas precisão parcial em verbos de comando, exigindo transcrição editável e envio manual antes de qualquer execução.
+
+O próximo passo da V2.1 é testar revisão e cancelamento no piloto isolado e então decidir o menor escopo de integração. Em frente separada, o usuário ainda precisa escolher explicitamente uma pasta ou nota pessoal como fonte autorizada de tarefas para a SKILL-002.
 
 ### Progresso da V1 validado até o momento
 
@@ -603,7 +610,7 @@ Marco de governança alcançado: Camada Zero implementada e validada (5.1-B e 5.
 
 Próxima etapa principal:
 
-**V2 — Voz**, mantendo SKILL-002 em Em teste e a trilha pós-V1 condicionada a decisão própria.
+**V2.1 — entrada por voz segura, ainda em piloto isolado.** A E1 e a interface responsiva possuem checkpoints locais; planos extensos continuam adiados. SKILL-002 permanece Em teste e a trilha pós-V1 condicionada a decisão própria.
 
 ### Frentes fechadas nesta rodada
 
@@ -622,12 +629,19 @@ Próxima etapa principal:
 
 - Lógica `text == command` em `_extract_pomodoro_budget()` pode ignorar turnos idênticos (baixo impacto)
 - `abra o obsidian` pode ocasionalmente retornar do Ollama com `arguments={}` (comportamento pré-existente do modelo, não causado por esta rodada)
-- Working tree acumulado com 12 arquivos modificados sem commit
+- Baseline global ainda possui falha preexistente em `read_scope` (não declarar o repositório globalmente verde)
+- `Estado Atual.md`, `Roadmap.md`, `.opencode/` e notas de retomada/referência ainda compõem trabalho local separado; não incluí-los automaticamente em um checkpoint de código
+- Pedido de plano muito extenso continua sem solução integrada; bug de esclarecimento após nome de aplicativo digitado incorretamente e rascunho de calendário ao Limpar são pendências separadas
+- Consumo de RAM do aplicativo Therion: usuário observou picos ao abrir e usar o app, enquanto o piloto isolado da V2 permaneceu quase estável durante horas. É uma hipótese de problema no app, não um vazamento ou causa confirmados. Ao retomar, medir por processo a RAM ao abrir, após comandos e após alguns minutos ocioso, registrando qual ação antecede cada aumento; investigar separadamente do piloto de voz.
 
 ---
 
 ## Checkpoints recentes
 
+- `3333cc2` — `fix(desktop): keep interface responsive during processing`
+- `001e2d4` — `fix(plans): stabilize generation and session references`
+- `6c78343` — `fix(desktop): clear plan session with conversation`
+- `fe0f1e4` — `feat: add session plan continuity and references`
 - `f260bff` — `fix(v1): correct calendar date parsing`
 - `97b595f` — `feat(v1): connect calendar confirmation to event creation`
 - `c1cc4cd` — `feat(v1): add calendar event creation adapter`

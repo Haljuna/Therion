@@ -182,6 +182,38 @@ Se o protocolo exigido não puder ser localizado ou carregado, o agente deve:
 
 Nenhuma sessão ou modelo pode presumir autorização implícita. A confirmação deve seguir o protocolo, sem inferir autorização a partir de respostas vagas, comentários ou feedback sobre o plano.
 
+### REGRA PERMANENTE DE RECUPERAÇÃO APÓS TRUNCAMENTO
+
+Se sua resposta, relatório ou execução textual for truncada/interrompida por limite da interface/modelo:
+
+1. Na próxima oportunidade, verifique primeiro se a resposta anterior terminou de forma incompleta.
+2. NÃO repita toda a tarefa.
+3. Identifique o último ponto claramente concluído.
+4. Continue SOMENTE a partir do primeiro item faltante.
+5. Preserve todas as restrições, escopo e proibições da instrução original.
+6. NÃO refaça edições, testes, comandos ou ações já concluídos sem necessidade.
+7. Se houver dúvida sobre o que realmente foi concluído antes do truncamento:
+   - faça uma auditoria mínima READ-ONLY;
+   - confirme o estado;
+   - depois continue apenas a parte faltante.
+8. Se o truncamento ocorreu durante escrita/edição:
+   - NÃO presuma que a alteração foi aplicada;
+   - confira o arquivo/diff de forma read-only antes de continuar.
+9. Se o truncamento ocorreu durante teste/comando:
+   - NÃO rerode automaticamente;
+   - primeiro determine, pelo output/estado disponível, se o comando terminou e qual foi o resultado.
+10. Ao retomar, comece com:
+   "RETOMADA APÓS TRUNCAMENTO:"
+   e informe em 2–5 linhas:
+   - último ponto concluído;
+   - ponto exato de retomada;
+   - se alguma verificação read-only foi necessária.
+11. Depois continue normalmente do ponto faltante.
+12. Se não for possível determinar com segurança onde parou, PARE E REPORTE em vez de adivinhar.
+
+Esta regra NÃO aumenta permissões.
+Ela NÃO autoriza novas edições, testes, Git, Ollama, downloads, instalações ou qualquer ação fora do escopo já autorizado.
+
 ## 8. Escrita no Segundo Cérebro
 
 Alterações permanentes no Segundo Cérebro continuam sujeitas às regras de Autonomia e Permissões e ao Protocolo de Confirmação.
