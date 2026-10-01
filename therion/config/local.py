@@ -35,6 +35,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "model": "qwen3:4b-instruct",
         "timeout_seconds": 90,
     },
+    "voice": {"model_path": None},
 }
 
 _CONFIG_PATH: Path | None = None
@@ -122,6 +123,18 @@ def _validate_config(data: dict[str, Any]) -> dict[str, Any]:
         if type(ai_timeout) is not int or ai_timeout <= 0:
             ai["timeout_seconds"] = DEFAULT_CONFIG["ai"]["timeout_seconds"]
         validated["ai"] = ai
+
+    # voice -> dict com model_path (str | None); preserva chaves extras
+    voice = validated.get("voice")
+    if not isinstance(voice, dict):
+        validated["voice"] = DEFAULT_CONFIG["voice"].copy()
+    else:
+        voice_merged = DEFAULT_CONFIG["voice"].copy()
+        voice_merged.update(voice)
+        model_path = voice_merged.get("model_path")
+        if model_path is not None and not isinstance(model_path, str):
+            voice_merged["model_path"] = None
+        validated["voice"] = voice_merged
 
     return validated
 

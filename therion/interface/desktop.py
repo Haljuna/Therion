@@ -33,6 +33,10 @@ from therion.core.ai_core import AICore
 from therion.core.ai_provider_ollama import OllamaProvider
 from therion.core.orchestrator import OrchestrationResult, Orchestrator, Plan
 from therion.governance.confirmation import ConfirmationHandler
+from therion.voice.capture import AudioCaptureService
+from therion.voice.pipeline import VoicePipeline
+from therion.voice.service import VoiceModelService
+from therion.voice.transcription import VoiceTranscriptionService
 
 
 # ---------------------------------------------------------------------------
@@ -159,6 +163,16 @@ STYLESHEET = (
     "}"
     "#btnSend:hover { background-color: " + _ACCENT_HOVER + "; }"
     "#btnSend:pressed { background-color: #c2410c; }"
+    "#btnVoice {"
+    "  background-color: " + _BG_INPUT + ";"
+    "  color: " + _TEXT_SECONDARY + ";"
+    "  border: 1px solid " + _BORDER + ";"
+    "  border-radius: 8px;"
+    "  padding: 8px 14px;"
+    "  font-size: 13px;"
+    "  font-weight: bold;"
+    "}"
+    "#btnVoice:hover { color: " + _ACCENT_HOVER + "; border: 1px solid " + _ACCENT + "; }"
     "#confirmPanel {"
     "  background-color: " + _BG_SECONDARY + ";"
     "  border: none;"
@@ -258,7 +272,14 @@ class _ConfirmationWorker(QThread):
 class MainWindow(QMainWindow):
     """Janela principal mínima do Therion."""
 
-    def __init__(self, app: QApplication, config: dict | None = None) -> None:
+    def __init__(
+        self,
+        app: QApplication,
+        config: dict | None = None,
+        *,
+        voice_service: Optional[VoiceModelService] = None,
+        voice_pipeline: Optional[VoicePipeline] = None,
+    ) -> None:
         super().__init__()
         self.setWindowTitle("Therion")
         self.resize(800, 600)
@@ -282,6 +303,17 @@ class MainWindow(QMainWindow):
         self._command_worker: _CommandWorker | None = None
         self._confirmation_worker: _ConfirmationWorker | None = None
         self._quit_requested = False
+
+        model_path = self._config.get("voice", {}).get("model_path")
+        if voice_service is not None:
+            self._voice_service = voice_service
+        else:
+            self._voice_service = VoiceModelService(model_path)
+        self._voice_service.loaded.connect(self._on_voice_model_loaded)
+        self._voice_service.load_failed.connect(self._on_voice_model_failed)
+        self._voice_service.state_changed.connect(self._on_voice_model_state_changed)
+        self._voice_pipeline: Optional[VoicePipeline] = voice_pipeline
+
         if not self._therion_icon.isNull():
             self.setWindowIcon(self._therion_icon)
         self._setup_ui()
@@ -448,6 +480,13 @@ class MainWindow(QMainWindow):
         self._send_button.setObjectName("btnSend")
         self._send_button.clicked.connect(self._send_command)
         input_layout.addWidget(self._send_button)
+
+        self._voice_button = QPushButton("Falar")
+        self._voice_button.setObjectName("btnVoice")
+        self._voice_button.clicked.connect(self._on_voice_clicked)
+        self._voice_button.pressed.connect(self._on_voice_pressed)
+        self._voice_button.released.connect(self._on_voice_released)
+        input_layout.addWidget(self._voice_button)
 
         layout.addLayout(input_layout)
 
@@ -699,20 +738,148 @@ class MainWindow(QMainWindow):
             self._history.verticalScrollBar().maximum()
         )
 
+    def _cancel_voice_if_active(self) -> None:
+        """Cancela o pipeline de voz se estiver ativo (recording ou transcribing).
+
+        Helper resiliente: nunca propaga exceção ao chamador.
+        """
+        try:
+            if self._voice_pipeline is not None:
+                self._voice_pipeline.cancel()
+        except Exception:  # noqa: BLE001
+            pass
+
     def _clear_conversation(self) -> None:
         """Limpa o histórico visual da conversa e encerra o estado interno da sessão."""
         if self._processing:
             return
+        self._cancel_voice_if_active()
         self._history.clear()
         self._orchestrator.clear_session()
 
     def _set_processing(self, processing: bool) -> None:
         """Impede ações concorrentes sem bloquear a edição do campo de texto."""
+        if processing:
+            self._cancel_voice_if_active()
         self._processing = processing
-        for name in ("_send_button", "_btn_confirm", "_btn_cancel"):
+        for name in ("_send_button", "_btn_confirm", "_btn_cancel", "_voice_button"):
             if hasattr(self, name):
                 getattr(self, name).setEnabled(not processing)
         self._update_clear_button_state()
+
+    def _on_voice_clicked(self) -> None:
+        """Primeiro clique dispara carregamento on-demand do modelo."""
+        if self._processing:
+            return
+
+        state = self._voice_service.state
+        if state in (VoiceModelService.STATE_UNLOADED, VoiceModelService.STATE_ERROR):
+            if hasattr(self, "_voice_button"):
+                self._voice_button.setText("Carregando modelo…")
+                self._voice_button.setEnabled(False)
+            self._voice_service.load()
+            return
+
+        if state == VoiceModelService.STATE_READY:
+            # Modelo pronto: pressed/released tratam a gravação
+            return
+
+    @Slot(object)
+    def _on_voice_model_loaded(self, model: object) -> None:
+        """Modelo carregado: cria o pipeline e atualiza o botão."""
+        if self._voice_pipeline is None:
+            capture = AudioCaptureService()
+            transcription = VoiceTranscriptionService(model)
+            self._voice_pipeline = VoicePipeline(capture, transcription)
+            self._voice_pipeline.transcribed.connect(self._on_voice_transcribed)
+            self._voice_pipeline.transcription_failed.connect(self._on_voice_transcription_failed)
+            self._voice_pipeline.state_changed.connect(self._on_voice_pipeline_state_changed)
+        if hasattr(self, "_voice_button"):
+            self._voice_button.setText("Segure para falar")
+            self._voice_button.setEnabled(not self._processing)
+
+    @Slot(str)
+    def _on_voice_model_failed(self, error: str) -> None:
+        """Falha no carregamento: visível e permite nova tentativa."""
+        if hasattr(self, "_voice_button"):
+            self._voice_button.setText("Tentar carregar voz")
+            self._voice_button.setEnabled(not self._processing)
+        self._append("Therion", f"Não foi possível carregar o modelo de voz: {error}")
+
+    def _on_voice_pressed(self) -> None:
+        """Botão pressionado: inicia captura se o pipeline estiver pronto.
+
+        Gates: não inicia se `_processing` ou `_pending_plan` ativo.
+        """
+        if self._voice_pipeline is None:
+            return
+        if self._processing or self._pending_plan is not None:
+            return
+        self._voice_pipeline.start()
+
+    def _on_voice_released(self) -> None:
+        """Botão solto: para a captura e dispara transcrição."""
+        if self._voice_pipeline is None:
+            return
+        self._voice_pipeline.stop()
+
+    @Slot(int, str)
+    def _on_voice_transcribed(self, generation: int, text: str) -> None:
+        """Resultado da transcrição inserido no campo de entrada (sem autoenvio).
+
+        Late-transcript: descartado silenciosamente se processamento ou plano pendente.
+        Voz nunca confirma plano/ação.
+        """
+        if self._processing or self._pending_plan is not None:
+            return
+        self._insert_transcribed_text(text)
+
+    @Slot(int, str)
+    def _on_voice_transcription_failed(self, generation: int, error: str) -> None:
+        """Falha na transcrição: exibe mensagem discreta no histórico sem autoenvio."""
+        self._append("Therion", f"Transcrição de voz falhou: {error}")
+
+    @Slot(str)
+    def _on_voice_pipeline_state_changed(self, state: str) -> None:
+        """Atualiza texto do botão de acordo com o estado do pipeline."""
+        if not hasattr(self, "_voice_button"):
+            return
+        if state == VoicePipeline.STATE_RECORDING:
+            self._voice_button.setText("Gravando…")
+        elif state == VoicePipeline.STATE_TRANSCRIBING:
+            self._voice_button.setText("Transcrevendo…")
+        elif state == VoicePipeline.STATE_IDLE:
+            if self._voice_service.state == VoiceModelService.STATE_READY:
+                self._voice_button.setText("Segure para falar")
+
+    def _insert_transcribed_text(self, text: str) -> None:
+        """Insere texto transcrito no campo self._input preservando rascunho.
+
+        Regras:
+        - texto vazio: não altera nada;
+        - campo vazio: insere diretamente;
+        - campo com conteúdo: adiciona um espaço se o último caractere não for espaço.
+        """
+        if not text:
+            return
+        current = self._input.toPlainText()
+        if not current:
+            new_text = text
+        elif current[-1].isspace():
+            new_text = current + text
+        else:
+            new_text = current + " " + text
+        self._input.setPlainText(new_text)
+        cursor = self._input.textCursor()
+        cursor.movePosition(cursor.MoveOperation.End)
+        self._input.setTextCursor(cursor)
+        self._input.setFocus()
+
+    @Slot(str)
+    def _on_voice_model_state_changed(self, state: str) -> None:
+        if state == VoiceModelService.STATE_LOADING and hasattr(self, "_voice_button"):
+            self._voice_button.setText("Carregando modelo…")
+            self._voice_button.setEnabled(False)
 
     def _update_clear_button_state(self) -> None:
         """Habilita Limpar somente fora de processamento e confirmação."""
@@ -781,8 +948,10 @@ class MainWindow(QMainWindow):
 
         if self._tray_icon and self._tray_icon.isVisible():
             event.ignore()
+            self._cancel_voice_if_active()
             self.hide()
         else:
+            self._cancel_voice_if_active()
             if self._tray_icon:
                 self._tray_icon.hide()
             super().closeEvent(event)

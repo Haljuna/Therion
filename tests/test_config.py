@@ -206,6 +206,42 @@ class TestConfig(unittest.TestCase):
         self.assertEqual(result["ai"]["model"], "meu-modelo-custom:latest")
         self.assertEqual(result["ai"]["timeout_seconds"], 120)
 
+    def test_voice_bloco_ausente_recebe_defaults(self) -> None:
+        """Bloco voice ausente recebe defaults."""
+        data = {"ui": {}}
+        result = _validate_config(data)
+        self.assertEqual(result["voice"]["model_path"], None)
+
+    def test_voice_model_path_valido_preservado(self) -> None:
+        """model_path válido como string é preservado."""
+        data = {"voice": {"model_path": "caminho/para/modelo"}}
+        result = _validate_config(data)
+        self.assertEqual(result["voice"]["model_path"], "caminho/para/modelo")
+
+    def test_voice_invalido_resulta_em_default(self) -> None:
+        """voice não-dict ou model_path de tipo inválido recebem fallback seguro."""
+        for invalid in ["not_a_dict", 123, True, None, []]:
+            result = _validate_config({"voice": invalid})
+            self.assertEqual(result["voice"], {"model_path": None})
+
+        for invalid_path in [123, True, [], {}]:
+            result = _validate_config({"voice": {"model_path": invalid_path}})
+            self.assertIsNone(result["voice"]["model_path"])
+
+    def test_voice_chaves_extras_preservadas(self) -> None:
+        """Chaves extras no bloco voice são preservadas."""
+        data = {
+            "voice": {
+                "model_path": "caminho",
+                "extra_param": "foo",
+                "nested": {"a": 1},
+            }
+        }
+        result = _validate_config(data)
+        self.assertEqual(result["voice"]["model_path"], "caminho")
+        self.assertEqual(result["voice"]["extra_param"], "foo")
+        self.assertEqual(result["voice"]["nested"], {"a": 1})
+
 
 if __name__ == "__main__":
     unittest.main()

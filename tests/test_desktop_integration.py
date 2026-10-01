@@ -1501,5 +1501,444 @@ class TestDesktopIcon(unittest.TestCase):
                     mock_tray.setIcon.assert_called()
 
 
+class TestDesktopVoiceIntegration(unittest.TestCase):
+    """Testes de integração do botão de voz e carregamento lazy do modelo."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        from PySide6.QtWidgets import QApplication
+
+        cls._qapp = QApplication.instance() or QApplication(sys.argv)
+
+    def test_modelo_nao_carrega_no_startup(self) -> None:
+        from therion.interface.desktop import MainWindow
+        app = MagicMock()
+        cfg = {"voice": {"model_path": "caminho/teste"}}
+        with patch.object(MainWindow, "_setup_tray"):
+            window = MainWindow(app, config=cfg)
+        self.assertEqual(window._voice_service.state, "unloaded")
+        self.assertEqual(window._voice_service._model_path, "caminho/teste")
+        self.assertEqual(window._voice_button.text(), "Falar")
+
+    def test_primeiro_clique_chama_load_e_mostra_carregando(self) -> None:
+        from therion.interface.desktop import MainWindow
+        from therion.voice.service import VoiceModelService
+        app = MagicMock()
+        voice_service = VoiceModelService("caminho/valido")
+
+        with patch.object(MainWindow, "_setup_tray"):
+            window = MainWindow(app, voice_service=voice_service)
+
+        with patch.object(voice_service, "load") as mock_load:
+            window._voice_button.click()
+            mock_load.assert_called_once()
+            self.assertEqual(window._voice_button.text(), "Carregando modelo…")
+            self.assertFalse(window._voice_button.isEnabled())
+
+    def test_loaded_nao_inicia_acao_e_atualiza_botao(self) -> None:
+        from therion.interface.desktop import MainWindow
+        from therion.voice.service import VoiceModelService
+        app = MagicMock()
+        voice_service = VoiceModelService("caminho/valido")
+        with patch.object(MainWindow, "_setup_tray"):
+            window = MainWindow(app, voice_service=voice_service)
+
+        voice_service.loaded.emit("model_instance")
+        self.assertEqual(window._voice_button.text(), "Segure para falar")
+        self.assertTrue(window._voice_button.isEnabled())
+        self.assertEqual(window._input.toPlainText(), "")
+        self.assertEqual(window._history.toPlainText(), "")
+
+    def test_apos_ready_exige_nova_interacao(self) -> None:
+        from therion.interface.desktop import MainWindow
+        from therion.voice.service import VoiceModelService
+        app = MagicMock()
+        voice_service = VoiceModelService("caminho/valido")
+        voice_service._state = VoiceModelService.STATE_READY
+        with patch.object(MainWindow, "_setup_tray"):
+            window = MainWindow(app, voice_service=voice_service)
+        window._voice_button.setText("Segure para falar")
+        window._voice_button.setEnabled(True)
+
+        with patch.object(voice_service, "load") as mock_load:
+            window._voice_button.click()
+            mock_load.assert_not_called()
+            self.assertEqual(window._input.toPlainText(), "")
+
+    def test_load_failed_mostra_erro_e_permite_retry(self) -> None:
+        from therion.interface.desktop import MainWindow
+        from therion.voice.service import VoiceModelService
+        app = MagicMock()
+        voice_service = VoiceModelService("caminho/invalido")
+        with patch.object(MainWindow, "_setup_tray"):
+            window = MainWindow(app, voice_service=voice_service)
+
+        voice_service.load_failed.emit("falha simulada")
+        self.assertEqual(window._voice_button.text(), "Tentar carregar voz")
+        self.assertTrue(window._voice_button.isEnabled())
+        self.assertIn("falha simulada", window._history.toPlainText())
+
+        # Retry ao clicar novamente
+        with patch.object(voice_service, "load") as mock_load:
+            voice_service._state = VoiceModelService.STATE_ERROR
+            window._voice_button.click()
+            mock_load.assert_called_once()
+            self.assertEqual(window._voice_button.text(), "Carregando modelo…")
+
+    def test_caminho_vem_da_config(self) -> None:
+        from therion.interface.desktop import MainWindow
+        app = MagicMock()
+        cfg = {"voice": {"model_path": "caminho/especifico/do/usuario"}}
+        with patch.object(MainWindow, "_setup_tray"):
+            window = MainWindow(app, config=cfg)
+        self.assertEqual(window._voice_service._model_path, "caminho/especifico/do/usuario")
+
+
+class TestDesktopVoicePushToTalk(unittest.TestCase):
+    """Testes da integração push-to-talk F3.2 (pressed/released + inserção de texto)."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        from PySide6.QtWidgets import QApplication
+
+        cls._qapp = QApplication.instance() or QApplication(sys.argv)
+
+    def _make_window_with_pipeline(self):
+        """Retorna (window, mock_pipeline) com pipeline já injetado."""
+        from unittest.mock import MagicMock, patch
+
+        from therion.interface.desktop import MainWindow
+        from therion.voice.pipeline import VoicePipeline
+        from therion.voice.service import VoiceModelService
+
+        app = MagicMock()
+        voice_service = VoiceModelService("modelo/teste")
+
+        pipeline = MagicMock(spec=VoicePipeline)
+
+        with patch.object(MainWindow, "_setup_tray"):
+            window = MainWindow(app, voice_service=voice_service, voice_pipeline=pipeline)
+
+        return window, pipeline, voice_service
+
+    # ------------------------------------------------------------------
+    def test_pressed_chama_pipeline_start(self) -> None:
+        window, pipeline, _ = self._make_window_with_pipeline()
+        window._on_voice_pressed()
+        pipeline.start.assert_called_once()
+
+    def test_released_chama_pipeline_stop(self) -> None:
+        window, pipeline, _ = self._make_window_with_pipeline()
+        window._on_voice_released()
+        pipeline.stop.assert_called_once()
+
+    def test_pressed_sem_pipeline_nao_levanta_excecao(self) -> None:
+        from unittest.mock import patch
+
+        from therion.interface.desktop import MainWindow
+
+        app = MagicMock()
+        from therion.voice.service import VoiceModelService
+
+        voice_service = VoiceModelService("modelo/teste")
+        with patch.object(MainWindow, "_setup_tray"):
+            window = MainWindow(app, voice_service=voice_service)
+        window._voice_pipeline = None
+        # Não deve lançar exceção
+        window._on_voice_pressed()
+        window._on_voice_released()
+
+    # ------------------------------------------------------------------
+    def test_transcribed_insere_texto_em_input(self) -> None:
+        window, _, _ = self._make_window_with_pipeline()
+        window._on_voice_transcribed(1, "olá mundo")
+        self.assertEqual(window._input.toPlainText(), "olá mundo")
+
+    def test_transcribed_texto_vazio_nao_altera_input(self) -> None:
+        window, _, _ = self._make_window_with_pipeline()
+        window._input.setPlainText("rascunho")
+        window._on_voice_transcribed(1, "")
+        self.assertEqual(window._input.toPlainText(), "rascunho")
+
+    def test_transcribed_preserva_e_adiciona_espaco(self) -> None:
+        window, _, _ = self._make_window_with_pipeline()
+        window._input.setPlainText("primeiro")
+        window._on_voice_transcribed(1, "segundo")
+        self.assertEqual(window._input.toPlainText(), "primeiro segundo")
+
+    def test_transcribed_nao_duplica_espaco_se_ja_existir(self) -> None:
+        window, _, _ = self._make_window_with_pipeline()
+        window._input.setPlainText("primeiro ")
+        window._on_voice_transcribed(1, "segundo")
+        self.assertEqual(window._input.toPlainText(), "primeiro segundo")
+
+    def test_transcribed_nao_autoenviar(self) -> None:
+        window, _, _ = self._make_window_with_pipeline()
+        from unittest.mock import patch
+
+        with patch.object(window, "_send_command") as mock_send:
+            window._on_voice_transcribed(1, "enviar isso")
+            mock_send.assert_not_called()
+
+    def test_transcription_failed_exibe_erro_no_historico(self) -> None:
+        window, _, _ = self._make_window_with_pipeline()
+        window._on_voice_transcription_failed(1, "microfone falhou")
+        self.assertIn("microfone falhou", window._history.toPlainText())
+
+    def test_transcription_failed_nao_autoenviar(self) -> None:
+        window, _, _ = self._make_window_with_pipeline()
+        from unittest.mock import patch
+
+        with patch.object(window, "_send_command") as mock_send:
+            window._on_voice_transcription_failed(1, "erro")
+            mock_send.assert_not_called()
+
+    # ------------------------------------------------------------------
+    def test_loaded_cria_pipeline_se_nenhum_injetado(self) -> None:
+        from unittest.mock import patch
+
+        from therion.interface.desktop import MainWindow
+        from therion.voice.service import VoiceModelService
+
+        app = MagicMock()
+        voice_service = VoiceModelService("modelo/teste")
+        with patch.object(MainWindow, "_setup_tray"):
+            window = MainWindow(app, voice_service=voice_service)
+
+        self.assertIsNone(window._voice_pipeline)
+        with (
+            patch("therion.interface.desktop.AudioCaptureService") as mock_cap,
+            patch("therion.interface.desktop.VoiceTranscriptionService") as mock_trans,
+            patch("therion.interface.desktop.VoicePipeline") as mock_pipe,
+        ):
+            mock_pipe.return_value = MagicMock()
+            mock_pipe.return_value.transcribed = MagicMock()
+            mock_pipe.return_value.transcribed.connect = MagicMock()
+            mock_pipe.return_value.transcription_failed = MagicMock()
+            mock_pipe.return_value.transcription_failed.connect = MagicMock()
+            mock_pipe.return_value.state_changed = MagicMock()
+            mock_pipe.return_value.state_changed.connect = MagicMock()
+            voice_service.loaded.emit("model_object")
+
+        self.assertIsNotNone(window._voice_pipeline)
+
+    def test_loaded_nao_recria_pipeline_se_ja_existir(self) -> None:
+        window, pipeline_original, voice_service = self._make_window_with_pipeline()
+        # Emitir loaded novamente não deve substituir o pipeline já injetado
+        voice_service.loaded.emit("model_object")
+        self.assertIs(window._voice_pipeline, pipeline_original)
+
+
+class TestDesktopVoiceGates(unittest.TestCase):
+    """Testes dos gates de segurança e cleanup de voz (F3.3)."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        from PySide6.QtWidgets import QApplication
+
+        cls._qapp = QApplication.instance() or QApplication(sys.argv)
+
+    def _make_window_with_pipeline(self):
+        """Retorna (window, mock_pipeline) com pipeline já injetado."""
+        from therion.interface.desktop import MainWindow
+        from therion.voice.pipeline import VoicePipeline
+        from therion.voice.service import VoiceModelService
+
+        app = MagicMock()
+        voice_service = VoiceModelService("modelo/teste")
+        pipeline = MagicMock(spec=VoicePipeline)
+
+        with patch.object(MainWindow, "_setup_tray"):
+            window = MainWindow(app, voice_service=voice_service, voice_pipeline=pipeline)
+
+        return window, pipeline
+
+    # ------------------------------------------------------------------
+    # Gate: _processing
+    # ------------------------------------------------------------------
+
+    def test_pressed_bloqueado_em_processing(self) -> None:
+        window, pipeline = self._make_window_with_pipeline()
+        window._processing = True
+        window._on_voice_pressed()
+        pipeline.start.assert_not_called()
+
+    def test_pressed_liberado_apos_processing_terminar(self) -> None:
+        window, pipeline = self._make_window_with_pipeline()
+        window._processing = True
+        window._on_voice_pressed()
+        pipeline.start.assert_not_called()
+
+        window._processing = False
+        window._on_voice_pressed()
+        pipeline.start.assert_called_once()
+
+    # ------------------------------------------------------------------
+    # Gate: _pending_plan
+    # ------------------------------------------------------------------
+
+    def test_pressed_bloqueado_com_pending_plan(self) -> None:
+        window, pipeline = self._make_window_with_pipeline()
+        window._pending_plan = MagicMock()
+        window._on_voice_pressed()
+        pipeline.start.assert_not_called()
+
+    def test_voz_nao_confirma_pending_plan(self) -> None:
+        """Transcrição recebida com _pending_plan ativo não deve alterar _input nem confirmar."""
+        window, _ = self._make_window_with_pipeline()
+        window._pending_plan = MagicMock()
+        window._input.setPlainText("")
+        window._on_voice_transcribed(1, "confirmar")
+        self.assertEqual(window._input.toPlainText(), "")
+
+    # ------------------------------------------------------------------
+    # Cancelamento ao iniciar _processing
+    # ------------------------------------------------------------------
+
+    def test_set_processing_true_cancela_pipeline_ativo(self) -> None:
+        window, pipeline = self._make_window_with_pipeline()
+        window._set_processing(True)
+        pipeline.cancel.assert_called_once()
+
+    def test_set_processing_false_nao_cancela(self) -> None:
+        window, pipeline = self._make_window_with_pipeline()
+        window._set_processing(False)
+        pipeline.cancel.assert_not_called()
+
+    # ------------------------------------------------------------------
+    # Late transcript descartado
+    # ------------------------------------------------------------------
+
+    def test_late_transcript_descartado_se_processing(self) -> None:
+        window, _ = self._make_window_with_pipeline()
+        window._processing = True
+        window._input.setPlainText("")
+        window._on_voice_transcribed(1, "texto tardio")
+        self.assertEqual(window._input.toPlainText(), "")
+
+    def test_late_transcript_descartado_se_pending_plan(self) -> None:
+        window, _ = self._make_window_with_pipeline()
+        window._pending_plan = MagicMock()
+        window._input.setPlainText("")
+        window._on_voice_transcribed(1, "texto tardio")
+        self.assertEqual(window._input.toPlainText(), "")
+
+    # ------------------------------------------------------------------
+    # Voz volta apenas quando seguro
+    # ------------------------------------------------------------------
+
+    def test_voz_desabilitada_durante_processing(self) -> None:
+        window, _ = self._make_window_with_pipeline()
+        window._set_processing(True)
+        self.assertFalse(window._voice_button.isEnabled())
+
+    def test_voz_volta_apos_processing_terminar(self) -> None:
+        from therion.voice.service import VoiceModelService
+
+        window, _ = self._make_window_with_pipeline()
+        window._voice_service._state = VoiceModelService.STATE_READY
+        window._set_processing(True)
+        self.assertFalse(window._voice_button.isEnabled())
+        window._set_processing(False)
+        self.assertTrue(window._voice_button.isEnabled())
+
+    def test_voz_nao_volta_com_pending_plan_presente(self) -> None:
+        window, _ = self._make_window_with_pipeline()
+        # _pending_plan não afeta enable via _set_processing diretamente
+        # mas o botão deve ter sido desabilitado pelo _set_processing(True) anterior
+        window._set_processing(True)
+        self.assertFalse(window._voice_button.isEnabled())
+        # Simular que processamento acabou mas há pending plan
+        window._pending_plan = MagicMock()
+        window._set_processing(False)
+        # Botão fica habilitado pelo _set_processing(False); gate está em _on_voice_pressed
+        # O gate real é _on_voice_pressed que verifica _pending_plan
+        # Confirmar que pressed é bloqueado mesmo com botão habilitado
+        pipeline = window._voice_pipeline
+        window._on_voice_pressed()
+        pipeline.start.assert_not_called()
+
+    # ------------------------------------------------------------------
+    # clear cancela
+    # ------------------------------------------------------------------
+
+    def test_clear_cancela_pipeline_ativo(self) -> None:
+        window, pipeline = self._make_window_with_pipeline()
+        window._processing = False
+        window._clear_conversation()
+        pipeline.cancel.assert_called_once()
+
+    def test_clear_nao_cancela_se_processing(self) -> None:
+        """_clear_conversation retorna cedo se _processing; não cancela nem limpa."""
+        window, pipeline = self._make_window_with_pipeline()
+        window._processing = True
+        window._history.append("conteúdo")
+        window._clear_conversation()
+        pipeline.cancel.assert_not_called()
+        self.assertIn("conteúdo", window._history.toPlainText())
+
+    # ------------------------------------------------------------------
+    # close/hide cancela
+    # ------------------------------------------------------------------
+
+    def test_close_sem_tray_cancela_pipeline(self) -> None:
+        """Fechar sem tray visível deve cancelar voz antes de prosseguir."""
+        from unittest.mock import MagicMock, patch
+
+        from PySide6.QtGui import QCloseEvent
+
+        window, pipeline = self._make_window_with_pipeline()
+        window._tray_icon = None
+        window._closing = False
+        window._processing = False
+
+        event = MagicMock(spec=QCloseEvent)
+        with patch.object(type(window).__bases__[0], "closeEvent"):
+            window.closeEvent(event)
+
+        pipeline.cancel.assert_called_once()
+
+    def test_hide_via_tray_cancela_pipeline(self) -> None:
+        """Ocultar para tray deve cancelar voz antes de esconder a janela."""
+        from PySide6.QtGui import QCloseEvent
+
+        window, pipeline = self._make_window_with_pipeline()
+
+        tray_mock = MagicMock()
+        tray_mock.isVisible.return_value = True
+        window._tray_icon = tray_mock
+        window._closing = False
+        window._processing = False
+
+        event = MagicMock(spec=QCloseEvent)
+        window.closeEvent(event)
+
+        pipeline.cancel.assert_called_once()
+        event.ignore.assert_called_once()
+
+    # ------------------------------------------------------------------
+    # Resiliência: erro no cancel não derruba desktop
+    # ------------------------------------------------------------------
+
+    def test_cancel_exception_nao_propaga(self) -> None:
+        window, pipeline = self._make_window_with_pipeline()
+        pipeline.cancel.side_effect = RuntimeError("falha simulada")
+        # Não deve lançar exceção
+        window._cancel_voice_if_active()
+
+    def test_cancel_sem_pipeline_nao_levanta_excecao(self) -> None:
+        from therion.interface.desktop import MainWindow
+        from therion.voice.service import VoiceModelService
+
+        app = MagicMock()
+        voice_service = VoiceModelService("modelo/teste")
+        with patch.object(MainWindow, "_setup_tray"):
+            window = MainWindow(app, voice_service=voice_service)
+        window._voice_pipeline = None
+        # Não deve lançar exceção
+        window._cancel_voice_if_active()
+
+
 if __name__ == "__main__":
     unittest.main()
+
