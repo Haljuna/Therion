@@ -19,6 +19,7 @@ Regras:
 
 import json
 import os
+from urllib.parse import urlsplit
 import shutil
 import tempfile
 from pathlib import Path
@@ -34,11 +35,27 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "enabled": False,
         "model": "qwen3:4b-instruct",
         "timeout_seconds": 90,
+        "endpoint": "http://127.0.0.1:11434/api/chat",
+        "think": None,
     },
     "voice": {"model_path": None},
 }
 
 _CONFIG_PATH: Path | None = None
+
+
+def is_local_ollama_endpoint(value: Any) -> bool:
+    """Aceita apenas HTTP no loopback literal, sem credenciais ou redirecionadores."""
+    if not isinstance(value, str):
+        return False
+    try:
+        url = urlsplit(value)
+        return (url.scheme == "http" and url.hostname in ("127.0.0.1", "::1")
+                and url.port is not None and 0 < url.port <= 65535
+                and url.path == "/api/chat" and not url.query and not url.fragment
+                and url.username is None and url.password is None)
+    except ValueError:
+        return False
 
 
 def _get_config_path() -> Path:
@@ -122,6 +139,11 @@ def _validate_config(data: dict[str, Any]) -> dict[str, Any]:
         ai_timeout = ai.get("timeout_seconds")
         if type(ai_timeout) is not int or ai_timeout <= 0:
             ai["timeout_seconds"] = DEFAULT_CONFIG["ai"]["timeout_seconds"]
+        if not is_local_ollama_endpoint(ai.get("endpoint")):
+            ai["endpoint"] = DEFAULT_CONFIG["ai"]["endpoint"]
+        if ai.get("think") is not None and type(ai["think"]) is not bool:
+            ai["think"] = None
+        ai.setdefault("think", None)
         validated["ai"] = ai
 
     # voice -> dict com model_path (str | None); preserva chaves extras

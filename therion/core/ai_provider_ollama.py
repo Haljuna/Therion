@@ -157,7 +157,15 @@ class OllamaProvider(AIProvider):
 
     ENDPOINT = ENDPOINT
 
-    def __init__(self, model: str = "qwen3:4b-instruct", timeout: int = 90) -> None:
+    def __init__(self, model: str = "qwen3:4b-instruct", timeout: int = 90,
+                 endpoint: str = ENDPOINT, think: bool | None = None) -> None:
+        from therion.config.local import is_local_ollama_endpoint
+        if not is_local_ollama_endpoint(endpoint):
+            raise ValueError("O endereço do Ollama deve ser HTTP local no loopback.")
+        if think is not None and type(think) is not bool:
+            raise ValueError("think deve ser booleano ou None.")
+        self.ENDPOINT = endpoint
+        self.think = think
         self.model = model
         self.timeout = timeout
         self._opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
@@ -170,15 +178,31 @@ class OllamaProvider(AIProvider):
     ) -> AIResponse:
         """Gera classificação estruturada via Ollama local."""
         payload = self._build_payload(message, context, available_intents)
+        if self.think is not None:
+            payload["think"] = self.think
         raw_content = self._send_request(payload, timeout=self.timeout)
         return self._parse_and_validate(raw_content)
 
     def _build_plan_payload(self, message: str, context: dict) -> dict[str, Any]:
         """Monta o payload de geração dirigida de plano, separado de _build_payload."""
-        messages = [
-            {"role": "system", "content": PLAN_SYSTEM_PROMPT},
-            {"role": "user", "content": message},
-        ]
+        messages = [{"role": "system", "content": PLAN_SYSTEM_PROMPT}]
+        recent_turns = (context or {}).get("recent_turns", [])
+        if isinstance(recent_turns, (list, tuple)):
+            # O snapshot da sessão já é limitado a cinco turnos; não ampliar
+            # a janela nem transformar conteúdo de histórico em instrução system.
+            history = list(recent_turns)[-5:]
+            if history and isinstance(history[-1], dict):
+                last = history[-1]
+                if last.get("role") == "user" and last.get("text") == message:
+                    history = history[:-1]
+            for turn in history:
+                if not isinstance(turn, dict):
+                    continue
+                text = turn.get("text")
+                role = {"user": "user", "therion": "assistant"}.get(turn.get("role"))
+                if role and isinstance(text, str) and text.strip():
+                    messages.append({"role": role, "content": text})
+        messages.append({"role": "user", "content": message})
         return {
             "model": self.model,
             "stream": False,
@@ -193,6 +217,8 @@ class OllamaProvider(AIProvider):
 
     def generate_plan(self, message: str, context: dict) -> PlanContent:
         payload = self._build_plan_payload(message, context)
+        if self.think is not None:
+            payload["think"] = self.think
         raw_content = self._send_request(payload, timeout=PLAN_TIMEOUT_SECONDS)
         return self._parse_plan_content(raw_content)
 

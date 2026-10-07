@@ -282,9 +282,12 @@ class IntentRecognizer:
                 entities=entities,
             )
         
-        match = self._OPEN_APP_PATTERN.match(cleaned)
+        # Pontuação de fim de frase não faz parte do nome do aplicativo.
+        # Normalização local: não altera comandos de arquivos, busca ou aliases.
+        open_candidate = re.sub(r"[.!?]+$", "", cleaned).strip()
+        match = self._OPEN_APP_PATTERN.match(open_candidate)
         if match:
-            target_raw = match.group(1)
+            target_raw = match.group(1).strip()
             # Preserva capitalização amigável (ex: obsidian -> Obsidian)
             target = target_raw.capitalize() if target_raw.islower() else target_raw
             return Intent(

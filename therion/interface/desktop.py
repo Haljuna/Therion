@@ -352,7 +352,12 @@ class MainWindow(QMainWindow):
 
         model = ai_config.get("model", "qwen3:4b-instruct")
         timeout_seconds = ai_config.get("timeout_seconds", 90)
-        provider = OllamaProvider(model=model, timeout=timeout_seconds)
+        provider_options = {}
+        if "endpoint" in ai_config:
+            provider_options["endpoint"] = ai_config["endpoint"]
+        if "think" in ai_config:
+            provider_options["think"] = ai_config["think"]
+        provider = OllamaProvider(model=model, timeout=timeout_seconds, **provider_options)
         available_intents = [
             "abrir aplicativo",
             "listar aliases",
@@ -768,12 +773,21 @@ class MainWindow(QMainWindow):
         self._update_clear_button_state()
 
     def _on_voice_clicked(self) -> None:
-        """Primeiro clique dispara carregamento on-demand do modelo."""
+        """Primeiro clique dispara carregamento on-demand do modelo.
+
+        Após ``STATE_ERROR``, o caminho é relido da configuração atual
+        antes da nova tentativa; se a atualização for rejeitada, o erro
+        visível permanece e nenhum carregamento é iniciado.
+        """
         if self._processing:
             return
 
         state = self._voice_service.state
         if state in (VoiceModelService.STATE_UNLOADED, VoiceModelService.STATE_ERROR):
+            if state == VoiceModelService.STATE_ERROR:
+                fresh_path = load_config().get("voice", {}).get("model_path")
+                if not self._voice_service.set_model_path(fresh_path):
+                    return
             if hasattr(self, "_voice_button"):
                 self._voice_button.setText("Carregando modelo…")
                 self._voice_button.setEnabled(False)
