@@ -579,7 +579,7 @@ Decisões aprovadas:
   - IA desabilitada por padrão na configuração local (`ai.enabled: false`);
   - Nenhuma requisição ou inferência é realizada durante a inicialização do aplicativo.
 - **Modelo inicial:**
-  - `qwen3:4b-instruct` adotado como modelo inicial validado, sem compromisso de permanência exclusiva.
+  - `qwen3:4b-instruct` adotado como modelo inicial validado, sem compromisso de permanência exclusiva. O padrão local atual foi atualizado pela DEC-035.
 - **Fronteira de validação e fallback:**
   - O `AICore` é a fronteira final e obrigatória de validação sintática e semântica;
   - Saídas com schemas inválidos, saídas híbridas (chat/clarification com intent ou arguments operacionais) ou intents fora da allowlist canônica retornam `None`;
@@ -754,3 +754,22 @@ Status possíveis:
 - Aprovada
 - Substituída
 - Revogada
+
+---
+
+## DEC-035 — Adoção do candidato Qwen3 fine-tune como padrão local
+
+**Status:** Aprovada
+
+**Data:** 08/10/2026
+
+**Autorização:** Marcus: “então pode implementar o candidato novo no therion definitivo”.
+
+Modelo padrão da instalação local de Marcus:
+`hf.co/pramodlohra/Qween3_4B_thinking_finetune:Q4_K_M`.
+
+O modelo está instalado em `F:\Therion\ollama-models` e é acessado pelo Ollama local em `http://127.0.0.1:11435/api/chat`. A configuração persistente usa raciocínio ativado e timeout de 180 segundos. Para conversa/classificação, o provider aplica o perfil avaliado: temperature 0,6, top_p 0,95, top_k 20, min_p 0, repeat_penalty 1, contexto 8.192 e geração máxima 6.144 tokens.
+
+A decisão considera a entrega das 27 respostas da bateria, preservação de contexto e escolha adequada das ferramentas na amostra simulada. Não implica perfeição, autonomia adicional nem habilitação de novas integrações. Cálculos, filtros e parâmetros das Skills devem continuar recebendo apoio e validação por código.
+
+Validação da implementação: 262 testes de configuração, provider e interface passaram; chamada real com a configuração persistida confirmou raciocínio e resposta estruturada válida. Configuração anterior preservada para reversão. Modelos anteriores permanecem instalados.

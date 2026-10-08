@@ -1,8 +1,21 @@
+---
+painel_status: em_desenvolvimento
+painel_fase: Pós-V1; E1 concluída para planos normais; piloto isolado de voz V2.1
+painel_proxima_acao: Testar revisão e cancelamento no piloto isolado de voz e decidir o menor escopo de integração
+painel_bloqueio: Falha preexistente em read_scope; fonte pessoal da SKILL-002 ainda depende de escolha explícita
+painel_atualizacao: 2026-10-08
+---
 # Therion — Estado Atual
+
+## Modelo local adotado em 08/10/2026
+
+Por autorização de Marcus, o padrão persistente desta instalação é `hf.co/pramodlohra/Qween3_4B_thinking_finetune:Q4_K_M`, com raciocínio ativado, armazenado em `F:\Therion\ollama-models` e servido pelo endpoint local `127.0.0.1:11435`. A DEC-035 registra a adoção. A configuração local e o perfil do provider foram verificados; 262 testes passaram e uma chamada real retornou resposta estruturada válida com raciocínio confirmado. Uma interface já aberta precisa ser reaberta para instanciar o novo provider.
 
 > Resumo operacional do estado real do projeto Therion.
 
 Esta nota deve refletir apenas o estado atual do projeto.
+
+As propriedades `painel_*` acima alimentam diretamente o [[10 - Projetos/Painel de Projetos|Painel de Projetos]] e a Home. Ao atualizar esta nota com autorização, alinhar texto e propriedades; não copiar a próxima ação para o painel. A revisão de 06/10/2026 reflete a documentação desta nota e do roadmap, não uma nova execução de testes técnicos.
 
 Planos futuros ficam em [[Roadmap]].
 Decisões importantes ficam em [[Decisões]].
