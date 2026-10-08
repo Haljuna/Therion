@@ -2,6 +2,35 @@
 
 > IA pessoal contextual integrada ao Segundo Cérebro.
 
+## Documentação e navegação
+
+### Referências do projeto
+
+- [[10 - Projetos/Therion/README|Apresentação técnica e instruções de uso]]
+- [[10 - Projetos/Therion/AGENTS|Instruções operacionais dos agentes]]
+- [[10 - Projetos/Therion/CapabilityDescriptor|Inventário documental de capacidades]]
+- [[10 - Projetos/Therion/Planejamento da V2 - Voz|Planejamento da V2 — Voz]]
+- [[90 - Sistema da IA/Skills/Arquitetura de Skills do Therion|Arquitetura de Skills]]
+- [[90 - Sistema da IA/Skills/Registro de Skills|Registro de Skills]]
+
+### Ideias e referências futuras
+
+Estes links dão acesso às propostas; não alteram seu estado de aprovação.
+
+- [[10 - Projetos/Therion/Ideia futura - Therion Guard|Thérion Guard — segurança e autorização]]
+- [[10 - Projetos/Therion/Ideia futura - Letta e memória persistente|Letta e memória persistente]]
+- [[10 - Projetos/Therion/Ideia futura - Interface visual estilo Jarvis|Interface visual estilo Jarvis]]
+- [[10 - Projetos/Therion/Ideia futura - Ajuste de modelo local|Avaliação e ajuste de modelo local]]
+- [[10 - Projetos/Therion/Referência futura - Catálogo de agentes e capacidades|Catálogo de agentes e capacidades]]
+- [[10 - Projetos/Therion/Referência futura - Qualidade de código|Qualidade de código]]
+
+### Registros históricos de retomada
+
+Preservam investigações anteriores. Para decidir o próximo passo, conferir o [[10 - Projetos/Therion/Estado Atual|Estado Atual]] e o [[10 - Projetos/Therion/Roadmap|Roadmap]].
+
+- [[10 - Projetos/Therion/E1 - Planos extensos - Ponto de retomada|E1 — investigação de planos extensos]]
+- [[10 - Projetos/Therion/Interface Responsiva - Ponto de Retomada|Interface responsiva — investigação inicial]]
+
 ## Visão
 
 Therion é uma IA pessoal inspirada em um assistente estilo Jarvis.
