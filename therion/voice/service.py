@@ -39,6 +39,20 @@ class VoiceModelService(QObject):
     def model(self):
         return self._model
 
+    def set_model_path(self, model_path) -> bool:
+        """Atualiza o caminho do modelo após uma falha de carregamento.
+
+        Permitido somente em ``STATE_ERROR``; em qualquer outro estado a
+        atualização é rejeitada sem alterar o caminho atual. Não inicia
+        carregamento nem altera o estado. Retorna True se o caminho foi
+        atualizado.
+        """
+        with self._lock:
+            if self._state != self.STATE_ERROR:
+                return False
+            self._model_path = model_path
+            return True
+
     def load(self) -> bool:
         """Inicia o carregamento. Retorna False se já houver um em andamento."""
         with self._lock:

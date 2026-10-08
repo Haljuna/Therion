@@ -1939,6 +1939,322 @@ class TestDesktopVoiceGates(unittest.TestCase):
         window._cancel_voice_if_active()
 
 
+class TestVoiceRetryAfterError(unittest.TestCase):
+    """Testes do fluxo: erro de voz → config corrigida → retry sem reiniciar.
+
+    Cobre:
+    - set_model_path aceita atualização em STATE_ERROR;
+    - set_model_path rejeita em UNLOADED, LOADING e READY;
+    - rejeição não altera model_path;
+    - rejeição não inicia load();
+    - cenário completo: erro → config corrigida → retry usa caminho novo;
+    - mesma instância do serviço preservada;
+    - sinais não são reconectados;
+    - primeiro carregamento saudável (UNLOADED) não relê config.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        from PySide6.QtWidgets import QApplication
+
+        cls._qapp = QApplication.instance() or QApplication(sys.argv)
+
+    # ------------------------------------------------------------------
+    # Testes unitários de VoiceModelService.set_model_path
+    # ------------------------------------------------------------------
+
+    def test_set_model_path_aceita_em_state_error(self) -> None:
+        """set_model_path retorna True e atualiza o caminho quando em STATE_ERROR."""
+        from therion.voice.service import VoiceModelService
+
+        svc = VoiceModelService("caminho/antigo")
+        svc._state = VoiceModelService.STATE_ERROR
+        resultado = svc.set_model_path("caminho/novo")
+        self.assertTrue(resultado)
+        self.assertEqual(svc._model_path, "caminho/novo")
+
+    def test_set_model_path_rejeita_em_unloaded(self) -> None:
+        """set_model_path retorna False e preserva model_path quando em UNLOADED."""
+        from therion.voice.service import VoiceModelService
+
+        svc = VoiceModelService("caminho/original")
+        # Estado inicial é UNLOADED
+        self.assertEqual(svc.state, VoiceModelService.STATE_UNLOADED)
+        resultado = svc.set_model_path("caminho/novo")
+        self.assertFalse(resultado)
+        self.assertEqual(svc._model_path, "caminho/original")
+
+    def test_set_model_path_rejeita_em_loading(self) -> None:
+        """set_model_path retorna False e preserva model_path quando em LOADING."""
+        from therion.voice.service import VoiceModelService
+
+        svc = VoiceModelService("caminho/original")
+        svc._state = VoiceModelService.STATE_LOADING
+        resultado = svc.set_model_path("caminho/novo")
+        self.assertFalse(resultado)
+        self.assertEqual(svc._model_path, "caminho/original")
+
+    def test_set_model_path_rejeita_em_ready(self) -> None:
+        """set_model_path retorna False e preserva model_path quando em READY."""
+        from therion.voice.service import VoiceModelService
+
+        svc = VoiceModelService("caminho/original")
+        svc._state = VoiceModelService.STATE_READY
+        resultado = svc.set_model_path("caminho/novo")
+        self.assertFalse(resultado)
+        self.assertEqual(svc._model_path, "caminho/original")
+
+    def test_rejeicao_nao_inicia_load(self) -> None:
+        """set_model_path rejeitado não dispara load nem altera o estado."""
+        from therion.voice.service import VoiceModelService
+
+        svc = VoiceModelService("caminho/original")
+        # Em UNLOADED: rejeita sem mudar estado
+        svc.set_model_path("caminho/novo")
+        self.assertEqual(svc.state, VoiceModelService.STATE_UNLOADED)
+        self.assertIsNone(svc.model)
+
+    def test_rejeicao_nao_altera_model_path(self) -> None:
+        """Após rejeição, model_path permanece exatamente igual ao original."""
+        from therion.voice.service import VoiceModelService
+
+        svc = VoiceModelService("caminho/preservado")
+        for estado in (
+            VoiceModelService.STATE_UNLOADED,
+            VoiceModelService.STATE_LOADING,
+            VoiceModelService.STATE_READY,
+        ):
+            svc._state = estado
+            svc.set_model_path("caminho/tentativa")
+            self.assertEqual(svc._model_path, "caminho/preservado",
+                             f"model_path alterado em estado {estado}")
+
+    def test_set_model_path_em_error_nao_altera_estado(self) -> None:
+        """set_model_path aceito não muda o estado; permanece STATE_ERROR até load() ser chamado."""
+        from therion.voice.service import VoiceModelService
+
+        svc = VoiceModelService("caminho/antigo")
+        svc._state = VoiceModelService.STATE_ERROR
+        svc.set_model_path("caminho/novo")
+        self.assertEqual(svc.state, VoiceModelService.STATE_ERROR)
+
+    # ------------------------------------------------------------------
+    # Cenário completo: erro → config corrigida → retry na mesma instância
+    # ------------------------------------------------------------------
+
+    def test_retry_apos_erro_usa_caminho_novo_da_config(self) -> None:
+        """Cenário principal: erro → config corrigida → retry usa novo model_path.
+
+        Verifica:
+        - mesma instância do serviço;
+        - set_model_path chamado com caminho novo;
+        - load() chamado após atualização bem-sucedida;
+        - config relida somente no retry após STATE_ERROR.
+        """
+        from therion.interface.desktop import MainWindow
+        from therion.voice.service import VoiceModelService
+
+        app = MagicMock()
+        voice_service = VoiceModelService("caminho/invalido")
+        voice_service._state = VoiceModelService.STATE_ERROR
+
+        config_atualizada = {"voice": {"model_path": "caminho/valido/corrigido"}}
+
+        with patch.object(MainWindow, "_setup_tray"):
+            window = MainWindow(app, voice_service=voice_service)
+
+        servico_original = window._voice_service
+
+        with (
+            patch("therion.interface.desktop.load_config", return_value=config_atualizada) as mock_load_cfg,
+            patch.object(voice_service, "set_model_path", wraps=voice_service.set_model_path) as mock_set_path,
+            patch.object(voice_service, "load", return_value=True) as mock_load,
+        ):
+            window._on_voice_clicked()
+
+        # Mesma instância
+        self.assertIs(window._voice_service, servico_original)
+        # Config relida exatamente uma vez no retry
+        mock_load_cfg.assert_called_once()
+        # set_model_path chamado com o caminho novo
+        mock_set_path.assert_called_once_with("caminho/valido/corrigido")
+        # load() chamado após atualização
+        mock_load.assert_called_once()
+
+    def test_retry_preserva_mesma_instancia_do_servico(self) -> None:
+        """A instância de VoiceModelService não é recriada no retry."""
+        from therion.interface.desktop import MainWindow
+        from therion.voice.service import VoiceModelService
+
+        app = MagicMock()
+        voice_service = VoiceModelService("caminho/invalido")
+        voice_service._state = VoiceModelService.STATE_ERROR
+
+        with patch.object(MainWindow, "_setup_tray"):
+            window = MainWindow(app, voice_service=voice_service)
+
+        instancia_antes = window._voice_service
+
+        with (
+            patch("therion.interface.desktop.load_config", return_value={"voice": {"model_path": "novo"}}),
+            patch.object(voice_service, "load", return_value=True),
+        ):
+            window._on_voice_clicked()
+
+        self.assertIs(window._voice_service, instancia_antes)
+
+    def test_sinais_nao_sao_reconectados_no_retry(self) -> None:
+        """Os três sinais do serviço não são reconectados durante o retry.
+
+        Usa _FakeVoiceService com sinais rastreáveis para contornar a
+        limitação de patch.object em PySide6.QtCore.SignalInstance (read-only).
+
+        Fluxo verificado:
+        1. MainWindow recebe o fake e conecta os três sinais (contagem = 1 cada).
+        2. Retry via _on_voice_clicked() em STATE_ERROR.
+        3. Contagem permanece 1 — nenhuma nova conexão foi feita.
+        4. A mesma instância do serviço é preservada.
+        """
+        from therion.interface.desktop import MainWindow
+        from therion.voice.service import VoiceModelService
+
+        class _FakeSignal:
+            """Sinal observável: registra cada chamada a connect()."""
+            def __init__(self):
+                self._connections = []
+
+            def connect(self, slot):
+                self._connections.append(slot)
+
+            def connection_count(self):
+                return len(self._connections)
+
+        class _FakeVoiceService:
+            """Interface mínima de VoiceModelService para exercitar _on_voice_clicked."""
+            STATE_UNLOADED = VoiceModelService.STATE_UNLOADED
+            STATE_LOADING  = VoiceModelService.STATE_LOADING
+            STATE_READY    = VoiceModelService.STATE_READY
+            STATE_ERROR    = VoiceModelService.STATE_ERROR
+
+            def __init__(self):
+                self._state    = self.STATE_ERROR
+                self.loaded        = _FakeSignal()
+                self.load_failed   = _FakeSignal()
+                self.state_changed = _FakeSignal()
+                self._load_calls   = 0
+                self._set_path_calls = []
+
+            @property
+            def state(self):
+                return self._state
+
+            def set_model_path(self, path) -> bool:
+                # Comportamento real: só aceita em STATE_ERROR
+                if self._state != self.STATE_ERROR:
+                    return False
+                self._set_path_calls.append(path)
+                return True
+
+            def load(self) -> bool:
+                self._load_calls += 1
+                return True
+
+        fake_svc = _FakeVoiceService()
+
+        # Conectar a MainWindow ao serviço fake; __init__ fará os três connects
+        with patch.object(MainWindow, "_setup_tray"):
+            window = MainWindow(MagicMock(), voice_service=fake_svc)
+
+        # Após __init__, cada sinal deve ter exatamente 1 conexão
+        conexoes_apos_init = (
+            fake_svc.loaded.connection_count(),
+            fake_svc.load_failed.connection_count(),
+            fake_svc.state_changed.connection_count(),
+        )
+        self.assertEqual(conexoes_apos_init, (1, 1, 1),
+                         "Cada sinal deve ter exatamente 1 conexão após __init__")
+
+        # Guardar referência da instância antes do retry
+        instancia_original = window._voice_service
+
+        # Executar o retry real — não deve reconectar nenhum sinal
+        with patch("therion.interface.desktop.load_config",
+                   return_value={"voice": {"model_path": "caminho/corrigido"}}):
+            window._on_voice_clicked()
+
+        # Contagem deve permanecer 1 para cada sinal
+        self.assertEqual(fake_svc.loaded.connection_count(), 1,
+                         "loaded não deve receber novas conexões no retry")
+        self.assertEqual(fake_svc.load_failed.connection_count(), 1,
+                         "load_failed não deve receber novas conexões no retry")
+        self.assertEqual(fake_svc.state_changed.connection_count(), 1,
+                         "state_changed não deve receber novas conexões no retry")
+
+        # Mesma instância preservada
+        self.assertIs(window._voice_service, instancia_original)
+
+    def test_retry_com_set_model_path_rejeitado_nao_chama_load(self) -> None:
+        """Se set_model_path for rejeitado (estado não é ERROR), load() não é chamado."""
+        from therion.interface.desktop import MainWindow
+        from therion.voice.service import VoiceModelService
+
+        app = MagicMock()
+        voice_service = VoiceModelService("caminho/invalido")
+        voice_service._state = VoiceModelService.STATE_ERROR
+
+        with patch.object(MainWindow, "_setup_tray"):
+            window = MainWindow(app, voice_service=voice_service)
+
+        # Forçar set_model_path a retornar False (simula rejeição inesperada)
+        with (
+            patch("therion.interface.desktop.load_config", return_value={"voice": {"model_path": "novo"}}),
+            patch.object(voice_service, "set_model_path", return_value=False),
+            patch.object(voice_service, "load") as mock_load,
+        ):
+            window._on_voice_clicked()
+            mock_load.assert_not_called()
+
+    def test_primeiro_carregamento_unloaded_nao_rele_config(self) -> None:
+        """No primeiro carregamento (UNLOADED), load_config() não é chamado."""
+        from therion.interface.desktop import MainWindow
+        from therion.voice.service import VoiceModelService
+
+        app = MagicMock()
+        voice_service = VoiceModelService("caminho/valido")
+        # Estado inicial: UNLOADED
+
+        with patch.object(MainWindow, "_setup_tray"):
+            window = MainWindow(app, voice_service=voice_service)
+
+        with (
+            patch("therion.interface.desktop.load_config") as mock_load_cfg,
+            patch.object(voice_service, "load", return_value=True),
+        ):
+            window._on_voice_clicked()
+            mock_load_cfg.assert_not_called()
+
+    def test_retry_model_path_atualizado_no_servico(self) -> None:
+        """Após retry bem-sucedido, o model_path do serviço reflete o caminho novo."""
+        from therion.interface.desktop import MainWindow
+        from therion.voice.service import VoiceModelService
+
+        app = MagicMock()
+        voice_service = VoiceModelService("caminho/antigo")
+        voice_service._state = VoiceModelService.STATE_ERROR
+
+        with patch.object(MainWindow, "_setup_tray"):
+            window = MainWindow(app, voice_service=voice_service)
+
+        with (
+            patch("therion.interface.desktop.load_config",
+                  return_value={"voice": {"model_path": "caminho/atualizado"}}),
+            patch.object(voice_service, "load", return_value=True),
+        ):
+            window._on_voice_clicked()
+
+        self.assertEqual(voice_service._model_path, "caminho/atualizado")
+
+
 if __name__ == "__main__":
     unittest.main()
 
