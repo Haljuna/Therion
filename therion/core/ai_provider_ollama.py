@@ -340,6 +340,14 @@ class OllamaProvider(AIProvider):
         available_intents: list[str],
     ) -> dict[str, Any]:
         system_content = SYSTEM_PROMPT
+        capabilities = (context or {}).get("capabilities_summary")
+        if isinstance(capabilities, str):
+            system_content += (
+                "\n\n[CAPACIDADES DA INSTÂNCIA ATUAL]\n" + capabilities
+                + "\nAo explicar o que pode fazer, respeite estas condições. "
+                "Não anuncie serviços indisponíveis nem simulação como execução real. "
+                "Uma capacidade configurada não comprova conexão saudável."
+            )
         if (context or {}).get("session_retrieval"):
             system_content += (
                 "\nO histórico inclui trechos recuperados da sessão, não necessariamente "

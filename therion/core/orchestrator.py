@@ -1133,6 +1133,27 @@ class Orchestrator:
         )
         return None
 
+    def _capabilities_summary(self) -> str:
+        """Descreve a instalação atual sem prometer saúde de serviços externos."""
+        lines = [
+            "Posso buscar e consultar notas do Segundo Cérebro dentro do escopo permitido "
+            "e consultar informações desta sessão.",
+            "Posso listar e gerenciar aliases; alterações seguem as confirmações do sistema.",
+        ]
+        if self.ai_core is not None:
+            lines.append("A IA está configurada para conversar e gerar planos textuais; depende da disponibilidade do modelo local.")
+        else:
+            lines.append("A conversa com o modelo de IA está desabilitada nesta instância.")
+        if self.simulate:
+            lines.append("Abrir aplicativos está em modo de simulação: posso demonstrar o fluxo, mas não abro o aplicativo de verdade.")
+        else:
+            lines.append("Posso solicitar a abertura de aplicativos permitidos, com confirmação antes da execução.")
+        if self.calendar_adapter is None:
+            lines.append("O calendário está indisponível nesta instância: não posso consultar nem criar eventos agora.")
+        else:
+            lines.append("O calendário está configurado para consultar e criar eventos, com confirmação na criação; o funcionamento depende da conexão e da autorização do serviço.")
+        return "\n\n".join(lines)
+
     def _build_ai_context(self, command: str = "") -> dict:
         """Cria snapshot somente leitura do contexto para o AICore."""
         # Excluir o pedido atual da busca; o provider o inclui integralmente uma vez.
@@ -1141,6 +1162,7 @@ class Orchestrator:
             prior_turns = prior_turns[:-1]
         recent = context_turns(prior_turns, command)
         ctx = {
+            "capabilities_summary": self._capabilities_summary(),
             "recent_turns": recent,
             "session_retrieval": True,
             "last_intent": self.memory.last_intent,
@@ -1344,6 +1366,16 @@ class Orchestrator:
             result = OrchestrationResult(status="success", message=recall)
             self._complete_task()
             self._finalize_session_result(result, session_recall=True)
+            return result
+
+        if re.fullmatch(
+            r"\s*(?:(?:eu )?(?:queria|quero) saber )?(?:o que voc[eê] (?:pode|consegue) fazer|"
+            r"quais (?:s[aã]o )?(?:suas|as suas) (?:fun[cç][oõ]es|capacidades))\s*[.!?]*\s*",
+            command, re.I,
+        ):
+            self._complete_task()
+            result = OrchestrationResult(status="success", message=self._capabilities_summary())
+            self._finalize_session_result(result)
             return result
 
         # Se o fluxo de abertura retornou uma Intent via variável auxiliar
@@ -1563,6 +1595,9 @@ class Orchestrator:
 
         # Tratamento especial para busca no Segundo Cérebro (somente leitura)
         if intent.action == "buscar segundo cérebro":
+            # Pontuação da frase não faz parte do termo, seja ele reconhecido
+            # pelo parser local ou retornado pela IA. Preservar pontos internos.
+            intent.target = intent.target.strip().rstrip(".!?").strip()
             trace = SearchTrace()
             results = self.second_brain.search_notes(intent.target, scope=scope, trace=trace)
             for root in trace.used_roots:
