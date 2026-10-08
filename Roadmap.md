@@ -135,7 +135,7 @@ Expandir a capacidade de consulta e integração da Therion mantendo-a como inte
 
 ## V2 — Voz
 
-**Estado em 29/09/2026:** política conceitual registrada; V2.1 em piloto isolado de transcrição local, ainda sem integração ao Therion. O teste ao vivo mostrou boa latência e memória, mas precisão parcial em verbos de comando. Próximo passo: verificar revisão e cancelamento antes de decidir implementação. A resposta falada/TTS pertence a etapa posterior.
+**Estado em 08/10/2026:** V2.1 — entrada por voz integrada — concluída por aceite explícito de Marcus, com limitações registradas em [[Validação V2.1 - 2026-10-08]]. Inclui push-to-talk, STT local, texto editável e envio manual. Próxima etapa: planejar V2.2 — resposta falada, sem provider TTS aprovado ou implementação autorizada por este registro.
 
 ### Objetivo
 
@@ -272,7 +272,7 @@ Não fazem parte da V0:
 
 ## Próxima meta
 
-**Prosseguir com a V2.1 — entrada por voz segura.** E1 concluída para planos de tamanho normal (M10 manual e M11 auditoria, checkpoint `001e2d4`) e interface responsiva checkpointada em `3333cc2`. A V2.1 está em piloto isolado; nenhuma integração de voz ao Therion foi feita. Planos muito extensos permanecem adiados.
+**Planejar a V2.2 — resposta falada.** A V2.1 foi concluída por aceite de Marcus em 08/10/2026, com ressalvas documentadas. E1 concluída para planos de tamanho normal (M10 manual e M11 auditoria, checkpoint `001e2d4`) e interface responsiva checkpointada em `3333cc2`. Definir escopo e critérios da V2.2 antes de instalar ou implementar TTS. Planos muito extensos permanecem adiados.
 
 Primeiro marco técnico (V0 concluída):
 

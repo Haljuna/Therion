@@ -1,7 +1,7 @@
 ---
 painel_status: em_desenvolvimento
-painel_fase: Pós-V1; E1 concluída para planos normais; piloto isolado de voz V2.1
-painel_proxima_acao: Testar revisão e cancelamento no piloto isolado de voz e decidir o menor escopo de integração
+painel_fase: Pós-V1; voz V2.1 concluída com ressalvas aceitas
+painel_proxima_acao: Definir escopo e critérios de avaliação da V2.2 — resposta falada
 painel_bloqueio: Falha preexistente em read_scope; fonte pessoal da SKILL-002 ainda depende de escolha explícita
 painel_atualizacao: 2026-10-08
 ---
@@ -41,7 +41,7 @@ As decisões técnicas principais da V1 foram aprovadas (interface PySide6, proc
 - 🧪 SKILL-002 — Planejar meu dia integrada, validada manualmente e Em teste (panorama read-only da agenda)
 - ✅ E1 — Planos conversacionais efêmeros na sessão (DEC-034): M9 validada, M10 aprovada manualmente para planos de tamanho normal e M11 auditada; checkpoints `fe0f1e4`, `6c78343` e `001e2d4`. Planos muito extensos seguem adiados em nota própria.
 - ✅ Interface responsiva durante comandos demorados: checkpoint `3333cc2`; envio e confirmação usam workers Qt, sem segundo envio durante o processamento. Validada manualmente; 206 testes focados passaram na validação anterior ao commit.
-- 🧪 V2.1 — Voz: piloto isolado de transcrição local em andamento, ainda sem integração ao Therion.
+- ✅ V2.1 — Concluída em 08/10/2026 por aceite explícito de Marcus: push-to-talk, STT local, texto editável e envio manual. Validações e limitações residuais aceitas em [[Validação V2.1 - 2026-10-08]]. Sem TTS.
 
 ### Prioridade arquitetural atual
 
@@ -49,9 +49,9 @@ A auditoria read-only do bootstrap dos agentes e do custo de contexto foi conclu
 
 Ressalva de integridade da baseline: o repositório ainda possui falha preexistente em `read_scope`, portanto NÃO deve ser declarado globalmente verde.
 
-A V2 — Voz entrou em avaliação prática isolada. `Planejamento da V2 - Voz.md` registra a política conceitual; nenhum caminho de voz foi integrado ao Therion. O piloto com microfone teve boa latência, mas precisão parcial em verbos de comando, exigindo transcrição editável e envio manual antes de qualquer execução.
+A V2.1 já possui entrada por voz integrada; não há TTS nesta frente. Os checkpoints `15a664e`, `416a003` e `47dfc80` registram captura/transcrição, integração e recuperação do carregamento. Os resultados manuais, medições aceitas e limites estão em [[Validação V2.1 - 2026-10-08]].
 
-O próximo passo da V2.1 é testar revisão e cancelamento no piloto isolado e então decidir o menor escopo de integração. Em frente separada, o usuário ainda precisa escolher explicitamente uma pasta ou nota pessoal como fonte autorizada de tarefas para a SKILL-002.
+A V2.1 está encerrada com ressalvas aceitas; o próximo passo da voz é definir escopo e critérios de avaliação da V2.2 — resposta falada. Nenhum provider TTS ou implementação foi autorizado por esse encerramento. Em frente separada, o usuário ainda precisa escolher explicitamente uma pasta ou nota pessoal como fonte autorizada de tarefas para a SKILL-002.
 
 ### Progresso da V1 validado até o momento
 
@@ -623,7 +623,7 @@ Marco de governança alcançado: Camada Zero implementada e validada (5.1-B e 5.
 
 Próxima etapa principal:
 
-**V2.1 — entrada por voz segura, ainda em piloto isolado.** A E1 e a interface responsiva possuem checkpoints locais; planos extensos continuam adiados. SKILL-002 permanece Em teste e a trilha pós-V1 condicionada a decisão própria.
+**V2.2 — planejar resposta falada, sem iniciar implementação.** A V2.1 foi concluída por aceite de Marcus em 08/10/2026, com limitações explícitas no registro de validação. A E1 e a interface responsiva possuem checkpoints locais; planos extensos continuam adiados. SKILL-002 permanece Em teste e a trilha pós-V1 condicionada a decisão própria.
 
 ### Frentes fechadas nesta rodada
 
@@ -645,7 +645,7 @@ Próxima etapa principal:
 - Baseline global ainda possui falha preexistente em `read_scope` (não declarar o repositório globalmente verde)
 - `Estado Atual.md`, `Roadmap.md`, `.opencode/` e notas de retomada/referência ainda compõem trabalho local separado; não incluí-los automaticamente em um checkpoint de código
 - Pedido de plano muito extenso continua sem solução integrada; bug de esclarecimento após nome de aplicativo digitado incorretamente e rascunho de calendário ao Limpar são pendências separadas
-- Consumo de RAM do aplicativo Therion: usuário observou picos ao abrir e usar o app, enquanto o piloto isolado da V2 permaneceu quase estável durante horas. É uma hipótese de problema no app, não um vazamento ou causa confirmados. Ao retomar, medir por processo a RAM ao abrir, após comandos e após alguns minutos ocioso, registrando qual ação antecede cada aumento; investigar separadamente do piloto de voz.
+- Consumo de RAM: a medição de 08/10/2026 foi aceita por Marcus como concluída. RAM residente do processo principal: 453 → 456 MiB, pico 577 MiB; retomada no tempo habitual relatado e processos encerrados após Sair. O intervalo medido sem novas chamadas foi de cerca de nove minutos; não comprova 20 minutos nem exclui problemas em uso mais longo. Ver [[Validação V2.1 - 2026-10-08]].
 - 30/09/2026 — Falha real ao tentar criar um evento no Google Calendar: a renovação da credencial OAuth retornou `invalid_grant` (`Token has been expired or revoked`) e o Therion informou que é necessária reautenticação. A criação do evento não foi confirmada; verificar no calendário antes de repetir o pedido. A causa específica ainda não foi diagnosticada. Conferir o estado da tela de consentimento OAuth (inclusive se está em `Testing`) e a configuração da credencial, sem expor segredos. Não há evidência de que o erro esteja relacionado a cobrança. Não reautenticar nem alterar tokens automaticamente.
 
 ---

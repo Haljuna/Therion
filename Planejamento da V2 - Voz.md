@@ -1,6 +1,6 @@
 # Planejamento da V2 — Voz do Therion
 
-**Estado:** planejamento; política conceitual V2.0 aprovada pelo usuário; implementação não autorizada.  
+**Estado em 08/10/2026:** V2.1 concluída por aceite explícito de Marcus, com ressalvas em [[Validação V2.1 - 2026-10-08]]; V2.2/TTS permanece planejamento sem provider definitivo aprovado.
 **Registro:** 2026-09-23.  
 **Papel deste documento:** preservar o desenho e a pesquisa para continuidade entre chats e agentes. Não substitui `Roadmap.md`, `Estado Atual.md`, `Decisões.md` nem a governança do Segundo Cérebro. Propostas técnicas e recomendações abaixo não são decisões de implementação.
 
@@ -90,7 +90,7 @@ O `Roadmap.md` atual põe V2 — Voz como próxima prioridade e afirma que a tri
 
 **Evidência documentada:** disponibilidade de APIs, idiomas/vozes anunciados, execução local/cloud, opções de streaming e políticas publicadas nas fontes abaixo. Alegações de desempenho dos fornecedores não são medições do Therion.
 
-**Hipóteses:** `faster-whisper` pode integrar mais facilmente; Piper pode ser suficiente como voz local; ElevenLabs pode justificar o custo; push-to-talk pode oferecer latência aceitável. Nenhuma está validada na máquina-alvo.
+**Atualização de 08/10/2026:** faster-whisper já integra a entrada por voz local do Therion; os testes manuais e a medição aceita estão em [[Validação V2.1 - 2026-10-08]]. Precisão não é perfeita: foi observado “realizar” no lugar de “revisar”. Piper e ElevenLabs continuam candidatos futuros de TTS, sem avaliação ou aprovação definitiva nesta frente.
 
 **Medir no computador real:** precisão PT-BR em frases representativas, nomes próprios e ruído; RAM/CPU/GPU; tempo entre soltar botão e ver a transcrição; tempo até o primeiro áudio e até terminar de falar; qualidade das vozes; cancelamento; funcionamento offline; custo no volume de uso esperado; compatibilidade de instalação.
 
@@ -100,7 +100,7 @@ O `Roadmap.md` atual põe V2 — Voz como próxima prioridade e afirma que a tri
 
 Ainda precisam de decisão própria: critérios mensuráveis de aceite, duração máxima de captura e timeouts, semântica exata de cancelamento após Enviar, política final de temporários e retenção, momento/formato do consentimento cloud, possibilidade e limite de enviar respostas comuns a TTS cloud, eventual exceção específica para conteúdo do Segundo Cérebro, provider de cada etapa e posição da V2 em relação à trilha de inteligência externa. Não converter essas lacunas em defaults permissivos.
 
-**Próximo passo recomendado:** auditoria read-only do Therion para localizar entrada textual, UI, cancelamento, memória/auditoria, arquivos temporários e pontos de encaixe de VoiceSession/STT/TTS. Depois apresentar o menor plano de V2.1 ao usuário e ao Gerente Geral. Nenhuma implementação, teste, instalação, Git ou contratação é autorizada por este documento.
+**Próximo passo recomendado:** definir o menor escopo da V2.2: resposta textual sempre disponível, reprodução de voz, interrupção e falha de áudio sem perda da resposta. Comparar opções local/cloud em etapa própria, com privacidade e custos explícitos antes de escolher provider. A V2.1 está encerrada com ressalvas, sem reconstruir o piloto. Este documento não autoriza instalações, Git, contratação, TTS ou ampliação de autonomia.
 
 ## 9. Visão de experiência futura — conversa natural com ações em etapas
 
