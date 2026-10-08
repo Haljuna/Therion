@@ -21,6 +21,7 @@ from therion.governance.confirmation import ConfirmationHandler
 from therion.governance.permissions import PermissionManager
 from therion.logging.audit import AuditLogger
 from therion.memory.working_memory import WorkingMemory
+from therion.memory.session_recall import context_turns, recall_answer
 from therion.skills.registry import get_skill
 
 
@@ -28,6 +29,18 @@ _DURATION_RE = re.compile(
     r'(\d+)\s*(horas?|h|min(?:utos?)?)',
     re.IGNORECASE,
 )
+
+
+def _is_first_message_query(command: str) -> bool:
+    """Reconhece consultas à primeira mensagem, sem capturar comandos compostos."""
+    normalized = " ".join(command.casefold().split()).rstrip(".!?").strip()
+    return re.fullmatch(
+        r"qual (?:foi|é|e|era) (?:a|minha|a minha) primeira "
+        r"(?:mensagem(?: que (?:eu )?enviei(?: (?:a você|a voce|para você|para voce))?)?"
+        r"|coisa que eu te pedi) "
+        r"(?:dessa|desta|nessa|nesta|da|na) sess[aã]o",
+        normalized,
+    ) is not None
 
 _AMBIGUOUS_PREFIX_RE = re.compile(
     r'(?:umas?\s+|mais\s+ou\s+menos\s+|cerca\s+de\s+|aproximadamente\s+)$',
@@ -52,6 +65,21 @@ PLAN_TOO_LARGE_MESSAGE = (
 
 # Motivo interno (ClassifyOutcome.failure) → status externo + mensagem não técnica.
 _AI_FAILURE_DIAGNOSTICS: dict[str, tuple[str, str]] = {
+    "plan_blocks_invalid": (
+        "plan_blocks_invalid",
+        "O plano não foi exibido porque os blocos de estudo e pausa não respeitam "
+        "a distribuição definida. Você pode pedir um novo plano.",
+    ),
+    "plan_content_invalid": (
+        "plan_content_invalid",
+        "O plano não foi exibido porque sua estrutura ou o texto de algum bloco "
+        "está inválido. Todos os blocos, inclusive pausas, precisam de título e descrição.",
+    ),
+    "plan_duration_invalid": (
+        "plan_duration_invalid",
+        "O plano não foi exibido porque os tempos dos blocos estão ausentes, inválidos "
+        "ou não somam a duração solicitada. Você pode pedir um novo plano.",
+    ),
     "provider_unavailable": (
         "ai_unavailable",
         "O serviço de IA auxiliar está indisponível no momento.",
@@ -382,10 +410,17 @@ class Orchestrator:
         self._pending_clarification = cleaned[:_PENDING_CLARIFICATION_MAX]
 
     def clear_session(self) -> None:
-        """Limpa a clarification pendente e o contexto de sessão da memória."""
+        """Encerra a sessão volátil, inclusive tarefas e fluxos intermediários."""
         self._pending_clarification = None
         self.memory.clear_session()
+        self.memory.clear()
         self._plan_state.clear_session()
+        self._reset_alias_flow()
+        self._reset_delete_alias_flow()
+        self._reset_replace_alias_flow()
+        self._reset_unknown_target_flow()
+        self._reset_calendar_create_flow()
+        self._reset_open_app_flow()
 
     def _parse_event_datetimes(self, draft: dict) -> tuple[datetime, datetime]:
         """Converte data/hora do rascunho em datetimes timezone-aware.
@@ -479,14 +514,21 @@ class Orchestrator:
             message="Eventos de hoje:\n" + "\n".join(lines),
         )
 
-    def _finalize_session_result(self, result: OrchestrationResult) -> None:
+    def _finalize_session_result(self, result: OrchestrationResult, *, session_recall: bool = False) -> None:
         """Registra turno do Therion e atualiza contexto operacional na sessão."""
         if self._scope_note:
             if result.message:
                 result.message = f"{result.message}\n\n{self._scope_note}"
             else:
                 result.message = self._scope_note
-        self.memory.add_turn("therion", result.message)
+        if not self.memory.add_turn(
+            "therion", result.message,
+            origin="session_recall" if session_recall else "original",
+        ):
+            result.message += (
+                "\n\nEsta resposta não foi registrada na memória: limite da sessão atingido. "
+                "Use Limpar conversa para iniciar outra sessão."
+            )
         self.memory.last_result = result.message
         self.memory.last_status = result.status
         if result.intent is not None:
@@ -1093,12 +1135,14 @@ class Orchestrator:
 
     def _build_ai_context(self, command: str = "") -> dict:
         """Cria snapshot somente leitura do contexto para o AICore."""
-        recent = [
-            {"role": t.role, "text": t.text}
-            for t in self.memory.recent_turns(5)
-        ]
+        # Excluir o pedido atual da busca; o provider o inclui integralmente uma vez.
+        prior_turns = list(self.memory.turns)
+        if prior_turns and prior_turns[-1].role == "user" and prior_turns[-1].text == command:
+            prior_turns = prior_turns[:-1]
+        recent = context_turns(prior_turns, command)
         ctx = {
             "recent_turns": recent,
+            "session_retrieval": True,
             "last_intent": self.memory.last_intent,
             "last_target": self.memory.last_target,
             "last_status": self.memory.last_status,
@@ -1108,7 +1152,11 @@ class Orchestrator:
                 else None
             ),
         }
-        budget = _extract_pomodoro_budget(command, recent)
+        # Orçamento operacional continua usando apenas a janela recente original.
+        budget = _extract_pomodoro_budget(command, [
+            {"role": turn.role, "text": turn.text}
+            for turn in self.memory.recent_turns(5)
+        ])
         if budget is not None:
             ctx["pomodoro_budget"] = budget
         if self._pending_clarification is not None:
@@ -1146,6 +1194,21 @@ class Orchestrator:
 
     def process_command(self, command: str) -> OrchestrationResult:
         """Processa um comando textual registrando todas as etapas na memória de trabalho."""
+        submitted_command = command
+        # Contagem conservadora inclui uma possível cópia da sintaxe de escopo.
+        if not self.memory.can_start_exchange(command) or (
+            self.memory.session_characters + 2 * len(command)
+            + 2 * self.memory.MAX_MESSAGE_CHARACTERS > self.memory.MAX_CHARACTERS
+        ):
+            return OrchestrationResult(
+                status="session_limit",
+                message=(
+                    "Mensagem acima do limite de 16.000 caracteres. Reduza o texto."
+                    if len(command) > self.memory.MAX_MESSAGE_CHARACTERS else
+                    "Limite da sessão atingido. O histórico anterior foi preservado. "
+                    "Use Limpar conversa para iniciar outra sessão."
+                ),
+            )
         self._scope_note = ""
         mode = "simulado" if self.simulate else "real"
         scope_syntax = _parse_scope_syntax(command)
@@ -1159,7 +1222,10 @@ class Orchestrator:
                     f"{root} ({reason})" for root, reason in scope_roots.rejected
                 )
         self.memory.start_task(command=command, execution_mode=mode)
-        self.memory.add_turn("user", command)
+        self.memory.add_turn(
+            "user", command,
+            submitted_text=submitted_command if submitted_command != command else None,
+        )
         if scope_syntax.present and not scope_syntax.malformed:
             scope = ReadScope(
                 task_id=self.memory.current_task.task_id,
@@ -1257,6 +1323,28 @@ class Orchestrator:
             self._complete_task()
             self._finalize_session_result(open_app_flow_result)
             return open_app_flow_result
+
+        # Consulta literal somente fora dos fluxos interativos; nunca concede permissão.
+        if _is_first_message_query(command):
+            self.memory.turns[-1].origin = "session_recall"
+            first_message = self.memory.first_user_message()
+            result = OrchestrationResult(
+                status="success",
+                message=("Sua primeira mensagem nesta sessão foi:\n" + first_message
+                         if first_message is not None else
+                         "Não há mensagem de usuário registrada nesta sessão."),
+            )
+            self._complete_task()
+            self._finalize_session_result(result, session_recall=True)
+            return result
+
+        recall = recall_answer(list(self.memory.turns)[:-1], command)
+        if recall is not None:
+            self.memory.turns[-1].origin = "session_recall"
+            result = OrchestrationResult(status="success", message=recall)
+            self._complete_task()
+            self._finalize_session_result(result, session_recall=True)
+            return result
 
         # Se o fluxo de abertura retornou uma Intent via variável auxiliar
         if self._pending_open_app_result is not None:
@@ -1675,7 +1763,11 @@ class Orchestrator:
         if plan.title is not None and plan.title != "":
             parts.append(plan.title)
         for section in plan.sections:
-            parts.append(section.heading + "\n" + section.body)
+            heading = "Pausa" if section.block_type == "break" else section.heading
+            if section.duration_minutes is not None:
+                heading += f" — {section.duration_minutes} minutos"
+            body = "Levante-se, alongue-se e descanse." if section.block_type == "break" else section.body
+            parts.append(heading + "\n" + body)
         return "\n\n".join(parts)
 
     def ack_plan_displayed(self, candidate_id: str) -> PlanAckResult:

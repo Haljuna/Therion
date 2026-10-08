@@ -20,12 +20,55 @@ from therion.core.ai_provider import (
     ProviderResponseError,
     ProviderTimeoutError,
     ProviderTransportError,
+    plan_duration_minutes,
+    plan_blocks,
 )
 
 FAILURE_PROVIDER_UNAVAILABLE = "provider_unavailable"
 FAILURE_PROVIDER_TIMEOUT = "provider_timeout"
 FAILURE_INVALID_RESPONSE = "invalid_response"
 FAILURE_REJECTED_BY_POLICY = "rejected_by_policy"
+FAILURE_PLAN_DURATION = "plan_duration_invalid"
+FAILURE_PLAN_CONTENT = "plan_content_invalid"
+FAILURE_PLAN_BLOCKS = "plan_blocks_invalid"
+
+
+def _explicit_plan_request(message: str) -> bool:
+    """Pedido textual de geração; referências e comandos externos ficam fora."""
+    if re.search(r"\b(?:abra|abrir|envie|enviar|execute|executar|agende|agendar|apague|exclua)\b", message, re.I):
+        return False
+    return re.match(
+        r"^\s*(?:por favor[,\s]+)?(?:"
+        r"(?:monte|gere|crie|prepare|elabore)\s+(?:um|uma|o|a)\s+"
+        r"|(?:quero|preciso de)\s+(?:um|uma)\s+"
+        r"|quero que (?:voc[eê] )?(?:monte|gere|crie|prepare|elabore)\s+(?:um|uma)\s+"
+        r")(?:plano|roteiro)\b", message, re.I,
+    ) is not None
+
+
+def _resolved_plan_request(message: str, context: dict) -> Optional[str]:
+    if _explicit_plan_request(message):
+        return message
+    if message.strip().casefold().rstrip(".!?") not in {
+        "pode mandar", "pode mandar o plano", "pode gerar", "pode gerar o plano",
+    }:
+        return None
+    history = (context or {}).get("recent_turns", [])
+    if not isinstance(history, (list, tuple)) or len(history) < 2:
+        return None
+    user, assistant = history[-2:]
+    if not isinstance(user, dict) or not isinstance(assistant, dict):
+        return None
+    request, reply = user.get("text"), assistant.get("text")
+    if user.get("role") != "user" or assistant.get("role") != "therion":
+        return None
+    if not isinstance(request, str) or not isinstance(reply, str):
+        return None
+    if _explicit_plan_request(request) and re.search(
+        r"\b(?:vou (?:montar|gerar|preparar)|aqui est[aá])\b.*\b(?:plano|roteiro)\b", reply, re.I,
+    ):
+        return request
+    return None
 
 _PLAN_REFERENCE_CUES = {
     "first": re.compile(r"\bprimeir[oa]\b", re.IGNORECASE),
@@ -127,6 +170,10 @@ class AICore:
             provider_unavailable, provider_timeout, invalid_response,
             rejected_by_policy.
         """
+        if _resolved_plan_request(message, context) is not None:
+            return ClassifyOutcome(response=AIResponse(
+                type=PLAN_REQUEST, message="Vou gerar o plano solicitado.",
+            ))
         try:
             raw = self._provider.generate(
                 message=message,
@@ -166,6 +213,7 @@ class AICore:
             validate_plan_content, None); falha = (None, uma das
             constantes FAILURE_* existentes).
         """
+        message = _resolved_plan_request(message, context) or message
         try:
             plan = self._provider.generate_plan(message=message, context=context)
         except ProviderTimeoutError:
@@ -181,7 +229,24 @@ class AICore:
             return None, FAILURE_INVALID_RESPONSE
 
         if not validate_plan_content(plan):
+            if plan_duration_minutes(message) is not None:
+                return None, FAILURE_PLAN_CONTENT
             return None, FAILURE_REJECTED_BY_POLICY
+
+        duration = plan_duration_minutes(message)
+        if duration is not None:
+            times = [section.duration_minutes for section in plan.sections]
+            if any(type(value) is not int or value <= 0 for value in times):
+                return None, FAILURE_PLAN_DURATION
+            if sum(times) != duration:
+                return None, FAILURE_PLAN_DURATION
+            expected = plan_blocks(duration)
+            if [(s.block_type, s.duration_minutes) for s in plan.sections] != expected:
+                return None, FAILURE_PLAN_BLOCKS
+            if any(s.block_type == "study" and re.match(
+                r"\s*(?:pausa|descanso|intervalo)\b", s.heading, re.I,
+            ) for s in plan.sections):
+                return None, FAILURE_PLAN_BLOCKS
 
         return plan, None
 

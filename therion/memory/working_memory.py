@@ -51,16 +51,26 @@ class Turn:
 
     role: Literal["user", "therion"]
     text: str
+    turn_id: int = 0
+    submitted_text: Optional[str] = None
+    origin: Literal["original", "session_recall"] = "original"
 
 
 class WorkingMemory:
     """Gerenciador de memória de trabalho estritamente volátil (sem persistência em disco)."""
 
+    MAX_TURNS = 500
+    MAX_CHARACTERS = 500_000
+    MAX_MESSAGE_CHARACTERS = 16_000
+
     def __init__(self) -> None:
         self.current_task: Optional[TaskContext] = None
         self.history: List[TaskContext] = []
         # Memória de sessão (V1)
-        self.turns: deque = deque(maxlen=50)
+        self.turns: deque = deque()
+        self.session_characters = 0
+        self.session_full = False
+        self._next_turn_id = 1
         self.last_intent: Optional[str] = None
         self.last_target: Optional[str] = None
         self.last_result: Optional[str] = None
@@ -172,7 +182,7 @@ class WorkingMemory:
 
     def complete_task(self) -> None:
         """Arquiva a tarefa atual concluída ou encerrada no histórico da sessão."""
-        if self.current_task:
+        if self.current_task and len(self.history) < self.MAX_TURNS:
             self.history.append(self.current_task)
 
     def clear(self) -> None:
@@ -180,9 +190,46 @@ class WorkingMemory:
         self.current_task = None
         self.history.clear()
 
-    def add_turn(self, role: Literal["user", "therion"], text: str) -> None:
+    def can_start_exchange(self, text: str) -> bool:
+        """Reserva espaço para pedido, resposta e eventual confirmação.
+
+        Não altera a sessão ao rejeitar uma entrada individual muito grande.
+        """
+        if len(text) > self.MAX_MESSAGE_CHARACTERS:
+            return False
+        return (
+            not self.session_full
+            and len(self.turns) + 3 <= self.MAX_TURNS
+            and self.session_characters + len(text)
+            + 2 * self.MAX_MESSAGE_CHARACTERS <= self.MAX_CHARACTERS
+        )
+
+    def add_turn(
+        self, role: Literal["user", "therion"], text: str,
+        submitted_text: Optional[str] = None,
+        origin: Literal["original", "session_recall"] = "original",
+    ) -> bool:
         """Adiciona um turno de conversa à sessão."""
-        self.turns.append(Turn(role=role, text=text))
+        size = len(text) + (len(submitted_text) if submitted_text is not None else 0)
+        if (
+            self.session_full
+            or len(text) > self.MAX_MESSAGE_CHARACTERS
+            or len(self.turns) >= self.MAX_TURNS
+            or self.session_characters + size > self.MAX_CHARACTERS
+        ):
+            self.session_full = True
+            return False
+        self.turns.append(Turn(role, text, self._next_turn_id, submitted_text, origin))
+        self._next_turn_id += 1
+        self.session_characters += size
+        return True
+
+    def first_user_message(self) -> Optional[str]:
+        """Recupera o envio original, nunca uma reconstrução feita pela IA."""
+        for turn in self.turns:
+            if turn.role == "user":
+                return turn.submitted_text if turn.submitted_text is not None else turn.text
+        return None
 
     def recent_turns(self, n: int = 10) -> List[Turn]:
         """Retorna os N turnos mais recentes."""
@@ -194,6 +241,9 @@ class WorkingMemory:
     def clear_session(self) -> None:
         """Limpa turnos e contexto operacional, preservando history e current_task."""
         self.turns.clear()
+        self.session_characters = 0
+        self.session_full = False
+        self._next_turn_id = 1
         self.last_intent = None
         self.last_target = None
         self.last_result = None

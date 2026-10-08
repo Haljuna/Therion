@@ -756,7 +756,7 @@ class MainWindow(QMainWindow):
 
     def _clear_conversation(self) -> None:
         """Limpa o histórico visual da conversa e encerra o estado interno da sessão."""
-        if self._processing:
+        if self._processing or self._pending_plan is not None:
             return
         self._cancel_voice_if_active()
         self._history.clear()

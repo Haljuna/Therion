@@ -1133,7 +1133,7 @@ class TestOrchestrationResultRegisteredPlanId(unittest.TestCase):
 class TestPlanReferenceBranch(unittest.TestCase):
     """Ramo plan_reference em process_command (E1/M8b2)."""
 
-    _COMMAND = "gere um plano de estudo sobre proporções"
+    _COMMAND = "Mostre um plano registrado"
     _UNAVAILABLE_MESSAGE = (
         "Não há um plano disponível nesta sessão para essa referência."
     )

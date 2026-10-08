@@ -269,13 +269,13 @@ class TestWorkingMemorySession(unittest.TestCase):
         self.assertEqual(self.memory.recent_turns(n=0), [])
         self.assertEqual(self.memory.recent_turns(n=-1), [])
 
-    def test_turns_fifo_limit(self) -> None:
-        """16. deque(maxlen=50) descarta turnos mais antigos."""
+    def test_turns_preserve_beginning_after_fifty(self) -> None:
+        """O início permanece disponível depois de cinquenta mensagens."""
         for i in range(55):
             self.memory.add_turn("user", f"cmd{i}")
         turns = list(self.memory.turns)
-        self.assertEqual(len(turns), 50)
-        self.assertEqual(turns[0].text, "cmd5")
+        self.assertEqual(len(turns), 55)
+        self.assertEqual(turns[0].text, "cmd0")
         self.assertEqual(turns[-1].text, "cmd54")
 
     def test_last_fields_start_none(self) -> None:
