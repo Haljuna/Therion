@@ -229,6 +229,13 @@ class TestDesktopIntegration(unittest.TestCase):
 
     def setUp(self) -> None:
         self.temp_dir = tempfile.mkdtemp(prefix="therion_desktop_test_")
+        # Não disputar o mutex do Therion pessoal nem criar runtime real.
+        instance = patch('therion.autonomy.windows.SingleInstance')
+        instance.start().return_value.acquired = True
+        self.addCleanup(instance.stop)
+        runtime = patch('therion.autonomy.windows.build_runtime')
+        runtime.start()
+        self.addCleanup(runtime.stop)
 
     def tearDown(self) -> None:
         shutil.rmtree(self.temp_dir, ignore_errors=True)
@@ -734,7 +741,7 @@ class TestDesktopOrchestratorIntegration(unittest.TestCase):
                 window._history.clear.assert_called_once()
                 window._orchestrator.clear_session.assert_called_once_with()
 
-    def test_pending_plan_not_cleared_by_clear(self) -> None:
+    def test_pending_plan_is_discarded_by_clear(self) -> None:
         from therion.interface.desktop import MainWindow
         mock_app = MagicMock()
         with patch.object(MainWindow, '_setup_ui'):
@@ -743,9 +750,9 @@ class TestDesktopOrchestratorIntegration(unittest.TestCase):
                 window._history = MagicMock()
                 window._pending_plan = MagicMock()
                 window._clear_conversation()
-                self.assertIsNotNone(window._pending_plan)
+                self.assertIsNone(window._pending_plan)
 
-    def test_update_clear_button_disabled_with_pending(self) -> None:
+    def test_update_clear_button_enabled_with_pending(self) -> None:
         from therion.interface.desktop import MainWindow
         mock_app = MagicMock()
         with patch.object(MainWindow, '_setup_ui'):
@@ -754,7 +761,7 @@ class TestDesktopOrchestratorIntegration(unittest.TestCase):
                 window._clear_button = MagicMock()
                 window._pending_plan = MagicMock()
                 window._update_clear_button_state()
-                window._clear_button.setEnabled.assert_called_once_with(False)
+                window._clear_button.setEnabled.assert_called_once_with(True)
 
     def test_update_clear_button_enabled_without_pending(self) -> None:
         from therion.interface.desktop import MainWindow
