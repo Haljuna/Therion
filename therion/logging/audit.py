@@ -11,12 +11,6 @@ from typing import Any, Dict, List, Optional, cast
 class AuditLogger:
     """Registrador de auditoria estruturada em formato JSON Lines (.jsonl)."""
 
-    DEFAULT_LOG_DIR = os.path.abspath(
-        os.path.join(
-            os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "logs"
-        )
-    )
-
     # Padrões regex para mascarar credenciais e segredos conhecidos.
     # Cada entrada é uma tupla (pattern, replacement) para permitir replacements
     # distintos: patterns com grupo capturado usam \1, sem grupo usam literal.
@@ -48,7 +42,9 @@ class AuditLogger:
     def __init__(
         self, log_dir: Optional[str] = None, log_file: str = "audit.jsonl"
     ) -> None:
-        self.log_dir = os.path.abspath(log_dir or self.DEFAULT_LOG_DIR)
+        # Fica com o resto do estado local (fora do repo); o test-v4.py isola LOCALAPPDATA.
+        local = os.environ.get("LOCALAPPDATA") or os.path.join(os.path.expanduser("~"), "AppData", "Local")
+        self.log_dir = os.path.abspath(log_dir or os.path.join(local, "Therion", "logs"))
         self.log_file = log_file
         self.log_path = os.path.join(self.log_dir, self.log_file)
 

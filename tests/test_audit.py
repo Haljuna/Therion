@@ -413,5 +413,15 @@ class TestAuditLogger(unittest.TestCase):
         self.assertEqual(task.accepted_roots[0], unc)
 
 
+class TestAuditDefaultLocation(unittest.TestCase):
+    """O log padrão fica no estado local, fora do repositório."""
+
+    def test_default_dir_follows_localappdata(self) -> None:
+        with tempfile.TemporaryDirectory() as local:
+            with patch.dict(os.environ, {"LOCALAPPDATA": local}):
+                logger = AuditLogger()
+            self.assertEqual(logger.log_dir, os.path.join(os.path.abspath(local), "Therion", "logs"))
+
+
 if __name__ == "__main__":
     unittest.main()

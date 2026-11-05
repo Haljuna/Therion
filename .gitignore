@@ -16,9 +16,7 @@ venv/
 ENV/
 
 # Testes e cobertura
-/tmp/v4-baseline/
-/tmp/v4-tests/
-/tmp/hermes-evolution/
+/tmp/
 *.sqlite3
 *.sqlite3-wal
 *.sqlite3-shm
@@ -31,7 +29,6 @@ htmlcov/
 .idea/
 
 # Logs e auditoria local
-/tmp/hermes-pilots/
 logs/
 *.jsonl
 *.log
