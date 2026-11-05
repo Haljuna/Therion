@@ -106,7 +106,7 @@ class TestOrchestratorCalendar(unittest.TestCase):
         orch = Orchestrator(simulate=True, calendar_adapter=adapter)
         result = orch.process_command("Therion, o que tenho hoje?")
         self.assertEqual(result.status, "success")
-        self.assertIn("Nenhum evento para hoje", result.message)
+        self.assertIn("Nenhum compromisso para hoje", result.message)
 
     def test_orchestrator_with_adapter_error(self) -> None:
         """6. Orchestrator com adapter que retorna erro controlado."""

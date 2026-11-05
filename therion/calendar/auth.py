@@ -63,7 +63,7 @@ def load_credentials() -> Credentials | None:
     return creds
 
 
-def ensure_valid_credentials(creds: Credentials | None) -> Credentials:
+def ensure_valid_credentials(creds: Credentials | None, *, expected_identity: str | None = None) -> Credentials:
     """Garante que as credenciais são válidas, fazendo refresh se necessário.
     
     Args:
@@ -94,8 +94,26 @@ def ensure_valid_credentials(creds: Credentials | None) -> Credentials:
     
     if creds.expired and creds.refresh_token:
         try:
-            creds.refresh(Request())
-            _persist_token(creds)
+            if expected_identity is None:
+                creds.refresh(Request());_persist_token(creds)
+            else:
+                request=Request()
+                def bounded(*args,**kwargs):
+                    kwargs['timeout']=30
+                    return request(*args,**kwargs)
+                creds.refresh(bounded)
+                from therion.integrations.gmail import account_identity
+                import tempfile
+                path=_get_token_path()
+                descriptor,name=tempfile.mkstemp(prefix='calendar-refresh-',suffix='.tmp',dir=path.parent)
+                try:
+                    with os.fdopen(descriptor,'w',encoding='utf-8') as stream:
+                        stream.write(creds.to_json());stream.flush();os.fsync(stream.fileno())
+                    if account_identity(path.parent,'token.json')!=expected_identity:
+                        raise CalendarError('A conta mudou durante a renovação; preservei o token atual.')
+                    os.replace(name,path)
+                finally:
+                    if os.path.exists(name):os.unlink(name)
             return creds
         except Exception as e:
             raise CalendarError(
@@ -134,7 +152,7 @@ def _persist_token(creds: Credentials) -> None:
         raise CalendarError(f"Falha ao persistir token atualizado: {e}") from e
 
 
-def get_valid_credentials() -> Credentials:
+def get_valid_credentials(*,expected_identity: str | None = None) -> Credentials:
     """Fluxo completo: carrega token, valida, faz refresh se necessário.
     
     Returns:
@@ -144,8 +162,14 @@ def get_valid_credentials() -> Credentials:
         CalendarError: Em qualquer falha controlada (token ausente, inválido,
                        refresh falhou, persistência falhou).
     """
+    if expected_identity is not None:
+        from therion.integrations.gmail import account_identity
+        root=_get_token_path().parent
+        if account_identity(root,'token.json')!=expected_identity:raise CalendarError('Conta da agenda alterada antes da autenticação.')
     creds = load_credentials()
-    return ensure_valid_credentials(creds)
+    if expected_identity is None:return ensure_valid_credentials(creds)
+    if account_identity(root,'token.json')!=expected_identity:raise CalendarError('Conta da agenda alterada durante a autenticação.')
+    return ensure_valid_credentials(creds,expected_identity=expected_identity)
 
 
 def run_initial_auth() -> None:

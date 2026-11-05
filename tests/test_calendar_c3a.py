@@ -119,7 +119,7 @@ class TestC3AConfirmationToCreateEvent(unittest.TestCase):
         self.orc.process_command("marque reunião amanhã às 15h")
         res = self.orc.process_command("sim")
         self.assertEqual(res.status, "success")
-        self.assertIn("Evento criado", res.message)
+        self.assertIn("Criei o evento no calendário", res.message)
         self.assertIn("Reunião", res.message)
 
     def test_10_calendar_error_returns_controlled_message(self):

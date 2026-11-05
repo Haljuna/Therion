@@ -1,12 +1,15 @@
 """Testes para o fluxo conversacional de criação de evento no calendário (C1)."""
 
 import unittest
+from datetime import datetime
+from zoneinfo import ZoneInfo
 from unittest.mock import MagicMock
 from therion.core.orchestrator import Orchestrator
 
 class TestCalendarCreationFlow(unittest.TestCase):
     def setUp(self):
         self.orc = Orchestrator()
+        self.orc._now_func = lambda: datetime(2026, 10, 9, 10, tzinfo=ZoneInfo('America/Sao_Paulo'))
         self.mock_adapter = MagicMock()
         self.orc.calendar_adapter = self.mock_adapter
 
@@ -85,7 +88,8 @@ class TestCalendarCreationFlow(unittest.TestCase):
     def test_confirm_only_after_summary_and_no_external_call(self):
         self.orc.process_command("marque reunião")
         res = self.orc.process_command("sim") 
-        self.assertIn("horas", res.message.lower())
+        self.assertIn("data", res.message.lower())
+        self.assertNotIn('date', self.orc._pending_event_draft)
         
         self.orc._reset_calendar_create_flow()
         

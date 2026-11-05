@@ -14,19 +14,27 @@ from therion.calendar.models import CalendarEvent
 class GoogleCalendarAdapter(CalendarAdapter):
     """Adapter Google Calendar."""
 
-    def __init__(self, time_zone: str = "America/Sao_Paulo") -> None:
+    def __init__(self, time_zone: str = "America/Sao_Paulo", *, verified_writes: bool = False) -> None:
         self._time_zone = time_zone
+        self._verified_writes=verified_writes
+        self._expected_account=None
 
     def _get_service(self):
         """Retorna serviço Google Calendar autenticado."""
         try:
-            creds = get_valid_credentials()
+            creds = get_valid_credentials(expected_identity=self._expected_account) if self._expected_account is not None else get_valid_credentials()
         except CalendarError:
             raise
         except Exception as e:
             raise CalendarError(f"Erro de autenticação: {e}") from e
 
         try:
+            if self._verified_writes:
+                from google_auth_httplib2 import AuthorizedHttp
+                from therion.integrations.google_transport import GoogleTransport
+                transport=GoogleTransport()
+                try:return build('calendar','v3',http=AuthorizedHttp(creds,http=transport,max_refresh_attempts=0),cache_discovery=False)
+                except Exception:transport.close();raise
             return build("calendar", "v3", credentials=creds, cache_discovery=False)
         except Exception as e:
             raise CalendarError(f"Falha ao criar serviço Google Calendar: {e}") from e
@@ -51,8 +59,8 @@ class GoogleCalendarAdapter(CalendarAdapter):
         Raises:
             CalendarError: Em erro de autenticação, API, ou conversão.
         """
-        service = self._get_service()
         tz = self._get_tz()
+        service = self._get_service()
 
         start_of_day = datetime.combine(day, datetime.min.time(), tzinfo=tz)
         end_of_day = start_of_day + timedelta(days=1)
@@ -73,12 +81,20 @@ class GoogleCalendarAdapter(CalendarAdapter):
                 )
                 .execute()
             )
+            items=list(events_result.get('items',[]))
+            if self._verified_writes:
+                pages=1
+                while events_result.get('nextPageToken'):
+                    if pages>=20:raise CalendarError('Agenda acima do limite de consulta; não retornei um dia incompleto.')
+                    events_result=service.events().list(calendarId='primary',timeMin=time_min,timeMax=time_max,
+                        timeZone=self._time_zone,singleEvents=True,orderBy='startTime',pageToken=events_result['nextPageToken']).execute()
+                    items.extend(events_result.get('items',[]));pages+=1
         except HttpError as e:
             raise CalendarError(f"Erro da API Google Calendar: {e}") from e
         except Exception as e:
             raise CalendarError(f"Erro inesperado ao chamar API: {e}") from e
-
-        items = events_result.get("items", [])
+        finally:
+            if self._verified_writes:service.close()
         return [self._convert_event(item) for item in items]
 
     def create_event(
@@ -86,6 +102,7 @@ class GoogleCalendarAdapter(CalendarAdapter):
         summary: str,
         start: datetime,
         end: datetime,
+        *,event_id: str | None = None,
     ) -> CalendarEvent:
         """Cria um evento no calendário.
         
@@ -113,8 +130,6 @@ class GoogleCalendarAdapter(CalendarAdapter):
         if end <= start:
             raise CalendarError("Data/hora de término deve ser posterior ao início.")
         
-        service = self._get_service()
-        
         body = {
             "summary": summary.strip(),
             "start": {
@@ -126,18 +141,38 @@ class GoogleCalendarAdapter(CalendarAdapter):
                 "timeZone": self._time_zone,
             },
         }
-        
+        if self._verified_writes:
+            import re,uuid
+            event_id=event_id or uuid.uuid4().hex
+            if not re.fullmatch(r'[0-9a-v]{5,128}',event_id):raise CalendarError('Identificador do evento inválido.')
+            body['id']=event_id
+        service = self._get_service()
         try:
             result = service.events().insert(
                 calendarId="primary",
                 body=body,
             ).execute()
+            if self._verified_writes:
+                fresh=service.events().get(calendarId='primary',eventId=event_id).execute()
+                actual=self._convert_event(fresh)
+                if actual.event_id!=event_id or actual.summary!=summary.strip() or actual.start!=start or actual.end!=end:
+                    raise CalendarError('O evento retornado não corresponde à prévia. Não repeti a criação.')
+                result=fresh
         except HttpError as e:
             raise CalendarError(f"Erro da API Google Calendar: {e}") from e
         except Exception as e:
             raise CalendarError(f"Erro inesperado ao criar evento: {e}") from e
+        finally:
+            if self._verified_writes:service.close()
         
         return self._convert_event(result)
+
+    def get_event(self,event_id):
+        service=self._get_service()
+        try:return self._convert_event(service.events().get(calendarId='primary',eventId=event_id).execute())
+        except Exception as error:raise CalendarError('Não consegui consultar o evento; não repeti operações.') from error
+        finally:
+            if self._verified_writes:service.close()
 
     def _convert_event(self, item: dict[str, Any]) -> CalendarEvent:
         """Converte evento da API Google para CalendarEvent."""
