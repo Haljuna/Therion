@@ -1,8 +1,14 @@
 """Registry estático de Skills do Therion."""
 
 from therion.skills.plan_day import PlanDaySkill
+from therion.skills.graphify import GraphifySkill
+from therion.skills.cybersecurity import CybersecuritySkill
+from therion.skills.ecc import EccSkill
 
 SKILLS: dict[str, type] = {
+    "ecc": EccSkill,
+    "cybersecurity": CybersecuritySkill,
+    "graphify": GraphifySkill,
     "SKILL-002": PlanDaySkill,
 }
 

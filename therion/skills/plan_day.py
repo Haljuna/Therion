@@ -7,10 +7,12 @@ explicitamente definida e autorizada.
 """
 
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, datetime
+from zoneinfo import ZoneInfo
 from typing import Optional
 
 from therion.calendar.adapter import CalendarAdapter, CalendarError
+from therion.calendar.dialogue import partition_events, event_start
 
 _READ_ONLY_WARNING = "[Leitura apenas — nenhuma alteração foi realizada]"
 
@@ -37,14 +39,18 @@ class PlanDaySkill:
     ) -> None:
         self._calendar = calendar
 
-    def execute(self, today: Optional[date] = None) -> SkillResult:
+    def execute(self, today: Optional[date] = None, *, now: Optional[datetime] = None) -> SkillResult:
         """Executa o planejamento diário.
 
         Args:
-            today: Data de referência. Se None, usa date.today().
+            today: Data de referência. Se None, usa o dia de now.
+            now: Relógio com fuso configurado, injetável para classificação dos eventos.
         """
+        now = now or datetime.now(ZoneInfo('America/Sao_Paulo'))
+        if now.tzinfo is None:
+            now = now.replace(tzinfo=ZoneInfo('America/Sao_Paulo'))
         if today is None:
-            today = date.today()
+            today = now.date()
 
         # --- Calendário ---
         events: list = []
@@ -70,15 +76,14 @@ class PlanDaySkill:
         # --- Montar mensagem ---
         sections: list[str] = []
 
-        timed = [e for e in events if not e.all_day]
-        all_day = [e for e in events if e.all_day]
-
-        timed.sort(key=lambda e: e.start)
+        parts = partition_events(events, now)
+        timed = sorted(parts['past'] + parts['ongoing'] + parts['future'], key=lambda e: event_start(e, now.tzinfo))
+        all_day = parts['all_day']
 
         if timed:
             sections.append("Compromissos:")
             for i, evt in enumerate(timed, 1):
-                t = evt.start
+                t = event_start(evt, now.tzinfo)
                 sections.append(f"{i}. {evt.summary} — {t.hour:02d}:{t.minute:02d}")
 
         if all_day:
@@ -87,13 +92,17 @@ class PlanDaySkill:
                 sections.append(f"{i}. {evt.summary} — Dia inteiro")
 
         next_commitment = ""
-        if timed:
-            first = timed[0]
-            t = first.start
-            next_commitment = (
+        if parts['ongoing']:
+            next_commitment += '\nEm andamento: ' + ', '.join(e.summary for e in parts['ongoing'])
+        if parts['future']:
+            first = parts['future'][0]
+            t = event_start(first, now.tzinfo)
+            next_commitment += (
                 f"\nPróximo compromisso: {first.summary} — "
                 f"{t.hour:02d}:{t.minute:02d}"
             )
+        else:
+            next_commitment += '\nNenhum próximo compromisso com horário nos eventos consultados.'
 
         message = "\n".join(sections) if sections else "Nenhum evento para hoje."
         message += next_commitment

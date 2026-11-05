@@ -1,0 +1,252 @@
+{
+  "repository": "https://github.com/WorldFlowAI/everything-claude-code",
+  "commit": "432485ba6b92c14fb357276a98957f348bcff9ee",
+  "state": "testing",
+  "skills": {
+    "ecc-planning": {
+      "title": "Planejamento e arquitetura",
+      "trigger": "Planejar implementação complexa, integração ou refatoração de software; estruturar tarefas com dependências. Não substitui planejamento diário da agenda.",
+      "invocation": "contextual",
+      "files": {
+        "main": {
+          "path": "SKILL.md",
+          "sha256": "c4b8180b2ac9a8f2a4ecdaa22d974e99c46ce045ca5fc25c30517e3a8194865b"
+        }
+      },
+      "upstream": [
+        {
+          "path": "agents/planner.md",
+          "url": "https://github.com/WorldFlowAI/everything-claude-code/blob/432485ba6b92c14fb357276a98957f348bcff9ee/agents/planner.md",
+          "sha256": "21b7689638cda339f6483cc17e56bb77f447c12fd0b270f3c4df96a90e19afea"
+        },
+        {
+          "path": "agents/architect.md",
+          "url": "https://github.com/WorldFlowAI/everything-claude-code/blob/432485ba6b92c14fb357276a98957f348bcff9ee/agents/architect.md",
+          "sha256": "ff5132105d94ac162445bfd618912faff1ec624976d0fdd1a4fd4d803ee0929f"
+        }
+      ]
+    },
+    "ecc-code-review": {
+      "title": "Revisão de código",
+      "trigger": "Revisar alterações de código, bugs e riscos de regressão; conferir mudanças relevantes antes de concluir.",
+      "invocation": "contextual",
+      "files": {
+        "main": {
+          "path": "SKILL.md",
+          "sha256": "193f22d5a000aad35b7d481dfdabfd8e4e13f7487de062c28c49b540ce86212f"
+        }
+      },
+      "upstream": [
+        {
+          "path": "agents/code-reviewer.md",
+          "url": "https://github.com/WorldFlowAI/everything-claude-code/blob/432485ba6b92c14fb357276a98957f348bcff9ee/agents/code-reviewer.md",
+          "sha256": "901e9c6770dca1b5331a2560f6f7ed477cc051f42dca9ea28682e1a14e0f46e1"
+        },
+        {
+          "path": "agents/refactor-cleaner.md",
+          "url": "https://github.com/WorldFlowAI/everything-claude-code/blob/432485ba6b92c14fb357276a98957f348bcff9ee/agents/refactor-cleaner.md",
+          "sha256": "4d020df6580ed72d5fdfe8f1078c3489b4e819d16db4c65c0c49666ce3afde70"
+        },
+        {
+          "path": "agents/doc-updater.md",
+          "url": "https://github.com/WorldFlowAI/everything-claude-code/blob/432485ba6b92c14fb357276a98957f348bcff9ee/agents/doc-updater.md",
+          "sha256": "45a3b89e1811b259e068514b3cd86cfbfe5426e71a54ba0b8065034be877189a"
+        }
+      ]
+    },
+    "ecc-verification": {
+      "title": "Verificação de resultados",
+      "trigger": "Verificar entrega, correção, refatoração ou operação relevante antes de declarar sucesso. Em ações pessoais, usar estado e recibos reais.",
+      "invocation": "contextual",
+      "files": {
+        "main": {
+          "path": "SKILL.md",
+          "sha256": "77643859b212e47b8ec8d975ab808968bdf913d72aedcd249caf4810b2082658"
+        }
+      },
+      "upstream": [
+        {
+          "path": "skills/verification-loop/SKILL.md",
+          "url": "https://github.com/WorldFlowAI/everything-claude-code/blob/432485ba6b92c14fb357276a98957f348bcff9ee/skills/verification-loop/SKILL.md",
+          "sha256": "850ae034c334a3c88428921043d6a2b3441284ee85b4d749fa19c62194190eaa"
+        },
+        {
+          "path": "agents/build-error-resolver.md",
+          "url": "https://github.com/WorldFlowAI/everything-claude-code/blob/432485ba6b92c14fb357276a98957f348bcff9ee/agents/build-error-resolver.md",
+          "sha256": "9069459f344ff1e3224114fdcc8604ee9fee4f927a175375dba62567d0158848"
+        },
+        {
+          "path": "agents/e2e-runner.md",
+          "url": "https://github.com/WorldFlowAI/everything-claude-code/blob/432485ba6b92c14fb357276a98957f348bcff9ee/agents/e2e-runner.md",
+          "sha256": "4cedf90b29be92a84862cbb7be7d0b1f8795b453bd0f46601922447f00e082f4"
+        }
+      ]
+    },
+    "ecc-tdd": {
+      "title": "Testes de comportamento",
+      "trigger": "Corrigir bugs, implementar lógica nova ou refatorar código com risco; definir testes de comportamento proporcionais à mudança.",
+      "invocation": "contextual",
+      "files": {
+        "main": {
+          "path": "SKILL.md",
+          "sha256": "827eee5f44da170f97de74b9d51c1b962a63f9440541dd59a959098fc91c294d"
+        }
+      },
+      "upstream": [
+        {
+          "path": "skills/tdd-workflow/SKILL.md",
+          "url": "https://github.com/WorldFlowAI/everything-claude-code/blob/432485ba6b92c14fb357276a98957f348bcff9ee/skills/tdd-workflow/SKILL.md",
+          "sha256": "2b5f62f68752e7c21dd217c9274b23290a5b8a6d40454125a27560a905e3da92"
+        }
+      ]
+    },
+    "ecc-evaluation": {
+      "title": "Avaliação de agentes",
+      "trigger": "Definir avaliações reproduzíveis de comportamento de IA, novas capacidades e regressões de agentes.",
+      "invocation": "contextual",
+      "files": {
+        "main": {
+          "path": "SKILL.md",
+          "sha256": "fb50a4059cc17c5fa29b2c71bbc91bd298a8d2a48843b50c45d538489376b3d6"
+        }
+      },
+      "upstream": [
+        {
+          "path": "skills/eval-harness/SKILL.md",
+          "url": "https://github.com/WorldFlowAI/everything-claude-code/blob/432485ba6b92c14fb357276a98957f348bcff9ee/skills/eval-harness/SKILL.md",
+          "sha256": "24330376cea79bb02cede9cef9b0132ac4af69f4db231e975c07ff4688e5edf9"
+        }
+      ]
+    },
+    "ecc-coding-standards": {
+      "title": "Convenções de código",
+      "trigger": "Implementar ou revisar código respeitando convenções da linguagem e do projeto; exemplos específicos para TypeScript e JavaScript.",
+      "invocation": "contextual",
+      "files": {
+        "main": {
+          "path": "SKILL.md",
+          "sha256": "34b6bb252bbbc21ea7111395c7f005c4d6ba1017e08d18519cbcfadfa5c6afbd"
+        },
+        "technical": {
+          "path": "references/technical.md",
+          "sha256": "fd043232e7a26dd202f850a17de1ca755c671d33508f27e908415114d72f1931"
+        }
+      },
+      "upstream": [
+        {
+          "path": "skills/coding-standards/SKILL.md",
+          "url": "https://github.com/WorldFlowAI/everything-claude-code/blob/432485ba6b92c14fb357276a98957f348bcff9ee/skills/coding-standards/SKILL.md",
+          "sha256": "1827f282caa07d38ec64ce7bf2bbc4fc1a703080c9346e17aea731a08aafac24"
+        }
+      ]
+    },
+    "ecc-backend-patterns": {
+      "title": "Padrões de backend web",
+      "trigger": "Projetar ou revisar APIs Node.js, Express e Next.js, consultas, cache e filas em backend web. Não aplicar ao Therion inteiro por ser um programa Python.",
+      "invocation": "contextual",
+      "files": {
+        "main": {
+          "path": "SKILL.md",
+          "sha256": "326e308767fae052a60bb127162b90f8979157814ebd7d0aa977af6c0375d9c2"
+        },
+        "technical": {
+          "path": "references/technical.md",
+          "sha256": "8c49fc27215e362c4042d3c12350ceed7891bab0d518e44020c3f9b336b5f37e"
+        }
+      },
+      "upstream": [
+        {
+          "path": "skills/backend-patterns/SKILL.md",
+          "url": "https://github.com/WorldFlowAI/everything-claude-code/blob/432485ba6b92c14fb357276a98957f348bcff9ee/skills/backend-patterns/SKILL.md",
+          "sha256": "229144897bded5b0ac5d39e9f3d34394234cbe6d92473a69df1a54bf211cdd5b"
+        }
+      ]
+    },
+    "ecc-frontend-patterns": {
+      "title": "Padrões de interface web",
+      "trigger": "Implementar ou revisar interfaces React/Next.js, estado, carregamento, formulários, desempenho e acessibilidade. Não é um guia de widgets Qt.",
+      "invocation": "contextual",
+      "files": {
+        "main": {
+          "path": "SKILL.md",
+          "sha256": "03a30b8e214683076b210aa71e5d54e93a1fd39f01e0be8959fd90e67f56dd5b"
+        },
+        "technical": {
+          "path": "references/technical.md",
+          "sha256": "50a726b5a2fe9f9f23ddd47f00704f4bcb0eb48eda98ad74c18554986ffce1e2"
+        }
+      },
+      "upstream": [
+        {
+          "path": "skills/frontend-patterns/SKILL.md",
+          "url": "https://github.com/WorldFlowAI/everything-claude-code/blob/432485ba6b92c14fb357276a98957f348bcff9ee/skills/frontend-patterns/SKILL.md",
+          "sha256": "193bfa61755991340c89e033b860fe7e84dd47ab013c844c09069e6e3543f21a"
+        }
+      ]
+    },
+    "ecc-security-review": {
+      "title": "Revisão defensiva geral",
+      "trigger": "Revisar autenticação, autorização, entradas externas, uploads, endpoints, segredos e dados sensíveis em código autorizado.",
+      "invocation": "contextual",
+      "files": {
+        "main": {
+          "path": "SKILL.md",
+          "sha256": "7ea58ffbc7dc0cf335a059c94eb64ca2efee9c6f0423f31ccadcd5856ddea463"
+        }
+      },
+      "upstream": [
+        {
+          "path": "skills/security-review/SKILL.md",
+          "url": "https://github.com/WorldFlowAI/everything-claude-code/blob/432485ba6b92c14fb357276a98957f348bcff9ee/skills/security-review/SKILL.md",
+          "sha256": "b4fbed82c5a1741432f0da689fd96e9fa0c40011d9450ca61065dad772758494"
+        }
+      ]
+    },
+    "ecc-session-handoff": {
+      "title": "Continuidade de tarefa",
+      "trigger": "Resumir estado verificável para retomada solicitada ou transição de etapa em tarefa longa; não altera compactação nem persiste memória automaticamente.",
+      "invocation": "contextual",
+      "files": {
+        "main": {
+          "path": "SKILL.md",
+          "sha256": "03df54be9e1845ec92e10230266081300ba3be6082d48a8a2f04c1c59e0f5506"
+        }
+      },
+      "upstream": [
+        {
+          "path": "skills/strategic-compact/SKILL.md",
+          "url": "https://github.com/WorldFlowAI/everything-claude-code/blob/432485ba6b92c14fb357276a98957f348bcff9ee/skills/strategic-compact/SKILL.md",
+          "sha256": "1258d7208d76af5379be4ca02d2378064a8dea689396c7599bbcdccbfb7edf03"
+        },
+        {
+          "path": "scripts/hooks/session-start.js",
+          "url": "https://github.com/WorldFlowAI/everything-claude-code/blob/432485ba6b92c14fb357276a98957f348bcff9ee/scripts/hooks/session-start.js",
+          "sha256": "65e4800b2e6642f14e6b27885c0660e5307ab72c9c0e788d4c43bf8a54f9cfc7"
+        },
+        {
+          "path": "scripts/hooks/session-end.js",
+          "url": "https://github.com/WorldFlowAI/everything-claude-code/blob/432485ba6b92c14fb357276a98957f348bcff9ee/scripts/hooks/session-end.js",
+          "sha256": "2304cbb20a804a2bcecc5472291c1383ec8ca482e8a801beafcd58b38f6233f4"
+        }
+      ]
+    },
+    "ecc-supervised-learning": {
+      "title": "Aprendizado supervisionado",
+      "trigger": "Extrair aprendizados técnicos reutilizáveis somente quando o usuário pedir; produzir proposta sem ativar skill nem gravar memória automaticamente.",
+      "invocation": "explicit",
+      "files": {
+        "main": {
+          "path": "SKILL.md",
+          "sha256": "61c2b02ee4afd1d6a1c22ca43b960f3b376462aee3355469a5edc2ea89e9c95f"
+        }
+      },
+      "upstream": [
+        {
+          "path": "skills/continuous-learning/SKILL.md",
+          "url": "https://github.com/WorldFlowAI/everything-claude-code/blob/432485ba6b92c14fb357276a98957f348bcff9ee/skills/continuous-learning/SKILL.md",
+          "sha256": "bcf0fe95b3b7b67c1bd59ec75cfd7fa40a9d698d0030ac14f3a45a5a98f1483d"
+        }
+      ]
+    }
+  }
+}
