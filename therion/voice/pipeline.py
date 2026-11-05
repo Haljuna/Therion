@@ -6,6 +6,7 @@ import threading
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QObject, Signal
+from therion.voice.cycle import VoiceCycle
 
 if TYPE_CHECKING:
     import numpy as np
@@ -39,6 +40,9 @@ class VoicePipeline(QObject):
         self._state = self.STATE_IDLE
         self._generation = 0
         self._lock = threading.Lock()
+        self.cycle = VoiceCycle()
+        self._capture_reserved = False
+        self._closing=False
 
         # Vincula a checagem de geração da transcrição a este pipeline
         self._transcription._is_current_generation = self.is_current_generation
@@ -58,34 +62,59 @@ class VoicePipeline(QObject):
 
     def is_current_generation(self, generation: int) -> bool:
         with self._lock:
-            return self._generation == generation
+            return not self._closing and self._generation == generation
 
-    def start(self) -> bool:
+    @property
+    def is_quiescent(self):
+        with self._lock:reserved=self._capture_reserved
+        return not reserved and not getattr(self._capture,'is_recording',False) and getattr(self._transcription,'is_quiescent',not getattr(self._transcription,'is_busy',False))
+
+    def shutdown(self):
+        with self._lock:
+            if self._closing:return
+            self._closing=True
+        self.cancel()
+        shutdown=getattr(self._transcription,'shutdown',None)
+        if callable(shutdown):shutdown()
+
+    @property
+    def ready_to_capture(self):
+        with self._lock:
+            return not self._closing and self._state == self.STATE_IDLE and not self._capture_reserved and self.cycle.can_capture
+
+    @property
+    def cycle_state(self):
+        return self.cycle.state(self.state)
+
+    def start(self, *, automatic=False) -> bool:
         """Inicia a captura de áudio com uma nova generation.
 
         Retorna False se o pipeline não estiver ocioso (idle) ou se a captura falhar.
         """
         with self._lock:
-            if self._state != self.STATE_IDLE:
+            if self._closing or self._state != self.STATE_IDLE or self._capture_reserved or not self.cycle.can_capture:
                 return False
             self._generation += 1
             gen = self._generation
+            self._state = 'starting'
+            self._capture_reserved = True
 
-        success = self._capture.start()
-        if not success:
+        try:
+            success = self._capture.start(automatic=True) if automatic else self._capture.start()
+            if not success:
+                with self._lock:
+                    if self._generation == gen:self._state = self.STATE_IDLE
+                return False
             with self._lock:
-                if self._generation == gen:
-                    self._state = self.STATE_IDLE
-            return False
-
-        with self._lock:
-            if self._generation != gen:
+                stale = self._generation != gen
+                if not stale:self._state = self.STATE_RECORDING
+            if stale:
                 self._capture.cancel()
                 return False
-            self._state = self.STATE_RECORDING
-
-        self.state_changed.emit(self.STATE_RECORDING)
-        return True
+            self.state_changed.emit(self.STATE_RECORDING)
+            return True
+        finally:
+            with self._lock:self._capture_reserved = False
 
     def stop(self) -> bool:
         """Para a gravação e envia o áudio para transcrição.
@@ -94,11 +123,16 @@ class VoicePipeline(QObject):
         ou se o disparo da transcrição falhar.
         """
         with self._lock:
-            if self._state != self.STATE_RECORDING:
+            if self._state != self.STATE_RECORDING or self._capture_reserved:
                 return False
             gen = self._generation
+            self._state = 'finishing'
+            self._capture_reserved = True
 
-        audio = self._capture.stop()
+        try:
+            audio = self._capture.stop()
+        finally:
+            with self._lock:self._capture_reserved = False
         if audio is None or len(audio) == 0:
             with self._lock:
                 if self._generation == gen:
@@ -123,14 +157,39 @@ class VoicePipeline(QObject):
 
         return True
 
+    @property
+    def utterance_complete(self):
+        return self._capture.utterance_complete
+
+    @property
+    def endpoint_reason(self):
+        return self._capture.endpoint_reason
+
+    @property
+    def has_speech(self):
+        return self._capture.has_speech
+
+    @property
+    def input_stalled(self):
+        return self._capture.input_stalled
+
+    def set_fast_mode(self, enabled):
+        self._transcription.fast_mode = bool(enabled)
+
     def cancel(self) -> None:
         """Cancela a operação atual, invalidando a generation e parando a captura."""
         with self._lock:
             old_state = self._state
+            owns_reservation = not self._capture_reserved
+            self._capture_reserved = True
             self._generation += 1
             self._state = self.STATE_IDLE
 
-        self._capture.cancel()
+        try:
+            self._capture.cancel()
+        finally:
+            if owns_reservation:
+                with self._lock:self._capture_reserved = False
         if old_state != self.STATE_IDLE:
             self.state_changed.emit(self.STATE_IDLE)
 

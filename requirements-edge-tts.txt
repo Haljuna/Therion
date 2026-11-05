@@ -1,0 +1,4 @@
+# Opcional, no ambiente de voz indicado por tts.edge_python_path.
+# Texto processado online pela Microsoft; ativação explícita na aplicação.
+edge-tts==7.3.1
+av>=19,<20

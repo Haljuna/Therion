@@ -39,6 +39,23 @@ def _wait(event: threading.Event, label: str) -> None:
     assert event.wait(_TIMEOUT), f"Timeout aguardando {label}"
 
 
+@pytest.mark.parametrize('error', [MemoryError(), RuntimeError('mkl_malloc: failed to allocate memory')])
+def test_memory_failure_is_reported_once_and_releases_single_flight(error):
+    model = FakeWhisperModel(exception=error)
+    service = VoiceTranscriptionService(model)
+    done = threading.Event()
+    failures = []
+    service.transcription_failed.connect(
+        lambda gen, message: (failures.append((gen, message)), done.set()),
+        Qt.ConnectionType.DirectConnection,
+    )
+    assert service.transcribe_async(np.zeros(1600, dtype=np.float32), 7)
+    _wait(done, 'memory failure')
+    assert failures == [(7, 'voice_memory_exhausted')]
+    assert not service.is_busy
+    assert len(model.calls) == 1
+
+
 def test_sucesso_texto_montado():
     fake_segments = [
         FakeSegment("  Olá mundo  "),
@@ -64,6 +81,18 @@ def test_sucesso_texto_montado():
     assert not service.is_busy
 
 
+def test_eco_do_prompt_em_silencio_nao_vira_comando():
+    model = FakeWhisperModel(segments=[FakeSegment("Conversa em português do Brasil com o assistente Therion.")])
+    service = VoiceTranscriptionService(model)
+    done = threading.Event()
+    texts, failures = [], []
+    service.transcribed.connect(lambda gen, text: (texts.append(text), done.set()), Qt.ConnectionType.DirectConnection)
+    service.transcription_failed.connect(lambda gen, msg: (failures.append(msg), done.set()), Qt.ConnectionType.DirectConnection)
+    assert service.transcribe_async(np.zeros(16000, dtype=np.float32), 1)
+    _wait(done, 'prompt echo')
+    assert texts == [] and len(failures) == 1
+
+
 def test_argumentos_exatos_transcribe():
     model = FakeWhisperModel(segments=[FakeSegment("teste")])
     service = VoiceTranscriptionService(model)
@@ -82,16 +111,15 @@ def test_argumentos_exatos_transcribe():
     call = model.calls[0]
     assert np.array_equal(call["audio"], audio)
 
-    expected_hotwords = (
-        "Obsidian, aliases, Segundo Cérebro, álgebra linear, "
-        "circuitos lógicos, matrizes, determinantes, cancele"
-    )
+    expected_hotwords = "Therion, Obsidian, Segundo Cérebro, cancele, abre, Bom dia, Boa tarde, Boa noite, tarefa, conclua"
     assert call["kwargs"] == {
         "language": "pt",
         "beam_size": 5,
+        "temperature": 0.0,
         "vad_filter": True,
         "condition_on_previous_text": False,
         "hotwords": expected_hotwords,
+        "initial_prompt": "Conversa em português do Brasil com o assistente Therion.",
     }
 
 

@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import threading
+import time
 from typing import Callable
 
 import numpy as np
 import sounddevice as sd
+from therion.voice.endpointing import SpeechEndpoint
+from therion.voice.activity import StreamingSpeechActivity
 
 
 class AudioCaptureService:
@@ -26,33 +29,77 @@ class AudioCaptureService:
         *,
         stream_factory: Callable[..., sd.InputStream] | None = None,
         sample_rate: int = SAMPLE_RATE,
+        activity_factory=None,
     ) -> None:
         self._sample_rate = sample_rate
         self._stream_factory = stream_factory or self._default_stream_factory
         self._stream: sd.InputStream | None = None
         self._chunks: list[np.ndarray] = []
         self._recording: bool = False
+        self._level = 0.0
         self._lock = threading.Lock()
+        self._endpoint = None
+        self._last_frame_at = 0.0
+        self._activity_factory = activity_factory or StreamingSpeechActivity
+
+    @property
+    def level(self) -> float:
+        """Intensidade da captura já autorizada; nunca abre outro microfone."""
+        with self._lock:
+            return self._level if self._recording else 0.0
+
+    @property
+    def utterance_complete(self):
+        with self._lock:
+            return bool(self._endpoint and self._endpoint.complete)
+
+    @property
+    def endpoint_reason(self):
+        with self._lock:
+            return self._endpoint.reason if self._endpoint else None
+
+    @property
+    def has_speech(self):
+        with self._lock:
+            return bool(self._endpoint and self._endpoint.speech_seconds >= 0.2)
+
+    @property
+    def input_stalled(self):
+        with self._lock:
+            return self._recording and time.monotonic() - self._last_frame_at > 3
 
     @property
     def is_recording(self) -> bool:
         with self._lock:
             return self._recording
 
-    def start(self) -> bool:
+    def start(self, *, automatic=False) -> bool:
         """Inicia a captura. Retorna False se já estiver gravando ou em caso de erro."""
         with self._lock:
             if self._recording:
                 return False
             self._chunks.clear()
+            self._level = 0.0
+            self._endpoint = None
+            self._last_frame_at = time.monotonic()
+            self._recording = True
 
         try:
+            if automatic:
+                if self._sample_rate != 16000:
+                    raise ValueError('A detecção de fala automática requer 16 kHz.')
+                endpoint = SpeechEndpoint(self._sample_rate, activity=self._activity_factory())
+                with self._lock:
+                    if not self._recording:
+                        return False
+                    self._endpoint = endpoint
             stream = self._stream_factory(
                 samplerate=self._sample_rate,
                 channels=self.CHANNELS,
                 dtype=self.DTYPE,
                 callback=self._audio_callback,
             )
+            self._stream = stream
             stream.start()
         except Exception:
             self._cleanup_stream()
@@ -118,6 +165,13 @@ class AudioCaptureService:
     ) -> None:
         with self._lock:
             if self._recording:
+                rms = float(np.sqrt(np.mean(indata[:, 0] ** 2))) if frames else 0.0
+                self._level = min(1.0, max(0.0, (rms - 0.003) * 5)) if np.isfinite(rms) else 0.0
+                self._last_frame_at = time.monotonic()
+                if self._endpoint is not None:
+                    if self._endpoint.complete:
+                        return
+                    self._endpoint.feed(indata[:, 0])
                 self._chunks.append(indata[:, 0].copy())
 
     @staticmethod

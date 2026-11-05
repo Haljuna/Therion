@@ -1,0 +1,5 @@
+# Instalar no ambiente de síntese configurado em tts.python_path.
+kokoro-onnx
+phonemizer
+soundfile
+scipy>=1.14,<2
