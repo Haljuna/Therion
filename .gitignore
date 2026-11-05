@@ -38,3 +38,10 @@ Handoff/
 .agents/
 Therion.code-workspace
 
+
+# Capturas, vídeos e benchmarks da interface (pesados); só fica o que o app usa
+therion/assets/constellation/*
+!therion/assets/constellation/singularity-environment.png
+
+# Banco pessoal de frases faladas
+tests/frases_reais.txt
