@@ -66,4 +66,4 @@ O mapa completo do código está em [docs/CODEBASE_MAP.md](docs/CODEBASE_MAP.md)
 
 ## Licença
 
-Ainda não há um arquivo `LICENSE`. Até que um seja definido, todos os direitos são reservados ao autor.
+[MIT](LICENSE) © 2026 Haljuna.
