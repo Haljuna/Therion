@@ -10,4 +10,4 @@ O Therion é um assistente pessoal local em pt-BR para Windows (estilo Jarvis), 
 
 Para a arquitetura completa, veja [docs/CODEBASE_MAP.md](docs/CODEBASE_MAP.md).
 
-**Regras deste projeto:** siga o [AGENTS.md](AGENTS.md) (governança "Camada Zero"). Não dê stage nem commit nas remoções das notas `.md` antigas (ver README). Rode os testes com `.venv\Scripts\python.exe scripts\test-v4.py tests\...`.
+**Regras deste projeto:** siga o [AGENTS.md](AGENTS.md) (governança "Camada Zero"). Rode os testes com `.venv\Scripts\python.exe scripts\test-v4.py tests\...`.
