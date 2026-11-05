@@ -1,3 +1,5 @@
+> Localizacao apos a migracao de 26/10/2026: codigo e Git em `F:/Therion/app`; notas canonicas em `C:/Users/marcu/Downloads/Segundo-Cerebro/10 - Projetos/Therion`. Referencias ao Segundo Cerebro continuam sujeitas ao escopo autorizado da tarefa. Este arquivo nao concede acesso adicional nem transfere permissoes. Notas oficiais nao devem ser copiadas para o runtime.
+
 # OpenCode — Instruções do Therion
 
 Este arquivo define o procedimento de inicialização para qualquer modelo utilizado no OpenCode dentro do projeto Therion.
@@ -10,7 +12,7 @@ Este arquivo é a Camada Zero do projeto Therion. Ele define limites não contor
 
 Antes de qualquer leitura de tarefa ou processamento de ação, carregar o perfil do agente:
 
-`90 - Sistema da IA/Agentes/OpenCode.md`
+`C:/Users/marcu/Downloads/Segundo-Cerebro/90 - Sistema da IA/Agentes/OpenCode.md`
 
 O perfil define identidade, função, escopo permitido, limites e referência ao contrato de permissões. Se o perfil não puder ser localizado, o agente deve informar ao usuário e permanecer bloqueado até resolução.
 
@@ -18,7 +20,7 @@ O perfil define identidade, função, escopo permitido, limites e referência ao
 
 Antes de aceitar ou acessar qualquer raiz de leitura, consultar:
 
-`90 - Sistema da IA/Áreas Protegidas.md`
+`C:/Users/marcu/Downloads/Segundo-Cerebro/90 - Sistema da IA/Áreas Protegidas.md`
 
 As raízes autorizadas para leitura são declaradas explicitamente em cada tarefa. A inclusão de uma área na política de áreas protegidas não concede acesso a ela.
 
@@ -38,10 +40,10 @@ Para consulta de governança, o agente pode carregar os seguintes documentos can
 
 | Documento | Gatilho |
 |-----------|---------|
-| `90 - Sistema da IA/Constituição da IA.md` | Quando uma ação puder afetar conhecimento oficial, decisões ou princípios |
-| `90 - Sistema da IA/Autonomia e Permissões.md` | Quando uma decisão envolver autonomia ou permissão, inclusive proposta de aumento, redução ou revogação de autonomia |
-| `90 - Sistema da IA/Protocolo de Confirmação.md` | Na transição de análise para execução |
-| `90 - Sistema da IA/Protocolo de Inicialização.md` | Quando houver conflito entre fontes; necessidade de verificar atualidade de informação recuperada; avaliação de confiabilidade de regra, fluxo ou informação recuperada; falha ou limitação na tarefa; falha ou perda de confiança que possa afetar uma decisão protegida; criação ou alteração de Skill; delegação de subtarefa; decisão sobre dados a acessar ou reter; encerramento de tarefa relevante; identificação de sobreposição estrutural; necessidade de repetir uma ação; conclusão de ação relevante que exija auditoria ou rastreabilidade; ou lidar com permissão de longa duração |
+| `C:/Users/marcu/Downloads/Segundo-Cerebro/90 - Sistema da IA/Constituição da IA.md` | Quando uma ação puder afetar conhecimento oficial, decisões ou princípios |
+| `C:/Users/marcu/Downloads/Segundo-Cerebro/90 - Sistema da IA/Autonomia e Permissões.md` | Quando uma decisão envolver autonomia ou permissão, inclusive proposta de aumento, redução ou revogação de autonomia |
+| `C:/Users/marcu/Downloads/Segundo-Cerebro/90 - Sistema da IA/Protocolo de Confirmação.md` | Na transição de análise para execução |
+| `C:/Users/marcu/Downloads/Segundo-Cerebro/90 - Sistema da IA/Protocolo de Inicialização.md` | Quando houver conflito entre fontes; necessidade de verificar atualidade de informação recuperada; avaliação de confiabilidade de regra, fluxo ou informação recuperada; falha ou limitação na tarefa; falha ou perda de confiança que possa afetar uma decisão protegida; criação ou alteração de Skill; delegação de subtarefa; decisão sobre dados a acessar ou reter; encerramento de tarefa relevante; identificação de sobreposição estrutural; necessidade de repetir uma ação; conclusão de ação relevante que exija auditoria ou rastreabilidade; ou lidar com permissão de longa duração |
 
 O carregamento desses documentos é limitado à consulta de governança e não autoriza navegação em pastas vizinhas. Esses gatilhos não autorizam mudança automática de autonomia, não transformam falha em autorização e não substituem confirmação quando ela for exigida.
 
@@ -65,12 +67,12 @@ A inicialização só se encerra quando a tarefa estiver compreendida, o escopo 
 
 Após carregar a governança, consultar quando necessário:
 
-1. `10 - Projetos/Therion/Estado Atual.md`
-2. `10 - Projetos/Therion/Decisões.md`
-3. `10 - Projetos/Therion/Arquitetura.md`
-4. `10 - Projetos/Therion/Roadmap.md`
-5. `10 - Projetos/Therion/Arquivo Mestre do Projeto.md`
-6. `10 - Projetos/Therion/Therion.md`
+1. `C:/Users/marcu/Downloads/Segundo-Cerebro/10 - Projetos/Therion/Estado Atual.md`
+2. `C:/Users/marcu/Downloads/Segundo-Cerebro/10 - Projetos/Therion/Decisões.md`
+3. `C:/Users/marcu/Downloads/Segundo-Cerebro/10 - Projetos/Therion/Arquitetura.md`
+4. `C:/Users/marcu/Downloads/Segundo-Cerebro/10 - Projetos/Therion/Roadmap.md`
+5. `C:/Users/marcu/Downloads/Segundo-Cerebro/10 - Projetos/Therion/Arquivo Mestre de Projeto.md`
+6. `C:/Users/marcu/Downloads/Segundo-Cerebro/10 - Projetos/Therion/Therion.md`
 
 Carregar somente o contexto necessário para a tarefa atual.
 
@@ -80,7 +82,7 @@ Antes de assumir que um problema já foi resolvido ou que determinado aprendizad
 
 Local:
 
-`../../90 - Sistema da IA/Notas de Rascunho da IA/Registros/`
+`C:/Users/marcu/Downloads/Segundo-Cerebro/90 - Sistema da IA/Notas de Rascunho da IA/Registros/`
 
 RAS são conhecimento temporário e não consolidado.
 
@@ -99,8 +101,8 @@ Verificar:
 
 Antes de criar novo procedimento reutilizável ou repetir uma solução já conhecida, consultar:
 
-- `../../90 - Sistema da IA/Skills/Skills.md`
-- `../../90 - Sistema da IA/Skills/Registro de Skills.md`
+- `C:/Users/marcu/Downloads/Segundo-Cerebro/90 - Sistema da IA/Skills/Skills.md`
+- `C:/Users/marcu/Downloads/Segundo-Cerebro/90 - Sistema da IA/Skills/Registro de Skills.md`
 
 Uma Skill não concede autonomia nem permissões adicionais.
 
@@ -125,7 +127,7 @@ A troca de modelo não cria uma nova autoridade.
 Cada novo modelo utilizado no OpenCode deve:
 
 1. seguir a Camada Zero deste arquivo;
-2. carregar o perfil ativo (`90 - Sistema da IA/Agentes/OpenCode.md`) antes de acessar raízes da tarefa ou processar ações;
+2. carregar o perfil ativo (`C:/Users/marcu/Downloads/Segundo-Cerebro/90 - Sistema da IA/Agentes/OpenCode.md`) antes de acessar raízes da tarefa ou processar ações;
 3. verificar a governança aplicável;
 4. entender o estado atual do projeto;
 5. verificar `git status`;
@@ -172,7 +174,7 @@ mensagem clara e afirmativa do usuário.
 
 Para orientar a transição, consultar:
 
-- `90 - Sistema da IA/Protocolo de Confirmação.md`
+- `C:/Users/marcu/Downloads/Segundo-Cerebro/90 - Sistema da IA/Protocolo de Confirmação.md`
 
 Se o protocolo exigido não puder ser localizado ou carregado, o agente deve:
 
@@ -224,11 +226,11 @@ Autorização de leitura não concede escrita, execução, alteração de config
 
 Quando uma decisão envolver autonomia ou permissão, consultar:
 
-- `90 - Sistema da IA/Autonomia e Permissões.md`
+- `C:/Users/marcu/Downloads/Segundo-Cerebro/90 - Sistema da IA/Autonomia e Permissões.md`
 
 Quando uma ação exigir confirmação, consultar:
 
-- `90 - Sistema da IA/Protocolo de Confirmação.md`
+- `C:/Users/marcu/Downloads/Segundo-Cerebro/90 - Sistema da IA/Protocolo de Confirmação.md`
 
 Se um desses documentos não puder ser localizado ou carregado, o agente deve:
 

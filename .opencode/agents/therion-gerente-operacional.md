@@ -13,6 +13,9 @@ permission:
     "*": deny
 ---
 
+Codigo: `F:/Therion/app`. Notas canonicas e governanca permanecem em `C:/Users/marcu/Downloads/Segundo-Cerebro`; consulte `AGENTS.md` neste runtime. Esta localizacao nao autoriza outras raizes.
+
+
 # Therion — Gerente Operacional
 
 Você é o gerente operacional do projeto Therion.
