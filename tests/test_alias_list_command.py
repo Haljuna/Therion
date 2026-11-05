@@ -91,7 +91,7 @@ class TestListAliasesCommand(unittest.TestCase):
         orchestrator = _make_orchestrator_with_aliases({})
         result = orchestrator.process_command("Therion, liste meus aliases")
         self.assertEqual(result.status, "success")
-        self.assertEqual(result.message, "Nenhum alias cadastrado.")
+        self.assertIn("Nenhum alias cadastrado.", result.message)
 
     def test_operacao_somente_leitura(self) -> None:
         """Verifica que o comando não altera o config."""
@@ -132,7 +132,7 @@ class TestListAliasesIntegration(unittest.TestCase):
         orchestrator = _make_orchestrator_with_aliases({})
         result = orchestrator.process_command("Therion, liste meus aliases")
         self.assertEqual(result.status, "success")
-        self.assertEqual(result.message, "Nenhum alias cadastrado.")
+        self.assertIn("Nenhum alias cadastrado.", result.message)
 
     def test_intencao_reconhecida_corretamente(self) -> None:
         recognizer = IntentRecognizer()

@@ -205,15 +205,16 @@ class TestSessionJournalIntegration(unittest.TestCase):
 
 
 class TestSessionClearInterface(unittest.TestCase):
-    def test_pending_confirmation_prevents_clear_and_voice_cancel(self):
+    def test_clear_discards_pending_confirmation_without_execution(self):
         from therion.interface.desktop import MainWindow
         window = MagicMock()
         window._processing = False
         window._pending_plan = object()
         MainWindow._clear_conversation(window)
-        window._cancel_voice_if_active.assert_not_called()
-        window._history.clear.assert_not_called()
-        window._orchestrator.clear_session.assert_not_called()
+        window._cancel_voice_if_active.assert_called_once()
+        window._history.clear.assert_called_once()
+        window._orchestrator.clear_session.assert_called_once()
+        self.assertIsNone(window._pending_plan)
 
     def test_safe_clear_cancels_voice_before_resetting_session(self):
         from therion.interface.desktop import MainWindow
@@ -222,8 +223,9 @@ class TestSessionClearInterface(unittest.TestCase):
         window._pending_plan = None
         MainWindow._clear_conversation(window)
         self.assertEqual(
-            [str(call) for call in window.mock_calls],
-            ["call._cancel_voice_if_active()", "call._history.clear()",
+            [str(call) for call in window.mock_calls[:7]],
+            ["call._invalidate_ai_readiness()", "call._end_conversation()", "call._cancel_voice_if_active()",
+             "call._stop_speech()", "call._listen_button.setEnabled(False)", "call._history.clear()",
              "call._orchestrator.clear_session()"],
         )
 

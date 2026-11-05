@@ -90,7 +90,7 @@ class TestRealActionsMocked(unittest.TestCase):
         mock_run.return_value = MagicMock(stdout="Obsidian.exe 1234\n", returncode=0)
 
         orchestrator = Orchestrator(simulate=False)
-        plan = Plan(intent=self.obsidian_intent, steps=["Abrir o Obsidian.", "Verificar."])
+        plan = orchestrator.process_command('abra o Obsidian').plan
 
         # Execução com confirmação positiva
         result = orchestrator.confirm_and_execute(plan, confirmed=True)
@@ -99,6 +99,7 @@ class TestRealActionsMocked(unittest.TestCase):
         self.assertIn("verificado e ativo", result.message)
 
         # Execução com cancelamento
+        plan = orchestrator.process_command('abra o Obsidian').plan
         cancel_result = orchestrator.confirm_and_execute(plan, confirmed=False)
         self.assertEqual(cancel_result.status, "cancelled")
         self.assertIn("cancelada pelo usuário", cancel_result.message)

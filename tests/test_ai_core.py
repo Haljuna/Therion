@@ -14,6 +14,7 @@ from therion.core.ai_core import (
 from therion.core.ai_provider import (
     AIProvider,
     AIResponse,
+    CONTEXT_REQUEST,
     NON_EXECUTABLE_TYPES,
     PLAN_REFERENCE,
     PLAN_REFERENCE_SELECTORS,
@@ -487,7 +488,8 @@ class TestPlanRouteClassification(unittest.TestCase):
         self.core = AICore(provider=self.provider, available_intents=self.intents)
 
     def test_non_executable_types_constant(self):
-        self.assertEqual(NON_EXECUTABLE_TYPES, {PLAN_REQUEST, PLAN_REFERENCE})
+        self.assertEqual(NON_EXECUTABLE_TYPES, {PLAN_REQUEST, PLAN_REFERENCE, CONTEXT_REQUEST})
+        self.assertIn(CONTEXT_REQUEST, AICore.VALID_TYPES)
         self.assertIn(PLAN_REQUEST, AICore.VALID_TYPES)
         self.assertIn(PLAN_REFERENCE, AICore.VALID_TYPES)
 

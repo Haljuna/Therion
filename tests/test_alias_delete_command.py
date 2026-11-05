@@ -84,7 +84,7 @@ class TestDeleteAliasCommand(unittest.TestCase):
             orchestrator.process_command("meu alias")
             result = orchestrator.process_command("sim")
             self.assertEqual(result.status, "success")
-            self.assertIn("removido com sucesso", result.message)
+            self.assertIn("Removi o alias com sucesso", result.message)
             mock_save.assert_called_once()
             self.assertNotIn("meu alias", orchestrator.alias_manager.list_aliases())
 
@@ -183,7 +183,7 @@ class TestDeleteAliasIntegration(unittest.TestCase):
             
             # Verifica que foi removido
             result = orchestrator.process_command("Therion, liste meus aliases")
-            self.assertEqual(result.message, "Nenhum alias cadastrado.")
+        self.assertIn("Nenhum alias cadastrado.", result.message)
 
     def test_fluxo_cancelado_nao_afeta_lista(self) -> None:
         orchestrator = _make_orchestrator_with_aliases({"meu alias": "Obsidian"})

@@ -69,7 +69,8 @@ class TestUnknownTargetFlowCommand(unittest.TestCase):
             orchestrator.process_command("Obsidian")
             result = orchestrator.process_command("sim")
             self.assertEqual(result.status, "success")
-            self.assertIn("salvo com sucesso", result.message)
+            self.assertIn("Salvei o alias", result.message)
+            self.assertIn("com sucesso", result.message)
             self.assertIn("segundo cérebro", orchestrator.alias_manager.list_aliases())
 
     def test_nao_cancela_sem_persistir(self) -> None:

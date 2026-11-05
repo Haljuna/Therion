@@ -83,7 +83,7 @@ class TestOllamaProviderIsolated(unittest.TestCase):
         self.assertEqual(fmt["required"], ["type", "message", "intent", "arguments"])
         self.assertEqual(
             fmt["properties"]["type"]["enum"],
-            ["chat", "clarification", "action", "plan_request", "plan_reference"],
+            ["chat", "clarification", "action", "plan_request", "plan_reference", "context_request"],
         )
 
     def test_chat_valid_returns_ai_response(self):
@@ -384,7 +384,7 @@ class TestOllamaProviderIsolated(unittest.TestCase):
         """Payload deve conter exemplo de resposta natural de chat."""
         payload = self.provider._build_payload("teste", {}, [])
         system_content = payload["messages"][0]["content"]
-        self.assertIn("Olá! Tudo bem sim. Como posso ajudar?", system_content)
+        self.assertIn("Olá, senhor! Tudo bem, obrigado por perguntar.", system_content)
 
     def test_payload_prohibits_classification_message(self):
         """Payload deve proibir mensagens classificatórias genéricas."""
@@ -515,15 +515,14 @@ class TestContextualShortResponseRule(unittest.TestCase):
         self.assertNotIn('"type":"chat"', example_line)
         self.assertNotIn("vou gerar agora", system_content.lower())
 
-    def test_system_prompt_contains_study_pomodoro_example(self):
-        """SYSTEM_PROMPT contém exemplo de frase de estudo/Pomodoro como chat."""
+    def test_system_prompt_does_not_force_study_example_into_unrelated_topics(self):
+        """O exemplo global não deve arrastar melhorias do Therion para estudos."""
         payload = self.provider._build_payload("teste", {}, [])
         sc = payload["messages"][0]["content"]
-        self.assertIn("tenho 2 horas para estudar circuitos lógicos e quero usar pomodoro", sc)
+        self.assertNotIn("tenho 2 horas para estudar circuitos lógicos e quero usar pomodoro", sc)
         self.assertIn('"type":"chat"', sc)
         self.assertIn('"intent":null', sc)
         self.assertIn('"arguments":{}', sc)
-        self.assertIn("Pomodoro", sc)
 
     def test_build_payload_places_prompt_in_messages_zero(self):
         """_build_payload() continua colocando SYSTEM_PROMPT em messages[0]['content']."""

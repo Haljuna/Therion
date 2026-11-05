@@ -340,14 +340,14 @@ class TestSearchNotes(unittest.TestCase):
         self.assertEqual(results, [])
         self.assertEqual(trace.used_roots, self.reader.allowed_roots)
 
-    def test_trace_stops_before_root_blocked_by_max_results(self) -> None:
-        """Limite atingido na primeira root não registra a segunda."""
+    def test_trace_covers_roots_scanned_before_ranking_and_limiting(self) -> None:
+        """Limite de apresentação não omite raízes percorridas para ordenar."""
         trace = SearchTrace()
 
         results = self.reader.search_notes("Aetherion", max_results=1, trace=trace)
 
         self.assertEqual(len(results), 1)
-        self.assertEqual(trace.used_roots, [self.reader.allowed_roots[0]])
+        self.assertEqual(trace.used_roots, self.reader.allowed_roots)
 
     def test_search_without_trace_keeps_list_return(self) -> None:
         """Chamada legada continua retornando a lista de SearchResult."""
@@ -549,7 +549,7 @@ class TestSearchOrchestrator(unittest.TestCase):
         orch = self._make_orchestrator()
         result = orch.process_command("Therion, procure no Segundo Cérebro InexistenteXYZ")
         self.assertEqual(result.status, "success")
-        self.assertIn("Nenhum resultado encontrado", result.message)
+        self.assertIn("não encontrei resultados", result.message)
 
     def test_search_records_in_memory(self) -> None:
         """Busca e registrada na memoria de trabalho."""

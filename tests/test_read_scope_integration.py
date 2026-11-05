@@ -224,7 +224,7 @@ class TestReadScopeIntegration(unittest.TestCase):
         )
 
         self.assertEqual(result.status, "success")
-        self.assertIn("Nenhum resultado", result.message)
+        self.assertIn("não encontrei resultados", result.message)
         self.assertEqual(
             orch.memory.current_task.used_roots,
             [os.path.normcase("90 - Sistema da IA").replace("\\", "/"), os.path.normcase("10 - Projetos/Therion").replace("\\", "/")],
@@ -245,7 +245,7 @@ class TestReadScopeIntegration(unittest.TestCase):
             [os.path.normcase("90 - Sistema da IA").replace("\\", "/"), os.path.normcase("10 - Projetos/Therion").replace("\\", "/")],
         )
 
-    def test_search_max_results_does_not_record_next_root(self) -> None:
+    def test_search_max_results_records_all_roots_scanned_for_ranking(self) -> None:
         for index in range(5):
             with open(
                 os.path.join(self.ia_dir, f"Limite{index}.md"),
@@ -261,7 +261,10 @@ class TestReadScopeIntegration(unittest.TestCase):
 
         self.assertEqual(result.status, "success")
         self.assertIn("5 resultado(s)", result.message)
-        self.assertEqual(orch.memory.current_task.used_roots, [os.path.normcase("90 - Sistema da IA").replace("\\", "/")])
+        self.assertEqual(orch.memory.current_task.used_roots, [
+            os.path.normcase("90 - Sistema da IA").replace("\\", "/"),
+            os.path.normcase("10 - Projetos/Therion").replace("\\", "/"),
+        ])
 
 
 if __name__ == "__main__":

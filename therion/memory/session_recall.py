@@ -121,6 +121,28 @@ def recall_answer(turns: list[Turn], query: str) -> str | None:
     )
 
 
+def spoken_recall(answer: str) -> str:
+    """Apresenta citações oralmente sem ler identificadores da interface."""
+    if answer.startswith('O último nome que você informou nesta sessão é '):
+        declaration = answer.split('\n\n', 1)[0]
+        name = declaration.removeprefix('O último nome que você informou nesta sessão é ').removesuffix('.')
+        return f'Você me disse que seu nome é {name}.'
+    if not answer.startswith('Encontrei estes registros da sessão.'):
+        return answer
+    records = re.split(r'\[(Você|Thérion \(resposta/sugestão\)), mensagem \d+\]\n', answer)
+    parts = []
+    for index in range(1, len(records), 2):
+        speaker = records[index]
+        content = records[index + 1].strip()
+        introduction = 'Você disse:' if speaker == 'Você' else 'Eu respondi:'
+        parts.append(f'{introduction} {content}')
+    if not parts:
+        return answer
+    return ('Encontrei estes trechos da nossa conversa. '
+            + ' '.join(parts)
+            + ' Esses registros não comprovam uma decisão ou autorização.')
+
+
 def context_turns(turns: list[Turn], query: str) -> list[dict]:
     """Recuperação seletiva substitui parte da janela; não envia a sessão inteira.
 

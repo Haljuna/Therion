@@ -9,6 +9,8 @@ from dataclasses import dataclass, replace
 from typing import Optional
 
 from therion.core.ai_provider import (
+    CONTEXT_REQUEST,
+    CONTEXT_PURPOSES,
     AIProvider,
     AIResponse,
     NON_EXECUTABLE_TYPES,
@@ -158,6 +160,20 @@ class AICore:
         """Compatibilidade: devolve a resposta válida ou None em falha controlada."""
         return self.classify_detailed(message, context).response
 
+    def warmup(self):
+        if hasattr(self._provider, 'warmup'):
+            self._provider.warmup()
+
+    def describe_result(self, message: str, evidence: dict, context: dict) -> Optional[str]:
+        """Saída apenas textual; nunca encaminha uma intenção para execução."""
+        try:
+            text = self._provider.describe_result(message, evidence, context)
+        except Exception:
+            return None
+        if not isinstance(text, str) or not text.strip() or len(text) > 1400:
+            return None
+        return text.strip()
+
     def classify_detailed(
         self,
         message: str,
@@ -289,6 +305,13 @@ class AICore:
                     return False
             elif response.type == PLAN_REFERENCE:
                 if not self._validate_plan_reference_arguments(response.arguments):
+                    return False
+            elif response.type == CONTEXT_REQUEST:
+                args = response.arguments
+                if (not {'purpose'} <= set(args) <= {'purpose', 'query'}
+                        or not isinstance(args.get('purpose'), str)
+                        or args.get('purpose') not in CONTEXT_PURPOSES
+                        or ('query' in args and (not isinstance(args['query'], str) or len(args['query']) > 300))):
                     return False
 
         return True

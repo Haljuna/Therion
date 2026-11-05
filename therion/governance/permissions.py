@@ -10,6 +10,9 @@ class PermissionManager:
     ALLOWED_ACTIONS = {"abrir aplicativo", "listar aliases", "adicionar alias", "excluir alias", "substituir alias"}
     ALLOWED_TARGETS = {"Obsidian"}
 
+    def __init__(self, application_catalog=None):
+        self.application_catalog = application_catalog
+
     def is_allowed(self, intent: Intent) -> bool:
         """Verifica se ação e alvo constam na allowlist estrita da V0."""
         if intent.action not in self.ALLOWED_ACTIONS:
@@ -18,7 +21,13 @@ class PermissionManager:
         if intent.action in ("listar aliases", "adicionar alias", "excluir alias", "substituir alias"):
             return True
         if intent.target not in self.ALLOWED_TARGETS:
-            return False
+            if self.application_catalog is None or intent.action != 'abrir aplicativo':
+                return False
+            try:
+                matches = self.application_catalog.resolve(intent.target)
+                return len(matches) == 1 and matches[0].id == intent.target
+            except (OSError, ValueError, TypeError):
+                return False
         return True
 
     def requires_confirmation(self, intent: Intent) -> bool:

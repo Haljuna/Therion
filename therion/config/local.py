@@ -26,7 +26,10 @@ from pathlib import Path
 from typing import Any
 
 DEFAULT_CONFIG: dict[str, Any] = {
-    "ui": {"start_minimized": False},
+    "agent": {"enabled": False, "history_enabled": False, "protocol": "json", "timeout_seconds": 180,
+        "gmail_enabled": False, "browser_enabled": False, "desktop_enabled": False, "documents_enabled": False,
+        "learning_enabled": False, "web_enabled": False},
+    "ui": {"start_minimized": False, "interface": "constellation", "graphics_quality": "auto", "reduced_motion": False},
     "aliases": {},
     "allowed_apps": [],
     "runtime": {"real_actions_enabled": False},
@@ -39,6 +42,11 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "think": None,
     },
     "voice": {"model_path": None},
+    "tts": {"enabled": False, "provider": "kokoro", "voice": "pm_alex", "model_root": "", "python_path": "", "warm_on_start": False,
+            "online_allowed": False, "edge_voice": "pt-BR-AntonioNeural", "edge_python_path": "",
+            "voicestudio_endpoint": "http://127.0.0.1:3900/v1/audio/speech",
+            "voicestudio_voice": "", "voicestudio_python_path": "",
+            "streaming_prepare": False},
 }
 
 _CONFIG_PATH: Path | None = None
@@ -86,7 +94,18 @@ def _validate_config(data: dict[str, Any]) -> dict[str, Any]:
         sm = ui.get("start_minimized")
         if not isinstance(sm, bool):
             ui["start_minimized"] = DEFAULT_CONFIG["ui"]["start_minimized"]
+        ui = ui.copy()
         validated["ui"] = ui
+    ui = validated['ui']
+    if not isinstance(ui.get('interface'),str) or ui['interface'] not in {'classic', 'constellation'}:
+        ui['interface'] = 'constellation'
+    if not isinstance(ui.get('graphics_quality'),str) or ui['graphics_quality'] not in {'auto', 'high', 'medium', 'low'}:
+        ui['graphics_quality'] = 'auto'
+    if type(ui.get('reduced_motion')) is not bool:
+        ui['reduced_motion'] = False
+    # Nota local da conversa (análise de erros); desligada salvo pedido explícito.
+    if type(ui.get('conversation_log')) is not bool:
+        ui['conversation_log'] = False
 
     # aliases -> dict
     aliases = validated.get("aliases")
@@ -158,6 +177,36 @@ def _validate_config(data: dict[str, Any]) -> dict[str, Any]:
             voice_merged["model_path"] = None
         validated["voice"] = voice_merged
 
+    tts = validated.get('tts')
+    merged_tts = DEFAULT_CONFIG['tts'].copy()
+    if isinstance(tts, dict):
+        merged_tts.update(tts)
+    if type(merged_tts.get('enabled')) is not bool:
+        merged_tts['enabled'] = False
+    if type(merged_tts.get('warm_on_start')) is not bool:
+        merged_tts['warm_on_start'] = False
+    if type(merged_tts.get('online_allowed')) is not bool:merged_tts['online_allowed']=False
+    if type(merged_tts.get('streaming_prepare')) is not bool:merged_tts['streaming_prepare']=False
+    for field in ('model_root', 'python_path', 'edge_python_path', 'voicestudio_python_path'):
+        if not isinstance(merged_tts.get(field), str):
+            merged_tts[field] = ''
+            merged_tts['enabled'] = False
+    from therion.voice.providers import EDGE_VOICES, is_voicestudio_endpoint, is_voicestudio_voice
+    provider=merged_tts.get('provider')
+    if provider=='kokoro':
+        if merged_tts.get('voice') not in ('pm_alex','alex_santa_c'):merged_tts['enabled']=False
+    elif provider=='edge':
+        if (merged_tts['online_allowed'] is not True or merged_tts.get('edge_voice') not in EDGE_VOICES
+                or not merged_tts['edge_python_path'].strip()):merged_tts['enabled']=False
+    elif provider=='voicestudio':
+        if (not is_voicestudio_endpoint(merged_tts.get('voicestudio_endpoint'))
+                or not is_voicestudio_voice(merged_tts.get('voicestudio_voice'))
+                or not merged_tts['voicestudio_python_path'].strip()):merged_tts['enabled']=False
+    else:
+        merged_tts['enabled'] = False
+    validated['tts'] = merged_tts
+    from therion.agent.settings import validate_settings
+    validated['agent'] = validate_settings(validated.get('agent'))
     return validated
 
 

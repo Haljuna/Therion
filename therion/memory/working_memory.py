@@ -53,7 +53,7 @@ class Turn:
     text: str
     turn_id: int = 0
     submitted_text: Optional[str] = None
-    origin: Literal["original", "session_recall"] = "original"
+    origin: Literal["original", "session_recall", "personal_context"] = "original"
 
 
 class WorkingMemory:
@@ -207,7 +207,7 @@ class WorkingMemory:
     def add_turn(
         self, role: Literal["user", "therion"], text: str,
         submitted_text: Optional[str] = None,
-        origin: Literal["original", "session_recall"] = "original",
+        origin: Literal["original", "session_recall", "personal_context"] = "original",
     ) -> bool:
         """Adiciona um turno de conversa à sessão."""
         size = len(text) + (len(submitted_text) if submitted_text is not None else 0)

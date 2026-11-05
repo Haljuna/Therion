@@ -97,8 +97,10 @@ def test_search_trace_records_only_started_roots(tmp_path: Path) -> None:
     reader, allowed, protected = _make_reader(tmp_path)
     reader.allowed_roots = [str(allowed), str(protected)]
     trace = SearchTrace()
-
-    results = reader.search_notes("termo_", trace=trace)
+    # Esta verificação cobre raízes percorridas, sem depender de busca por prefixos.
+    (allowed / "nota.md").write_text('auditoria comum', encoding='utf-8')
+    (protected / "privada.md").write_text('auditoria comum', encoding='utf-8')
+    results = reader.search_notes("auditoria", trace=trace)
 
     assert len(results) == 2
     assert trace.used_roots == [str(allowed), str(protected)]

@@ -71,7 +71,7 @@ class TestV0Flow(unittest.TestCase):
         """Critério 7: ciclo completo com confirmação positiva retorna execução simulada."""
         result = self.orchestrator.process_command("Therion, abra o Obsidian")
         self.assertEqual(result.status, "awaiting_confirmation")
-        self.assertIn("Intenção identificada: abrir aplicativo", result.message)
+        self.assertIn("Posso realizar esta ação após sua confirmação: abrir aplicativo", result.message)
         self.assertIn("Alvo: Obsidian", result.message)
         self.assertIn("Esta ação exige confirmação.", result.message)
         self.assertIn("Continuar? [s/n]", result.message)

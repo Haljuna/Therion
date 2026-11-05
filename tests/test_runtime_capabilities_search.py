@@ -43,16 +43,23 @@ def test_capabilities_reflect_runtime_and_do_not_execute(tmp_path, simulate, cal
                         ai_core=MagicMock())
     orch.executor = MagicMock()
     for question in ["O que você pode fazer?", "Eu queria saber o que você pode fazer.",
-                     "Quais são suas capacidades?"]:
+                     "Quais são suas capacidades?", "Você consegue abrir algum aplicativo?",
+                     "Você pode abrir programas?"]:
         result = orch.process_command(question)
         assert result.status == "success"
         assert "Segundo Cérebro" in result.message
+        assert result.speech_message != result.message
+        assert 'notas autorizadas' in result.speech_message
+        assert 'confirmação' in result.speech_message
         if simulate:
             assert "não abro o aplicativo de verdade" in result.message
             assert "não posso consultar nem criar eventos agora" in result.message
+            assert 'não os abro de verdade' in result.speech_message
+            assert 'calendário está indisponível' in result.speech_message
         else:
             assert "confirmação antes da execução" in result.message
             assert "depende da conexão" in result.message
+            assert 'depende da conexão e da autorização' in result.speech_message
     orch.executor.assert_not_called()
     orch.ai_core.classify_detailed.assert_not_called()
     if calendar is not None:
@@ -69,6 +76,15 @@ def test_pending_flow_precedes_capabilities(tmp_path):
     assert result.message != orch._capabilities_summary()
 
 
+@pytest.mark.parametrize('command', ['Abra o Chrome.', 'Você consegue abrir o Obsidian?',
+    'Não abra nenhum aplicativo.', 'Abra um aplicativo chamado Discord.'])
+def test_app_capability_question_does_not_capture_named_or_negative_requests(command):
+    from therion.context.conversation_frame import capabilities_request
+    assert not capabilities_request(command)
+
+
 def test_no_ai_capability_is_not_advertised(tmp_path):
     orch = Orchestrator(log_dir=str(tmp_path))
-    assert "desabilitada" in orch.process_command("O que você consegue fazer?").message
+    result = orch.process_command("O que você consegue fazer?")
+    assert "desabilitada" in result.message
+    assert 'modelo local está desativada' in result.speech_message

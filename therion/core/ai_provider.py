@@ -8,8 +8,10 @@ from typing import FrozenSet, List, Literal, Optional
 
 PLAN_REQUEST = "plan_request"
 PLAN_REFERENCE = "plan_reference"
+CONTEXT_REQUEST = "context_request"
+CONTEXT_PURPOSES = frozenset({'profile_read', 'personal_summary'})
 
-NON_EXECUTABLE_TYPES: FrozenSet[str] = frozenset({PLAN_REQUEST, PLAN_REFERENCE})
+NON_EXECUTABLE_TYPES: FrozenSet[str] = frozenset({PLAN_REQUEST, PLAN_REFERENCE, CONTEXT_REQUEST})
 
 PLAN_REFERENCE_SELECTORS: FrozenSet[str] = frozenset(
     {"first", "second", "last", "previous", "same"}
@@ -33,7 +35,7 @@ class AIResponse:
     """Resposta estruturada de um AIProvider."""
 
     type: Literal[
-        "chat", "action", "clarification", "plan_request", "plan_reference"
+        "chat", "action", "clarification", "plan_request", "plan_reference", "context_request"
     ]
     intent: Optional[str] = None
     arguments: dict = field(default_factory=dict)
@@ -99,6 +101,23 @@ class PlanContent:
 
 class AIProvider(ABC):
     """Interface abstrata para provedores de inferência de IA."""
+
+    def compare_knowledge(self, evidence: dict, timeout_seconds: int = 20):
+        """Comparação opcional, somente sobre fontes selecionadas; nenhuma ação."""
+        return None
+
+    def interpret_workflow_commands(self, message: str, context: Optional[dict] = None,
+                                    timeout_seconds: int = 20) -> Optional[dict]:
+        """Decomposição opcional em trechos literais, sem ações ou argumentos."""
+        return None
+
+    def extract_memory_candidates(self, evidence: dict, timeout_seconds: int = 20) -> list:
+        """Operação opcional, sem ações. Providers anteriores não propõem memórias."""
+        return []
+
+    def describe_result(self, message: str, evidence: dict, context: dict) -> Optional[str]:
+        """Interpreta resultados já obtidos, sem solicitar ou executar ações."""
+        return None
 
     @abstractmethod
     def generate(

@@ -88,7 +88,7 @@ class TestAddAliasCommand(unittest.TestCase):
             orchestrator.process_command("Obsidian")
             result = orchestrator.process_command("sim")
             self.assertEqual(result.status, "success")
-            self.assertIn("Alias adicionado com sucesso", result.message)
+            self.assertIn("Adicionei o alias com sucesso", result.message)
             mock_save.assert_called_once()
             # Verifica que o alias foi salvo
             self.assertIn("meu alias", orchestrator.alias_manager.list_aliases())
@@ -197,7 +197,7 @@ class TestAddAliasIntegration(unittest.TestCase):
         
         result = orchestrator.process_command("Therion, liste meus aliases")
         self.assertEqual(result.status, "success")
-        self.assertEqual(result.message, "Nenhum alias cadastrado.")
+        self.assertIn("Nenhum alias cadastrado.", result.message)
 
 
 if __name__ == "__main__":

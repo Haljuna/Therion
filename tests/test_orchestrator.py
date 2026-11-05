@@ -269,7 +269,7 @@ class TestDeterministicRoutingPriority(unittest.TestCase):
 
         orch = Orchestrator(simulate=True, ai_core=ai_core)
 
-        result = orch.process_command("O que tenho hoje no calendário?")
+        result = orch.process_command("Consulte minha agenda.")
 
         fake_provider.generate.assert_called_once()
         self.assertEqual(result.status, "success")

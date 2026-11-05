@@ -6,12 +6,31 @@ from unittest.mock import MagicMock
 import pytest
 
 from therion.core.orchestrator import Orchestrator
-from therion.memory.session_recall import context_turns, recall_answer, search
+from therion.memory.session_recall import context_turns, recall_answer, search, spoken_recall
 from therion.memory.working_memory import Turn
 
 
 def turns(*entries):
     return [Turn(role, text, index + 1) for index, (role, text) in enumerate(entries)]
+
+
+def test_spoken_recall_preserves_authorship_and_authority_limits():
+    history = turns(('user', 'Estou estudando Álgebra Linear.'),
+                    ('therion', 'Sugiro revisar Álgebra Linear.'))
+    visual = recall_answer(history, 'Mostre no histórico Álgebra Linear')
+    spoken = spoken_recall(visual)
+    assert '[Você, mensagem 1]' in visual
+    assert 'mensagem 1' not in spoken
+    assert 'Você disse: Estou estudando Álgebra Linear.' in spoken
+    assert 'Eu respondi: Sugiro revisar Álgebra Linear.' in spoken
+    assert 'não comprovam uma decisão ou autorização' in spoken
+
+
+def test_spoken_name_uses_corrected_declaration_without_reading_citation():
+    visual = recall_answer(turns(('user', 'Meu nome é Marcus.'),
+                                ('user', 'Corrigindo: meu nome é Marcos.')), 'Qual é meu nome?')
+    assert spoken_recall(visual) == 'Você me disse que seu nome é Marcos.'
+    assert 'mensagem 2' in visual
 
 
 def test_name_after_many_messages_and_correction():
@@ -192,13 +211,14 @@ def test_context_keeps_corrected_name_instead_of_old_name():
 def test_retrieval_payloads_keep_limits_and_data_outside_system():
     from therion.core.ai_provider_ollama import OllamaProvider
     provider = OllamaProvider()
+    declaration = 'Meu nome é PessoaExclusivaDoHistorico.'
     context = {"session_retrieval": True,
-               "recent_turns": [{"role": "user", "text": "Meu nome é Marcus."}]}
+               "recent_turns": [{"role": "user", "text": declaration}]}
     for payload, size in (
         (provider._build_payload("Olá", context, []), 4096),
         (provider._build_plan_payload("Plano", context), 2048),
     ):
         assert payload["options"]["num_ctx"] == size
-        assert "Marcus" not in payload["messages"][0]["content"]
+        assert 'PessoaExclusivaDoHistorico' not in payload["messages"][0]["content"]
         assert "histórico" in payload["messages"][0]["content"].lower()
-        assert payload["messages"][1] == {"role": "user", "content": "Meu nome é Marcus."}
+        assert payload["messages"][1] == {"role": "user", "content": declaration}
