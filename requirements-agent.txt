@@ -1,0 +1,8 @@
+# Capacidades opcionais; instalar no ambiente de teste antes de ativar.
+httpx==0.28.1
+pypdf
+python-docx
+openpyxl
+reportlab
+playwright
+pywinauto; sys_platform == "win32"
