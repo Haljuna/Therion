@@ -37,6 +37,9 @@ def _terms(text: str) -> set[str]:
     return words
 
 
+NAME_NOT_FOUND = "Não encontrei uma declaração explícita do seu nome nesta sessão."
+
+
 def _name_declaration(turn: Turn) -> str | None:
     if turn.role != "user":
         return None
@@ -82,7 +85,7 @@ def recall_answer(turns: list[Turn], query: str) -> str | None:
         declarations = [(turn, _name_declaration(turn)) for turn in turns]
         declarations = [(turn, name) for turn, name in declarations if name]
         if not declarations:
-            return "Não encontrei uma declaração explícita do seu nome nesta sessão."
+            return NAME_NOT_FOUND
         turn, name = declarations[-1]
         return f"O último nome que você informou nesta sessão é {name}.\n\n" + evidence(turn)
 

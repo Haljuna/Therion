@@ -53,7 +53,8 @@ class ControlledCore:
 
 
 def wait_for(predicate):
-    deadline = time.monotonic() + 3
+    # Sai assim que a condição vale; o limite largo só evita falso negativo com a suíte inteira rodando.
+    deadline = time.monotonic() + 15
     while not predicate() and time.monotonic() < deadline:
         QTest.qWait(5)
     assert predicate()

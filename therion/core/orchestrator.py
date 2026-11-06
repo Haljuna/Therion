@@ -42,7 +42,7 @@ from therion.memory.review import review_preview
 from therion.memory.knowledge import MemoryError as KnowledgeError, SourceReference, preview
 from therion.memory.working_memory import WorkingMemory
 from therion.memory.session_tasks import SessionTasks, task_request, TEMPORARY_NOTICE
-from therion.memory.session_recall import context_turns, recall_answer, spoken_recall
+from therion.memory.session_recall import NAME_NOT_FOUND, context_turns, recall_answer, spoken_recall
 from therion.skills.registry import get_skill
 from therion.skills.proposals import skill_proposals
 from therion.agent.host import AgentSupport
@@ -2435,9 +2435,23 @@ class Orchestrator(WorkflowSupport, MemorySupport, PersonalContextSupport, Catal
 
         personal_purpose = personal_request(command,voice=self.voice_conversation)
         if personal_purpose is not None and self._personal_flow_is_free():
-            result = self._resolve_personal_context(personal_purpose, command, scope)
+            # "Qual meu nome?": o que foi dito nesta sessão vale antes do Perfil; sem Perfil
+            # acessível, a resposta é a da sessão ("não encontrei"), não um aviso de escopo.
+            recall = (recall_answer(list(self.memory.turns)[:-1], command)
+                      if personal_purpose == 'profile_read' else None)
+            result = None
+            if recall is None or recall == NAME_NOT_FOUND:
+                result = self._resolve_personal_context(personal_purpose, command, scope)
+                if recall is not None and result.status != 'success':
+                    result = None
+            if result is not None:
+                self._complete_task()
+                self._finalize_session_result(result)
+                return result
+            self.memory.turns[-1].origin = "session_recall"
+            result = OrchestrationResult(status="success", message=recall, speech_message=spoken_recall(recall))
             self._complete_task()
-            self._finalize_session_result(result)
+            self._finalize_session_result(result, session_recall=True)
             return result
         if not self._personal_sources_valid(scope):
             self._clear_personal_context()

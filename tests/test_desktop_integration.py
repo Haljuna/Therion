@@ -10,6 +10,14 @@ import shutil
 import unittest
 
 
+def _history_mock():
+    """Histórico falso com barra de rolagem numérica (o _append decide se acompanha o fim)."""
+    history = MagicMock()
+    history.verticalScrollBar.return_value.value.return_value = 0
+    history.verticalScrollBar.return_value.maximum.return_value = 0
+    return history
+
+
 def _complete_command_inline(window, command):
     """Mantém os testes de resultado isolados do despacho em thread."""
     worker = MagicMock()
@@ -241,7 +249,9 @@ class TestDesktopIntegration(unittest.TestCase):
         shutil.rmtree(self.temp_dir, ignore_errors=True)
 
     def _run_main_with_config(self, config_data: dict) -> tuple[bool, MagicMock]:
-        with patch("therion.interface.desktop.load_config", return_value=config_data):
+        # main() abre o canal TherionV4-activate; simulado para não tocar no Therion pessoal aberto.
+        with patch("therion.interface.desktop.load_config", return_value=config_data), \
+                patch("PySide6.QtNetwork.QLocalServer"):
             with patch("therion.interface.desktop.QApplication") as mock_app_class:
                 with patch("therion.interface.desktop.MainWindow") as mock_window_class:
                     mock_app = MagicMock()
@@ -275,7 +285,8 @@ class TestDesktopIntegration(unittest.TestCase):
 
     def test_load_config_consumido_corretamente(self) -> None:
         config = {"ui": {"start_minimized": True}, "aliases": {}, "allowed_apps": []}
-        with patch("therion.interface.desktop.load_config", return_value=config) as mock_load:
+        with patch("therion.interface.desktop.load_config", return_value=config) as mock_load, \
+                patch("PySide6.QtNetwork.QLocalServer"):
             with patch("therion.interface.desktop.QApplication") as mock_app_class:
                 with patch("therion.interface.desktop.MainWindow"):
                     mock_app = MagicMock()
@@ -307,7 +318,7 @@ class TestDesktopOrchestratorIntegration(unittest.TestCase):
         with patch.object(MainWindow, '_setup_ui'):
             with patch.object(MainWindow, '_setup_tray'):
                 window = MainWindow(mock_app)
-                window._history = MagicMock()
+                window._history = _history_mock()
                 window._input = MagicMock()
                 window._input.toPlainText.return_value = ""
                 window._send_button = MagicMock()
@@ -724,7 +735,7 @@ class TestDesktopOrchestratorIntegration(unittest.TestCase):
         with patch.object(MainWindow, '_setup_ui'):
             with patch.object(MainWindow, '_setup_tray'):
                 window = MainWindow(mock_app)
-                window._history = MagicMock()
+                window._history = _history_mock()
                 window._clear_conversation()
                 window._history.clear.assert_called_once()
 
@@ -735,7 +746,7 @@ class TestDesktopOrchestratorIntegration(unittest.TestCase):
         with patch.object(MainWindow, '_setup_ui'):
             with patch.object(MainWindow, '_setup_tray'):
                 window = MainWindow(mock_app)
-                window._history = MagicMock()
+                window._history = _history_mock()
                 window._orchestrator = MagicMock()
                 window._clear_conversation()
                 window._history.clear.assert_called_once()
@@ -747,7 +758,7 @@ class TestDesktopOrchestratorIntegration(unittest.TestCase):
         with patch.object(MainWindow, '_setup_ui'):
             with patch.object(MainWindow, '_setup_tray'):
                 window = MainWindow(mock_app)
-                window._history = MagicMock()
+                window._history = _history_mock()
                 window._pending_plan = MagicMock()
                 window._clear_conversation()
                 self.assertIsNone(window._pending_plan)
@@ -798,7 +809,7 @@ class TestDesktopOrchestratorIntegration(unittest.TestCase):
         with patch.object(MainWindow, '_setup_ui'):
             with patch.object(MainWindow, '_setup_tray'):
                 window = MainWindow(mock_app)
-                window._history = MagicMock()
+                window._history = _history_mock()
                 window._append("Você", "teste")
                 window._history.append.assert_called_once()
                 call_args = window._history.append.call_args[0][0]
@@ -812,7 +823,7 @@ class TestDesktopOrchestratorIntegration(unittest.TestCase):
         with patch.object(MainWindow, '_setup_ui'):
             with patch.object(MainWindow, '_setup_tray'):
                 window = MainWindow(mock_app)
-                window._history = MagicMock()
+                window._history = _history_mock()
                 window._append("Therion", "resposta")
                 window._history.append.assert_called_once()
                 call_args = window._history.append.call_args[0][0]
@@ -826,7 +837,7 @@ class TestDesktopOrchestratorIntegration(unittest.TestCase):
         with patch.object(MainWindow, '_setup_ui'):
             with patch.object(MainWindow, '_setup_tray'):
                 window = MainWindow(mock_app)
-                window._history = MagicMock()
+                window._history = _history_mock()
                 window._append("Você", "teste")
                 call_args = window._history.append.call_args[0][0]
                 self.assertIn("width:auto;", call_args)
@@ -839,7 +850,7 @@ class TestDesktopOrchestratorIntegration(unittest.TestCase):
         with patch.object(MainWindow, '_setup_ui'):
             with patch.object(MainWindow, '_setup_tray'):
                 window = MainWindow(mock_app)
-                window._history = MagicMock()
+                window._history = _history_mock()
                 window._append("Você", "<b>teste</b> & <i>script</i>")
                 call_args = window._history.append.call_args[0][0]
                 self.assertIn("&lt;b&gt;teste&lt;/b&gt; &amp; &lt;i&gt;script&lt;/i&gt;", call_args)
@@ -851,7 +862,7 @@ class TestDesktopOrchestratorIntegration(unittest.TestCase):
         with patch.object(MainWindow, '_setup_ui'):
             with patch.object(MainWindow, '_setup_tray'):
                 window = MainWindow(mock_app)
-                window._history = MagicMock()
+                window._history = _history_mock()
                 window._append("Therion", "linha1\nlinha2")
                 call_args = window._history.append.call_args[0][0]
                 self.assertIn("linha1<br>linha2", call_args)
@@ -1229,7 +1240,7 @@ class TestDesktopConfirmPanel(unittest.TestCase):
         window._confirmation_handler.evaluate_response.return_value = True
         window._orbe = MagicMock()
         window._orbe_label = MagicMock()
-        window._history = MagicMock()
+        window._history = _history_mock()
         window._clear_button = MagicMock()
         window._pending_plan = None
         window._start_command_worker = lambda command: _complete_command_inline(
@@ -1464,7 +1475,7 @@ class TestDesktopIcon(unittest.TestCase):
         from pathlib import Path
         expected_parent = Path(__file__).resolve().parent.parent / "therion" / "interface"
         self.assertEqual(_ICONE_PATH.parent.parent, expected_parent.parent)
-        self.assertEqual(_ICONE_PATH.name, "icone.png")
+        self.assertEqual(_ICONE_PATH.name, "therion-orb.ico")
 
     def test_window_receives_valid_icon_when_asset_exists(self) -> None:
         """A janela recebe um QIcon válido quando o asset existe."""

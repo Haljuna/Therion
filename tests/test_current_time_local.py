@@ -38,7 +38,9 @@ def test_duration_events_other_zones_and_negations_are_not_current_local_time(co
 def test_each_query_reads_new_time_instead_of_reusing_previous_answer(case):
     host,_,_,_=case
     enable(host)
-    times=iter([datetime(2026,10,20,14,5,9),datetime(2026,10,20,14,6,10)])
-    host._now_func=lambda:next(times)
+    # Relógio que só muda entre as perguntas; outras rotas também podem consultá-lo.
+    clock=[datetime(2026,10,20,14,5,9)]
+    host._now_func=lambda:clock[0]
     assert host.process_command('Que horas são?').message=='Agora são 14:05:09.'
+    clock[0]=datetime(2026,10,20,14,6,10)
     assert host.process_command('Que horas são?').message=='Agora são 14:06:10.'

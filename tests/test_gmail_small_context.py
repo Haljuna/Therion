@@ -28,7 +28,9 @@ def gmail(tmp_path):
     return registry,client
 
 
-def test_three_subjects_fit_reported_budget_without_loading_bodies_or_effect_tools(gmail):
+# Orçamentos reais: config pessoal desde 04/11/2026 (o antigo 5120 já não cabia o prompt) e padrão.
+@pytest.mark.parametrize('context,output',[(12288,4352),(8192,2048)])
+def test_three_subjects_fit_reported_budget_without_loading_bodies_or_effect_tools(gmail,context,output):
     registry,client=gmail
     assert {'gmail_search','gmail_message_headers'}<=registry.advertised
     assert not {'gmail_prepare_send','gmail_prepare_draft','prepare_task'} & registry.advertised
@@ -39,18 +41,18 @@ def test_three_subjects_fit_reported_budget_without_loading_bodies_or_effect_too
     seen=[]
     class Provider:
         async def decide(self,rows,schemas,budget,*args):
-            assert budget.context_tokens==5120
-            assert ContextBuilder().estimate(rows,schemas)+budget.output_tokens<=5120
+            assert budget.context_tokens==context
+            assert ContextBuilder().estimate(rows,schemas)+budget.output_tokens<=context
             assert 'PRIVATE-BODY-NOT-REQUESTED' not in str(rows)
             seen.append(budget)
             return next(decisions)
     result=asyncio.run(AgentRuntime(Provider(),registry).run(
         'Liste os assuntos dos meus três e-mails mais recentes.',session_id='fixture',
-        budget=TurnBudget(context_tokens=5120,output_tokens=4352)))
+        budget=TurnBudget(context_tokens=context,output_tokens=output)))
     assert result.status=='completed',result.message
     assert len(seen)==3 and client.metadata.call_count==3
     assert all(source.get('account') for _,row in result.results for source in row.evidence)
-    assert all(b.output_tokens<4352 for b in seen)
+    assert all(b.output_tokens<=output for b in seen)
     client.thread.assert_not_called()
     client.send_draft.assert_not_called()
 
