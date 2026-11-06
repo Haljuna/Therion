@@ -1,6 +1,6 @@
 # Backend mínimo OmniVoice / Jarvis
 
-**Uso diário adotado em 20/10/2026:** o atalho normal prepara Jarvis + Parakeet + IA pelo `scripts/Start-Therion.ps1`. O estado aprovado foi copiado para `%LOCALAPPDATA%/Therion/voice/`. Consulte `C:/Users/marcu/Downloads/Segundo-Cerebro/10 - Projetos/Therion/Voz local - Uso diário.md` no cofre; os iniciadores de teste abaixo permanecem como histórico e comparação.
+**Uso diário adotado em 20/10/2026:** o atalho normal prepara Jarvis + Parakeet + IA pelo `scripts/Start-Therion.ps1`. O estado aprovado foi copiado para `%LOCALAPPDATA%/Therion/voice/`. Consulte `10 - Projetos/Therion/Voz local - Uso diário.md` no cofre (Segundo Cérebro); os iniciadores de teste abaixo permanecem como histórico e comparação.
 
 Após autorização do usuário, o servidor passou a limpar blocos CUDA desocupados ao terminar cada síntese, inclusive no caminho de erro. A limpeza ocorre depois da criação do WAV em CPU; pesos, referência, semente e parâmetros de geração não são alterados. `last_generation` inclui reserva antes/depois, memória liberada e duração da limpeza. Isso reduz reserva entre falas, não o pico necessário para gerar áudio, e pode acrescentar custo de alocação à fala seguinte. Evidências da comparação: `tmp/voice-cache-20261020/`. O código anterior está preservado em `server-before.py` nessa pasta.
 
