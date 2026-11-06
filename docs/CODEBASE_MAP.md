@@ -153,7 +153,11 @@ F:\Therion\                 (só a pasta app\ é código; o resto são modelos e
 | `autonomy_panel.py` | Diálogo "Autonomia": apps, rotinas, memória técnica, evidências | ~8.8k |
 | `agent_panel.py` | "Capacidades e histórico": liga e desliga `agent.*`, OAuth do Gmail | ~7k |
 | `launcher.py` | Splash animado | ~6.4k |
-| `constellation.py`, `singularity.py`, `scene_flow.py` | Orbe em OpenGL/GLSL, com fallback estático | ~10k |
+| `constellation.py` | Moldura da orbe usada pelo painel e pelo launcher; reserva 2D sem OpenGL | ~1.5k |
+| `orb_geometry.py` | Forma da orbe holográfica em 7 camadas (numpy, sem OpenGL), com placas em relevo | ~3k |
+| `orb_motion.py` | Comportamento por estado: giro, rastro, clarão, aro, olho, erro, montagem, respiração | ~2k |
+| `orb_renderer.py`, `orb_shaders.py` | `OrbGL`: cena com MSAA, rastro, brilho em 1–3 escalas, halo e chão (GLSL 1.20) | ~5k |
+| `singularity.py`, `scene_flow.py` | Cena antiga (terreno e fluxos); não usada pela orbe atual | ~5k |
 | `surface_dialogs.py`, `workspace.py` | Diálogos dentro da cena e painéis flutuantes | ~7.4k |
 | `design_system.py` | Paleta violeta "Obsidiana" + QSS | ~1.5k |
 | `graphics.py`, `native_accessibility.py` | Ordem de OpenGL/WebEngine e pré-inicialização do UIA | ~1.3k |
@@ -360,7 +364,7 @@ O modelo chama `*_prepare_*` → `ActionProposals.prepare` (preview, digest, TTL
 - **Nova ferramenta do agente:** `ToolSpec` em `integrations/tools.py` ou `visual_tools.py` (efeito `read`/`prepare`) → registro em `agent/host.py` (~linhas 485–499) → regex em `agent/registry.py:initial_tools` → flag em `agent/settings.py` → testes `tests/test_agent_*.py` com `ScriptedProvider`.
 - **Nova integração externa:** worker em `integrations/<x>.py` + `kind` em `integrations/worker.py` → `OwnedWorker('<x>')` em `rpc.py` → host permitido em `google_transport.py`, se for API do Google.
 - **Mexer na voz (STT):** `voice/transcription.py` (hotwords, limiares) ou `voice/http_model.py` + `scripts/voice_gateway/`. **TTS:** `voice/speech_output.py` + o worker do provider + `config/local.py` (regras do `tts`).
-- **Mexer na UI:** `interface/desktop.py` (lógica e sessão) e `interface/dashboard.py` (skin). Estilo em `design_system.py`. Testes Qt em `test_constellation.py` e `test_desktop_integration.py`.
+- **Mexer na UI:** `interface/desktop.py` (lógica e sessão) e `interface/dashboard.py` (skin). Estilo em `design_system.py`. Testes Qt em `test_constellation.py` e `test_desktop_integration.py`; orbe em `test_orb_geometry.py`, `test_orb_motion.py` e `test_orb_renderer.py` (print com `scripts/orb_snapshot.py`).
 - **Novo app aprovado ou nova rotina:** `autonomy/apps.py` (catálogo), `autonomy/routines.py`, `interface/autonomy_panel.py`. Lembre que mudar código invalida as concessões.
 - **Mexer na memória persistente:** `memory/supervised.py`, `memory/repository.py`, `memory/knowledge.py:MemoryPolicy`, contrato em `config/knowledge.py`.
 - **Inicialização e portas:** `scripts/Start-Therion.ps1`, `scripts/VoiceStartup.ps1`, `scripts/start-local-ollama.ps1`.

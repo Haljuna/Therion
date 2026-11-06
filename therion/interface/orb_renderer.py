@@ -121,6 +121,8 @@ class OrbGL(QOpenGLWidget):
         changed = state != self.state
         self.state = state
         self.animation.set_visual(state, intensity)
+        # Enquanto o modelo usa a placa (pensando/executando), a orbe desenha a 30 quadros/s.
+        self.timer.setInterval(frame_interval_ms(state))
         if self.reduced and changed:
             self.animation.advance(0., reduced=True)
             self.update()

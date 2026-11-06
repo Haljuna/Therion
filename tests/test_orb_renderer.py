@@ -130,3 +130,15 @@ def test_static_fallback_uses_new_shape(app):
     background = QColor('#09090F')
     lit = sum(img.pixelColor(x, y) != background for x in range(0, 300, 3) for y in range(0, 300, 3))
     assert lit > 500
+
+
+@gl
+def test_cadence_and_detail_follow_state_and_size(app):
+    from PySide6.QtCore import QRectF
+    from therion.interface.orb_renderer import OrbGL
+    w = OrbGL(); w.resize(600, 600); w.show(); w.set_active(True); settle(lambda: w.ready)
+    w.set_visual('thinking', 0); pump(.1); assert w.timer.interval() == 33
+    w.set_visual('idle', 0); pump(.1); assert w.timer.interval() == FRAME_INTERVAL_MS
+    w.focus_rect = QRectF(0, 0, 150, 150); pump(.2); assert w.current_detail() == 0
+    w.focus_rect = QRectF(0, 0, 500, 500); pump(.2); assert w.current_detail() == 1
+    w.close()
