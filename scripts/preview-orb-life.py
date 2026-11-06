@@ -25,7 +25,7 @@ def main():
     from PIL import Image
     import av
     from therion.interface.graphics import prepare_graphics
-    from therion.interface.constellation import ParticleGL
+    from therion.interface.orb_renderer import OrbGL as ParticleGL
     from therion.interface.presentation import LABELS
     prepare_graphics();app=QApplication([])
     window=QWidget();window.setWindowTitle('Therion · Prévia da presença')

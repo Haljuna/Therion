@@ -66,7 +66,7 @@ def normalized_level(value):
 class QualityController:
     """Ajuste por janelas estáveis; evita oscilar e nunca interfere na voz."""
     LEVELS = ('low', 'medium', 'high')
-    COUNTS = {'low': 12000, 'medium': 28000, 'high': 48000}
+    BLOOM_LEVELS = {'low': 1, 'medium': 2, 'high': 3}
 
     def __init__(self, requested='auto'):
         self.requested = requested

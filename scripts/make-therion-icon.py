@@ -6,7 +6,30 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageFilter
 
 sys.path.insert(0, str(__import__('pathlib').Path(__file__).resolve().parents[1]))
-from therion.interface.constellation import particle_data  # noqa: E402
+
+
+# Distribuição da orbe antiga, que gerou o ícone atual.
+def particle_data(count=48000):
+    """Mistura intercalada em todos os níveis: superfície, fitas e poeira exterior.
+
+    O prefixo de 12 mil mantém a mesma distribuição do nível alto, sem virar
+    uma casca vazia. As últimas quatro colunas são atributos dos shaders.
+    """
+    rng = np.random.default_rng(419)
+    y = rng.uniform(-.99, .99, count)
+    theta = rng.uniform(0, math.tau, count)
+    seed = rng.random(count)
+    kind = rng.choice([0.,1.,2.],count,p=[.72,.20,.08])
+    radius = rng.uniform(.975,1.015,count)
+    radius[kind==2] = rng.uniform(1.06,1.22,np.count_nonzero(kind==2))
+    band = rng.choice([-.28,.27],count)
+    thickness = rng.normal(0,.032,count)
+    ribbon = kind==1
+    y[ribbon] = band[ribbon]+.19*np.sin(theta[ribbon]*2)+.065*np.sin(theta[ribbon]*5)+thickness[ribbon]
+    ring = np.sqrt(np.maximum(.03,1-y*y))
+    glow = np.where(kind==2,.30, np.where(ribbon,.95,1.0))
+    return np.column_stack((ring*np.cos(theta)*radius,y*radius,
+                            ring*np.sin(theta)*radius,seed,kind,band,thickness,glow)).astype('float32')
 
 S = 1024
 OUT = str(__import__('pathlib').Path(__file__).resolve().parents[1] / 'therion' / 'assets')

@@ -89,29 +89,6 @@ def test_graphics_timing_preserves_surface_and_avoids_unbounded_rendering():
     finally: QSurfaceFormat.setDefaultFormat(original)
 
 
-def test_particle_layers_remain_distributed_at_every_quality():
-    from therion.interface.constellation import particle_data
-    data=particle_data(QualityController.COUNTS['high'])
-    assert data.shape==(48000,8) and data.dtype==np.float32
-    assert np.isfinite(data).all()
-    for count in QualityController.COUNTS.values():
-        subset=data[:count]
-        radii=np.linalg.norm(subset[:,:3],axis=1)
-        assert radii.min()>.96 and radii.max()<1.23
-        assert .68<np.mean(subset[:,4]==0)<.76
-        assert .16<np.mean(subset[:,4]==1)<.24
-        assert .05<np.mean(subset[:,4]==2)<.11
-
-
-def test_responsive_density_preserves_coverage_without_saturating_small_sphere():
-    from therion.interface.constellation import visible_particle_count
-    assert visible_particle_count('high',900,600)==48000
-    assert visible_particle_count('high',900,250)==12000
-    assert visible_particle_count('high',250,900)==12000
-    assert visible_particle_count('low',900,250)==3000
-    assert 0<visible_particle_count('low',0,0)<=12000
-
-
 def test_wav_envelope_preserves_silence_and_pauses(tmp_path):
     from therion.voice.envelope import wav_envelope
     path=tmp_path/'voice.wav'
