@@ -56,7 +56,7 @@ class OrbGL(QOpenGLWidget):
         fmt.setVersion(2, 1)
         fmt.setProfile(QSurfaceFormat.CompatibilityProfile)
         fmt.setSwapInterval(0)
-        fmt.setSamples(4)
+        fmt.setSamples(0)   # a cena tem MSAA própria (scene_ms); a janela só recebe quadros cheios
         self.setFormat(fmt)
         self.setMinimumSize(160, 160)
         self.quality = QualityController()
@@ -122,7 +122,10 @@ class OrbGL(QOpenGLWidget):
         self.state = state
         self.animation.set_visual(state, intensity)
         # Enquanto o modelo usa a placa (pensando/executando), a orbe desenha a 30 quadros/s.
-        self.timer.setInterval(frame_interval_ms(state))
+        # Só quando muda: setInterval reinicia o timer, e o painel chama isto a cada 50 ms.
+        interval = frame_interval_ms(state)
+        if self.timer.interval() != interval:
+            self.timer.setInterval(interval)
         if self.reduced and changed:
             self.animation.advance(0., reduced=True)
             self.update()

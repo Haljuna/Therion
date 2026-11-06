@@ -142,3 +142,22 @@ def test_cadence_and_detail_follow_state_and_size(app):
     w.focus_rect = QRectF(0, 0, 150, 150); pump(.2); assert w.current_detail() == 0
     w.focus_rect = QRectF(0, 0, 500, 500); pump(.2); assert w.current_detail() == 1
     w.close()
+
+
+@gl
+def test_repeated_state_polls_do_not_restart_the_frame_timer(app):
+    # O painel chama set_visual a cada 50 ms; reiniciar o timer derrubava os quadros/s.
+    from therion.interface.orb_renderer import OrbGL
+    w = OrbGL(); w.resize(300, 300); w.show(); w.set_active(True); settle(lambda: w.ready)
+    w.set_visual('thinking', 0)
+    timer_id = w.timer.timerId()
+    for _ in range(5):
+        w.set_visual('thinking', 0)
+    assert w.timer.timerId() == timer_id
+    w.close()
+
+
+def test_widget_framebuffer_has_no_extra_msaa(app):
+    # A cena já tem MSAA própria; a janela só recebe quadros cheios.
+    from therion.interface.orb_renderer import OrbGL
+    assert OrbGL().format().samples() == 0
