@@ -94,3 +94,39 @@ def test_reduced_motion_clears_trail_next_frame(app):
     w.reduced = True; w.update(); pump(.1)
     assert w.trail_cleared and w.animation.trail == 0
     w.close()
+
+
+def _mean_lit_color(img):
+    """Cor média dos pixels acesos perto do centro (ignora o fundo)."""
+    cx, cy = img.width()//2, img.height()//2
+    total, n = [0, 0, 0], 0
+    for x in range(cx-60, cx+61, 2):
+        for y in range(cy-60, cy+61, 2):
+            c = img.pixelColor(x, y)
+            if c.lightness() > 40:
+                total[0] += c.red(); total[1] += c.green(); total[2] += c.blue(); n += 1
+    assert n > 50
+    return [v/n for v in total]
+
+
+@gl
+def test_error_turns_the_orb_redder_and_dimmer_than_idle(app):
+    from therion.interface.orb_renderer import OrbGL
+    measured = {}
+    for state in ('idle', 'error'):
+        w = OrbGL(); w.resize(300, 300); w.show(); w.set_active(True); settle(lambda: w.ready)
+        w.set_visual(state, 0); pump(.8)
+        measured[state] = _mean_lit_color(w.grabFramebuffer()); w.close()
+    ratio = {s: r/b for s, (r, _, b) in measured.items()}
+    assert ratio['error'] > ratio['idle']+.07   # mistura de 30% da spec dá ~+0,09
+    assert sum(measured['error']) < sum(measured['idle'])
+
+
+def test_static_fallback_uses_new_shape(app):
+    from PySide6.QtGui import QColor
+    from therion.interface.constellation import StaticConstellation
+    s = StaticConstellation(); s.resize(300, 300)
+    img = s.grab().toImage()
+    background = QColor('#09090F')
+    lit = sum(img.pixelColor(x, y) != background for x in range(0, 300, 3) for y in range(0, 300, 3))
+    assert lit > 500

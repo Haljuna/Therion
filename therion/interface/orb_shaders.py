@@ -11,7 +11,7 @@ attribute vec2 rise;   // elevação desta ponta e da outra
 uniform float spin, clock, detailLevel, lineWidth, pointSize, aspect, fit;
 uniform float eye, tint, rim, flash, assembly, energy, relief;
 uniform vec2 center, viewport;
-varying float vGlow, vLight, vLayer, vSeed;
+varying float vGlow, vLight, vLayer, vSeed, vFlash;
 
 vec3 place(vec3 p, float lift) {
     float layer = meta.y;
@@ -53,16 +53,21 @@ void main() {
     vGlow = extra.x;
     vLayer = meta.y;
     vSeed = extra.y;
+    // Clarão: nasce no olho e alcança o que está perto do centro.
+    float r = length(p.xy);
+    vFlash = flash*3.*exp(-r*r/.08);
 }
 '''
 
 SCENE_FRAGMENT = '''
 #version 120
 uniform float isPoint, groupGain, eye, tint, rim, flash;
-varying float vGlow, vLight, vLayer, vSeed;
+varying float vGlow, vLight, vLayer, vSeed, vFlash;
 const vec3 BASE = vec3(.486, .302, 1.);    // #7C4DFF
 const vec3 EDGE = vec3(.788, .722, 1.);    // #C9B8FF
 const vec3 HOT = vec3(.957, .941, 1.);     // #F4F0FF
+const vec3 SPARK = vec3(.867, .922, 1.);   // #DDEBFF, clarão
+const vec3 ERROR = vec3(1., .420, .478);   // #FF6B7A
 void main() {
     float shape = 1.;
     if (isPoint > .5) {
@@ -72,7 +77,13 @@ void main() {
     }
     vec3 color = mix(BASE, EDGE, clamp(vGlow/1.2, 0., 1.));
     color = mix(color, HOT, clamp((vGlow-1.2)/.8, 0., 1.));
-    gl_FragColor = vec4(color*vGlow*vLight*shape*groupGain, 0.);
+    // Estado: olho segue o canal eye (0,7 = normal); erro escurece a 60% e avermelha 30%.
+    float gain = abs(vLayer-5.) < .5 ? eye/.7 : 1.-.4*tint;
+    if (abs(vLayer-1.) < .5) gain *= 1.+1.5*rim;   // aro acende com a voz ou pisca na espera
+    color = mix(color, ERROR, .3*tint);
+    color = mix(color, SPARK, .4*flash);           // a esfera esfria no clarão
+    float light = vGlow*vLight*shape*groupGain;
+    gl_FragColor = vec4(color*light*gain+SPARK*vFlash*light, 0.);
 }
 '''
 
