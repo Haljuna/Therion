@@ -10,6 +10,26 @@ SPEEDS = {
     'awaiting_confirmation': .3, 'clarification': .4,
     'error': .28, 'uncertain': .3, 'partial': 1.0,
 }
+# Segundos por volta da casca da orbe holográfica; 0 = parada.
+SPIN_SECONDS = {
+    'idle': 40, 'preparing': 20, 'listening': 120, 'transcribing': 12,
+    'thinking': 6, 'executing': 4, 'synthesizing': 20, 'speaking': 14,
+    'awaiting_confirmation': 90, 'clarification': 90, 'error': 0, 'uncertain': 0, 'partial': 40,
+}
+EYE_LEVELS = {'error': .25, 'uncertain': .25, 'partial': .55}
+THINKING_STATES = {'thinking', 'executing'}
+SPEECH_STATES = {'synthesizing', 'speaking'}
+WAITING_STATES = {'awaiting_confirmation', 'clarification'}
+_IDLE_RATE, _FAST_RATE = math.tau/40, math.tau/4
+FLASH_COOLDOWN = 4.
+ASSEMBLY_SECONDS = 1.2
+
+
+def spin_rate_for(state):
+    seconds = SPIN_SECONDS.get(state, 40)
+    return math.tau/seconds if seconds else 0.
+
+
 MODE_STATES = ({'listening'}, {'thinking','transcribing','executing'},
                {'awaiting_confirmation','clarification'}, {'error','uncertain'})
 ACTIVITY_STATES = ({'preparing'}, {'synthesizing'}, {'speaking'})
@@ -39,11 +59,17 @@ class OrbMotion:
         self.target_energy=0.; self._excitation=0.
         self.action=0.
         self.expression=list(EXPRESSIONS['idle'])
+        # Canais da orbe holográfica.
+        self.spin=0.; self.spin_rate=_IDLE_RATE; self.flash=0.; self.flash_ready_in=0.
+        self.tint=0.; self.assembly=1.; self.clock=0.; self._eye_base=.7
 
     def set_visual(self,state,intensity=0.):
         state=state if state in SPEEDS else 'idle'
         if state!=self.state:
             self._excitation=1.
+            if self.state in THINKING_STATES and state in SPEECH_STATES and self.flash_ready_in<=0:
+                self.flash=1.; self.flash_ready_in=FLASH_COOLDOWN
+            self.assembly=0. if state=='preparing' else 1.
             self.state=state
         reactive=state in {'listening','speaking'}
         self.target_energy=normalized_level(intensity) if reactive else 0.
@@ -58,6 +84,9 @@ class OrbMotion:
             self.action=float(self.state=='executing')
             self.expression=list(EXPRESSIONS[self.state])
             self.energy=self.tension=self.pulse=self._excitation=self.speed=0.
+            self.spin_rate=self.flash=0.; self.assembly=1.
+            self.tint=float(self.state in {'error','uncertain'})
+            self._eye_base=EYE_LEVELS.get(self.state,.7)
             return
         dt=min(.1,max(0.,float(seconds))) if math.isfinite(seconds) else 0.
         if dt<=0.: return
@@ -65,11 +94,19 @@ class OrbMotion:
         target=SPEEDS[self.state]; decay=math.exp(-dt/.3)
         self.phase+=target*dt+(self.speed-target)*.3*(1.-decay)
         self.speed=target+(self.speed-target)*decay
+        rate=spin_rate_for(self.state)
+        self.spin+=rate*dt+(self.spin_rate-rate)*.3*(1.-decay)
+        self.spin_rate=rate+(self.spin_rate-rate)*decay
+        self.clock+=dt
+        self.flash*=math.exp(-dt/.1); self.flash_ready_in-=dt
+        self.assembly=min(1.,self.assembly+dt/ASSEMBLY_SECONDS) if self.state=='preparing' else 1.
         blend=1.-math.exp(-dt/.11)
         self.mode=[a+(b-a)*blend for a,b in zip(self.mode,target_mode)]
         self.activity=[a+(b-a)*blend for a,b in zip(self.activity,target_activity)]
         self.action+=(float(self.state=='executing')-self.action)*blend
         self.expression=[a+(b-a)*blend for a,b in zip(self.expression,EXPRESSIONS[self.state])]
+        self.tint+=(float(self.state in {'error','uncertain'})-self.tint)*blend
+        self._eye_base+=(EYE_LEVELS.get(self.state,.7)-self._eye_base)*blend
         tau=.065 if self.target_energy>self.energy else .17
         audio_decay=math.exp(-dt/tau); inertia=math.exp(-dt/.12)
         old_energy=self.energy
@@ -85,3 +122,19 @@ class OrbMotion:
     @property
     def presence(self):
         return (*self.activity,self.pulse)
+
+    @property
+    def trail(self):
+        return max(0.,min(1.,(self.spin_rate-_IDLE_RATE)/(_FAST_RATE-_IDLE_RATE)))
+
+    @property
+    def rim(self):
+        if self.state=='listening': return self.energy
+        if self.state in WAITING_STATES: return .5+.5*math.sin(math.pi*self.clock)
+        return 0.
+
+    @property
+    def eye(self):
+        speaking,synthesizing=self.activity[2],self.activity[1]
+        return (self._eye_base+.5*self.energy*speaking
+                +.15*math.sin(math.tau*self.clock/2.5)*synthesizing)

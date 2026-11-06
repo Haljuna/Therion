@@ -132,3 +132,76 @@ def test_expression_transition_is_cadence_independent_and_reduced_motion_is_stil
     run(motion,1,reduced=True)
     assert motion.phase==phase and motion.energy==0
     assert motion.expression==list(EXPRESSIONS['listening'])
+
+
+# Canais da orbe holográfica.
+from therion.interface.orb_motion import SPIN_SECONDS
+
+
+def test_spin_follows_spec_seconds_per_turn():
+    for state, seconds in (('idle', 40), ('thinking', 6), ('executing', 4), ('listening', 120)):
+        m = OrbMotion(); m.set_visual(state); run(m, 3)
+        assert m.spin_rate == pytest.approx(2*math.pi/seconds, rel=.01)
+        assert SPIN_SECONDS[state] == seconds
+    m = OrbMotion(); m.set_visual('error'); run(m, 3)
+    assert m.spin_rate == pytest.approx(0, abs=1e-3)
+
+
+def test_trail_grows_with_speed():
+    vals = []
+    for state in ('idle', 'thinking', 'executing'):
+        m = OrbMotion(); m.set_visual(state); run(m, 3); vals.append(m.trail)
+    assert vals[0] == pytest.approx(0, abs=.01) and vals[0] < vals[1] < vals[2]
+    assert vals[2] == pytest.approx(1, abs=.01)
+
+
+def test_flash_only_on_think_to_speak_and_at_most_every_four_seconds():
+    m = OrbMotion(); m.set_visual('idle'); run(m, 5)
+    m.set_visual('speaking'); assert m.flash == 0
+    m.set_visual('thinking'); run(m, 1); m.set_visual('speaking'); assert m.flash == 1
+    run(m, .3); assert m.flash < .06
+    for _ in range(4):
+        m.set_visual('thinking'); run(m, .25); m.set_visual('speaking'); assert m.flash < .06; run(m, .25)
+    run(m, 2); m.set_visual('executing'); run(m, .1); m.set_visual('synthesizing')
+    assert m.flash == 1
+
+
+def test_rim_tracks_voice_while_listening_and_blinks_while_waiting():
+    m = OrbMotion(); m.set_visual('listening', .8); run(m, .5)
+    assert m.rim == pytest.approx(m.energy)
+    m.set_visual('awaiting_confirmation'); seen = []
+    for _ in range(120):
+        m.advance(1/60); seen.append(m.rim)
+    assert min(seen) < .1 and max(seen) > .9
+    m.set_visual('idle'); run(m, .1); assert m.rim == 0
+
+
+def test_eye_and_tint_targets():
+    for state, eye, tint in (('idle', .7, 0), ('error', .25, 1), ('partial', .55, 0)):
+        m = OrbMotion(); m.set_visual(state); run(m, 1)
+        assert m.eye == pytest.approx(eye, abs=.01) and m.tint == pytest.approx(tint, abs=.01)
+    m = OrbMotion(); m.set_visual('speaking', 1); run(m, 1)
+    assert m.eye == pytest.approx(1.2, abs=.02)
+
+
+def test_assembly_plays_during_preparing():
+    m = OrbMotion(); m.set_visual('preparing'); run(m, .6); assert .4 < m.assembly < .6
+    run(m, 1); assert m.assembly == 1
+    m.set_visual('idle'); assert m.assembly == 1
+
+
+def test_reduced_motion_has_no_spin_trail_or_flash():
+    m = OrbMotion(); m.set_visual('thinking'); run(m, 1); m.set_visual('speaking')
+    spin = m.spin; run(m, 1, reduced=True)
+    assert m.spin == spin and m.spin_rate == m.trail == m.flash == 0 and m.assembly == 1
+    m.set_visual('error'); run(m, .1, reduced=True)
+    assert m.tint == 1 and m.eye == .25
+
+
+def test_new_channels_are_frame_rate_independent():
+    out = []
+    for rate in (30, 60, 120):
+        m = OrbMotion(); m.set_visual('thinking'); run(m, 1, rate); m.set_visual('speaking', .6); run(m, 1, rate)
+        out.append((m.spin, m.spin_rate, m.trail, m.flash, m.eye))
+    for s in out[1:]:
+        assert s == pytest.approx(out[0], abs=1e-6)
