@@ -195,14 +195,16 @@ class OrbGL(QOpenGLWidget):
         uniform('viewport', width, height)
         uniform('eye', a.eye); uniform('tint', a.tint); uniform('rim', a.rim)
         uniform('flash', a.flash); uniform('assembly', a.assembly); uniform('energy', a.energy)
+        uniform('relief', 0. if self.reduced else a.relief)
         for name, mode in (('surfaces', _TRIANGLES), ('lines', _TRIANGLES), ('points', _POINTS)):
             buffer, count = self.buffers[name]
             uniform('isPoint', mode == _POINTS)
             buffer.bind()
-            for attr, offset, size in (('position', 0, 3), ('other', 12, 3), ('meta', 24, 4), ('extra', 40, 2)):
+            for attr, offset, size in (('position', 0, 3), ('other', 12, 3), ('meta', 24, 4),
+                                       ('extra', 40, 2), ('rise', 48, 2)):
                 p.enableAttributeArray(attr); p.setAttributeBuffer(attr, _GL_FLOAT, offset, size, STRIDE)
             gl.glDrawArrays(mode, 0, count)
-            for attr in ('position', 'other', 'meta', 'extra'):
+            for attr in ('position', 'other', 'meta', 'extra', 'rise'):
                 p.disableAttributeArray(attr)
             buffer.release()
         p.release()

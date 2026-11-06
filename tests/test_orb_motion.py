@@ -205,3 +205,13 @@ def test_new_channels_are_frame_rate_independent():
         out.append((m.spin, m.spin_rate, m.trail, m.flash, m.eye))
     for s in out[1:]:
         assert s == pytest.approx(out[0], abs=1e-6)
+
+
+def test_relief_amplitude_follows_state_and_voice():
+    for state, value in (('idle', .3), ('thinking', .6), ('executing', .8),
+                         ('awaiting_confirmation', .15), ('error', 0)):
+        m = OrbMotion(); m.set_visual(state); run(m, 1)
+        assert m.relief == pytest.approx(value, abs=.01)
+    m = OrbMotion(); m.set_visual('listening', .8); run(m, 1)
+    assert m.relief == pytest.approx(.3+.6*m.energy, abs=.01)
+    run(m, .5, reduced=True); assert m.relief == 0

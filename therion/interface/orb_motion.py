@@ -16,6 +16,11 @@ SPIN_SECONDS = {
     'thinking': 6, 'executing': 4, 'synthesizing': 20, 'speaking': 14,
     'awaiting_confirmation': 90, 'clarification': 90, 'error': 0, 'uncertain': 0, 'partial': 40,
 }
+RELIEF_LEVELS = {
+    'idle': .3, 'preparing': .5, 'listening': .3, 'transcribing': .5, 'thinking': .6,
+    'executing': .8, 'synthesizing': .4, 'speaking': .4, 'awaiting_confirmation': .15,
+    'clarification': .15, 'error': 0., 'uncertain': 0., 'partial': .3,
+}
 EYE_LEVELS = {'error': .25, 'uncertain': .25, 'partial': .55}
 THINKING_STATES = {'thinking', 'executing'}
 SPEECH_STATES = {'synthesizing', 'speaking'}
@@ -62,6 +67,7 @@ class OrbMotion:
         # Canais da orbe holográfica.
         self.spin=0.; self.spin_rate=_IDLE_RATE; self.flash=0.; self.flash_ready_in=0.
         self.tint=0.; self.assembly=1.; self.clock=0.; self._eye_base=.7
+        self._relief_base=RELIEF_LEVELS['idle']
 
     def set_visual(self,state,intensity=0.):
         state=state if state in SPEEDS else 'idle'
@@ -87,6 +93,7 @@ class OrbMotion:
             self.spin_rate=self.flash=0.; self.assembly=1.
             self.tint=float(self.state in {'error','uncertain'})
             self._eye_base=EYE_LEVELS.get(self.state,.7)
+            self._relief_base=0.
             return
         dt=min(.1,max(0.,float(seconds))) if math.isfinite(seconds) else 0.
         if dt<=0.: return
@@ -107,6 +114,7 @@ class OrbMotion:
         self.expression=[a+(b-a)*blend for a,b in zip(self.expression,EXPRESSIONS[self.state])]
         self.tint+=(float(self.state in {'error','uncertain'})-self.tint)*blend
         self._eye_base+=(EYE_LEVELS.get(self.state,.7)-self._eye_base)*blend
+        self._relief_base+=(RELIEF_LEVELS[self.state]-self._relief_base)*blend
         tau=.065 if self.target_energy>self.energy else .17
         audio_decay=math.exp(-dt/tau); inertia=math.exp(-dt/.12)
         old_energy=self.energy
@@ -138,3 +146,8 @@ class OrbMotion:
         speaking,synthesizing=self.activity[2],self.activity[1]
         return (self._eye_base+.5*self.energy*speaking
                 +.15*math.sin(math.tau*self.clock/2.5)*synthesizing)
+
+    @property
+    def relief(self):
+        """Amplitude da respiração das placas elevadas."""
+        return self._relief_base+.6*self.energy

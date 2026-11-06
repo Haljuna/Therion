@@ -7,13 +7,17 @@ attribute vec3 position;
 attribute vec3 other;
 attribute vec4 meta;
 attribute vec2 extra;
+attribute vec2 rise;   // elevação desta ponta e da outra
 uniform float spin, clock, detailLevel, lineWidth, pointSize, aspect, fit;
-uniform float eye, tint, rim, flash, assembly, energy;
+uniform float eye, tint, rim, flash, assembly, energy, relief;
 uniform vec2 center, viewport;
 varying float vGlow, vLight, vLayer, vSeed;
 
-vec3 place(vec3 p) {
+vec3 place(vec3 p, float lift) {
     float layer = meta.y;
+    // Placas elevadas respiram: ±35% da altura, fase e ritmo próprios.
+    float breath = 1.+relief*.35*sin(clock*6.283*(.25+extra.y*.35)+extra.y*6.283);
+    p += normalize(p+vec3(1e-6))*lift*breath;
     float grow = smoothstep(extra.y*.6, extra.y*.6+.4, assembly);
     p = mix(p*.05, p, grow);
     float a = spin*meta.z;
@@ -36,9 +40,9 @@ vec2 project(vec3 p) {
 }
 
 void main() {
-    vec3 p = place(position);
+    vec3 p = place(position, rise.x);
     vec2 a = project(p);
-    vec2 d = (project(place(other))-a)*viewport*.5;
+    vec2 d = (project(place(other, rise.y))-a)*viewport*.5;
     vec2 n = length(d) > 1e-4 ? normalize(vec2(-d.y, d.x)) : vec2(0.);
     gl_Position = vec4(a+n*meta.x*lineWidth/viewport, 0., 1.);
     gl_PointSize = pointSize*(.7+extra.y*.6);

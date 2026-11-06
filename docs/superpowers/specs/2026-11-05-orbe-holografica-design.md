@@ -155,3 +155,15 @@ Cada etapa termina com print ou folha de quadros lado a lado com o GIF, e o usu�
 
 Branch própria (`orbe-holografica`) a partir da master. A tentativa anterior não commitada
 (`constellation.py`, `presentation.py`, `tests/test_constellation.py`) é descartada.
+
+## Acréscimo (2026-11-05, após a etapa 1)
+
+Pedido do usuário: algumas peças mais altas, para dar impressão 3D, mexendo bem pouco como sinal de vida,
+conforme a situação.
+
+- Relevo: ~25% das placas da casca ficam elevadas, com altura de 0,03 a 0,10 (topo, contorno do topo,
+  quinas verticais e paredes laterais fracas). Raio máximo continua ≤ 1,2.
+- Vida: a altura de cada placa elevada oscila ±35% com fase e ritmo próprios (0,25 a 0,6 Hz).
+- A amplitude depende do estado (canal `relief` em `OrbMotion`): idle 0,3; preparing 0,5; listening 0,3 + 0,6×voz;
+  transcribing 0,5; thinking 0,6; executing 0,8; synthesizing 0,4; speaking 0,4 + 0,6×voz; espera 0,15;
+  erro/incerto 0; partial 0,3. "Reduzir movimento": sem oscilação.

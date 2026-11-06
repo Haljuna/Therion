@@ -1,7 +1,7 @@
 """Forma da orbe holográfica: camadas, limites e nível de detalhe."""
 import numpy as np
 import pytest
-from therion.interface.orb_geometry import (build_orb, shell_plates, VERTEX_FLOATS,
+from therion.interface.orb_geometry import (build_orb, shell_plates, raised_heights, VERTEX_FLOATS,
     ANTENNA, CAGE, SHELL, CORE, GYRO, EYE, SPARKS)
 
 
@@ -54,3 +54,26 @@ def test_build_is_deterministic():
     a, b = build_orb(), build_orb()
     assert all(np.array_equal(x, y) for x, y in
                zip((a.surfaces, a.lines, a.points), (b.surfaces, b.lines, b.points)))
+
+
+def test_some_plates_are_raised_within_the_sphere():
+    h = raised_heights()
+    assert len(h) == len(shell_plates())
+    assert .2 <= np.mean(h > 0) <= .3
+    assert h[h > 0].min() >= .03 and h.max() <= .10
+    mesh = build_orb()
+    assert VERTEX_FLOATS == 14
+    allv = np.vstack((mesh.surfaces, mesh.lines, mesh.points))
+    lifted = np.linalg.norm(allv[:, :3], axis=1)+np.maximum(allv[:, 12], allv[:, 13])*1.35
+    assert lifted.max() <= 1.2
+    walls = mesh.lines[(mesh.lines[:, 7] == SHELL) & (mesh.lines[:, 12] != mesh.lines[:, 13])]
+    assert len(walls) > 0   # quinas verticais ligam a base ao topo
+
+
+def test_raised_plate_shares_one_seed_so_it_moves_as_a_block():
+    mesh = build_orb()
+    top = mesh.lines[(mesh.lines[:, 7] == SHELL) & (mesh.lines[:, 12] > 0) & (mesh.lines[:, 13] > 0)]
+    seeds_per_height = {}
+    for row in top:
+        seeds_per_height.setdefault(round(float(row[12]), 6), set()).add(round(float(row[11]), 6))
+    assert all(len(seeds) == 1 for seeds in seeds_per_height.values())

@@ -1,14 +1,15 @@
 """Forma da orbe holográfica em camadas. Apenas numpy; sem OpenGL.
 
 Raio da esfera = 1. Cada vértice tem 12 floats:
-x,y,z, ox,oy,oz (outra ponta da linha), side, layer, spin, detail, glow, seed.
+x,y,z, ox,oy,oz (outra ponta da linha), side, layer, spin, detail, glow, seed,
+lift, olift (elevação da ponta e da outra ponta, para as placas em relevo).
 """
 import math
 from dataclasses import dataclass
 import numpy as np
 
 ANTENNA, CAGE, SHELL, CORE, GYRO, EYE, SPARKS = range(7)
-VERTEX_FLOATS = 12
+VERTEX_FLOATS = 14
 SHELL_RADIUS = .96
 _STEP = math.radians(3)        # curvas: no máximo 3° por segmento
 _FILL_STEP = math.radians(6)
@@ -37,10 +38,11 @@ def _arc_xy(r, a0, a1, center=(0., 0., 0.)):
     return np.column_stack((r*np.cos(a), r*np.sin(a), np.zeros_like(a)))+center
 
 
-def _rows(pos, other, side, layer, spin, detail, glow, seed):
+def _rows(pos, other, side, layer, spin, detail, glow, seed, lift=0., olift=0.):
     n = len(pos)
     col = lambda v: np.broadcast_to(np.asarray(v, float), (n,))
-    return np.column_stack((pos, other, col(side), col(layer), col(spin), col(detail), col(glow), col(seed)))
+    return np.column_stack((pos, other, col(side), col(layer), col(spin), col(detail), col(glow), col(seed),
+                            col(lift), col(olift)))
 
 
 class _Builder:
@@ -48,22 +50,25 @@ class _Builder:
         self.rng = rng
         self.surfaces, self.lines, self.points = [], [], []
 
-    def line(self, pts, layer, spin, detail=0, glow=1.):
+    def line(self, pts, layer, spin, detail=0, glow=1., lift=0., seed=None):
         """Polilinha → 6 vértices por segmento. A ponta final guarda side invertido,
         porque a direção (outra - posição) se inverte e o shader usa a mesma normal."""
         pts = np.asarray(pts, float)
         g = np.broadcast_to(np.asarray(glow, float), (len(pts),))
-        p0, p1, g0, g1 = pts[:-1], pts[1:], g[:-1], g[1:]
-        seed = self.rng.random(len(p0))
-        corners = ((p0, p1, -1, g0), (p0, p1, 1, g0), (p1, p0, 1, g1),
-                   (p1, p0, 1, g1), (p0, p1, 1, g0), (p1, p0, -1, g1))
-        quad = [_rows(pos, other, side, layer, spin, detail, gl, seed) for pos, other, side, gl in corners]
+        h = np.broadcast_to(np.asarray(lift, float), (len(pts),))
+        p0, p1, g0, g1, h0, h1 = pts[:-1], pts[1:], g[:-1], g[1:], h[:-1], h[1:]
+        seed = self.rng.random(len(p0)) if seed is None else seed
+        near, far = (p0, p1, g0, h0, h1), (p1, p0, g1, h1, h0)
+        corners = ((near, -1), (near, 1), (far, 1), (far, 1), (near, 1), (far, -1))
+        quad = [_rows(pos, other, side, layer, spin, detail, gl, seed, hp, ho)
+                for (pos, other, gl, hp, ho), side in corners]
         self.lines.append(np.stack(quad, axis=1).reshape(-1, VERTEX_FLOATS))
 
-    def triangles(self, tri, layer, spin, detail=0, glow=.1):
+    def triangles(self, tri, layer, spin, detail=0, glow=.1, lift=0., seed=None):
         tri = np.asarray(tri, float).reshape(-1, 3)
-        seed = np.repeat(self.rng.random(len(tri)//3), 3)
-        self.surfaces.append(_rows(tri, tri, 0, layer, spin, detail, glow, seed))
+        seed = np.repeat(self.rng.random(len(tri)//3), 3) if seed is None else seed
+        lift = np.asarray(lift, float).reshape(-1) if np.ndim(lift) else lift
+        self.surfaces.append(_rows(tri, tri, 0, layer, spin, detail, glow, seed, lift, lift))
 
     def dots(self, pos, layer, spin, detail, glow):
         self.points.append(_rows(pos, pos, 0, layer, spin, detail, glow, self.rng.random(len(pos))))
@@ -95,25 +100,53 @@ def shell_plates(seed: int = 419) -> np.ndarray:
     return np.array(plates)
 
 
+def raised_heights(seed: int = 419) -> np.ndarray:
+    """Altura de cada placa de shell_plates; 0 = rente à casca. ~25% elevadas."""
+    n = len(shell_plates(seed))
+    rng = np.random.default_rng(seed+1)
+    heights = np.zeros(n)
+    chosen = rng.choice(n, round(.25*n), replace=False)
+    heights[chosen] = rng.uniform(.03, .10, len(chosen))
+    return heights
+
+
+def _raise(b, outline, corners, h, seed):
+    """Topo elevado: contorno no alto, quinas verticais e paredes fracas."""
+    b.line(outline, SHELL, 1., lift=h, seed=seed)
+    for c in corners:
+        b.line([c, c], SHELL, 1., glow=.8, lift=[0., h], seed=seed)
+    base, top = outline[:-1], outline[1:]
+    wall = np.stack((base, base, top, top, base, top), axis=1)
+    lift = np.tile([0., h, 0., 0., h, h], len(base))
+    b.triangles(wall, SHELL, 1., glow=.06, lift=lift, seed=seed)
+
+
 def _shell(b, rng, seed):
     r = SHELL_RADIUS
-    for lat0, lat1, lon0, lon1 in shell_plates(seed):
+    for (lat0, lat1, lon0, lon1), h in zip(shell_plates(seed), raised_heights(seed)):
+        plate_seed = rng.random()
+        own = plate_seed if h else None
         dlon = np.mod(lon1-lon0, _TAU); lon1 = lon0+dlon
         top = np.linspace(lon0, lon1, _steps(dlon)); side = np.linspace(lat1, lat0, _steps(lat1-lat0))
         outline = np.vstack((_sphere(r, lat1, top), _sphere(r, side, lon1),
                              _sphere(r, lat0, top[::-1]), _sphere(r, side[::-1], lon0)))
-        b.line(outline, SHELL, 1.)
+        if h:
+            corners = _sphere(r, [lat1, lat1, lat0, lat0], [lon0, lon1, lon1, lon0])
+            _raise(b, outline, corners, h, plate_seed)
+        else:
+            b.line(outline, SHELL, 1.)
         la = np.linspace(lat0, lat1, _steps(lat1-lat0, _FILL_STEP))
         lo = np.linspace(lon0, lon1, _steps(dlon, _FILL_STEP))
         grid = _sphere(r, la[:, None], lo[None, :]).reshape(len(la), len(lo), 3)
         a, c, d, e = grid[:-1, :-1], grid[1:, :-1], grid[:-1, 1:], grid[1:, 1:]
-        b.triangles(np.stack((a, c, d, d, c, e), axis=2), SHELL, 1., glow=rng.uniform(.10, .18))
+        b.triangles(np.stack((a, c, d, d, c, e), axis=2), SHELL, 1., glow=rng.uniform(.10, .18),
+                    lift=h, seed=own)
         if rng.random() < .3:
             if rng.random() < .5:
-                b.line(_sphere(r, side, lon0+dlon/2), SHELL, 1., detail=1)
+                b.line(_sphere(r, side, lon0+dlon/2), SHELL, 1., detail=1, lift=h, seed=own)
             else:
                 for f in (1/3, 2/3):
-                    b.line(_sphere(r, lat0+(lat1-lat0)*f, top), SHELL, 1., detail=1)
+                    b.line(_sphere(r, lat0+(lat1-lat0)*f, top), SHELL, 1., detail=1, lift=h, seed=own)
 
 
 def _cage(b):
