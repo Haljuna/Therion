@@ -2,20 +2,25 @@
 import math
 import time
 import numpy as np
-from PySide6.QtCore import Qt, QTimer, Signal, QRectF
+from PySide6.QtCore import Qt, QTimer, Signal, QRectF, QSize
 from PySide6.QtGui import QSurfaceFormat
 from PySide6.QtOpenGLWidgets import QOpenGLWidget
-from PySide6.QtOpenGL import QOpenGLBuffer, QOpenGLShader, QOpenGLShaderProgram
+from PySide6.QtOpenGL import (QOpenGLBuffer, QOpenGLShader, QOpenGLShaderProgram,
+                             QOpenGLFramebufferObject, QOpenGLFramebufferObjectFormat)
 from .graphics import FRAME_INTERVAL_MS
 from .orb_geometry import build_orb, VERTEX_FLOATS
 from .orb_motion import OrbMotion, THINKING_STATES
-from .orb_shaders import SCENE_VERTEX, SCENE_FRAGMENT, QUAD_VERTEX, BLOOM_FRAGMENT
+from .orb_shaders import (SCENE_VERTEX, SCENE_FRAGMENT, QUAD_VERTEX, BLOOM_FRAGMENT,
+                          BLUR_FRAGMENT, COMPOSITE_FRAGMENT)
 from .presentation import QualityController
 from .scene_motion import SceneMotion
 
 THINKING_INTERVAL_MS = 33
 STRIDE = VERTEX_FLOATS*4
 _GL_FLOAT, _TRIANGLES, _POINTS, _STRIP = 0x1406, 0x0004, 0x0000, 0x0005
+_TEXTURE_2D, _LINEAR, _CLAMP = 0x0DE1, 0x2601, 0x812F
+GLOW_WEIGHTS = (.55, .45, .35)
+GROUP_GAIN = {'surfaces': .45, 'lines': .85, 'points': 1.}
 
 
 def line_width_px(orb_px: float) -> float:
@@ -57,7 +62,9 @@ class OrbGL(QOpenGLWidget):
         self.reduced = False
         self.ready = False
         self.disabled = False
-        self.program = self.bloom = self.quad = None
+        self.program = self.bloom = self.quad = self.blur = self.composite = None
+        self.scene_ms = self.scene_fbo = None
+        self._chain = []   # pares (temporário, saída) por escala de brilho
         self.buffers = {}
         self.failure_detail = ''
         self.last_frame = None
@@ -72,6 +79,8 @@ class OrbGL(QOpenGLWidget):
             self.gl = self.context().functions()
             self.program = self._program(SCENE_VERTEX, SCENE_FRAGMENT)
             self.bloom = self._program(QUAD_VERTEX, BLOOM_FRAGMENT)
+            self.blur = self._program(QUAD_VERTEX, BLUR_FRAGMENT)
+            self.composite = self._program(QUAD_VERTEX, COMPOSITE_FRAGMENT)
             mesh = build_orb()
             for name in ('surfaces', 'lines', 'points'):
                 data = getattr(mesh, name)
@@ -152,15 +161,88 @@ class OrbGL(QOpenGLWidget):
         width = max(1, round(self.width()*self.devicePixelRatioF()))
         height = max(1, round(self.height()*self.devicePixelRatioF()))
         gl = self.gl
-        gl.glViewport(0, 0, width, height)
-        gl.glClearColor(9/255, 9/255, 15/255, 1.); gl.glClear(0x4000)
-        gl.glEnable(0x0BE2)   # GL_BLEND
-        gl.glBlendFunc(1, 1)  # emissão aditiva: ONE, ONE
+        levels = bloom_levels(self.quality.level, self.state)
+        self._ensure_targets(width, height, levels)
         gl.glEnable(0x8642)   # tamanho de ponto programável
         gl.glEnable(0x8861)   # point sprites (contexto de compatibilidade)
-        self._aura(width, height)
+        # 1. Cena num FBO com MSAA, resolvida para uma textura.
+        self.scene_ms.bind()
+        gl.glViewport(0, 0, width, height)
+        gl.glClearColor(0., 0., 0., 1.); gl.glClear(0x4000)
+        gl.glEnable(0x0BE2); gl.glBlendFunc(1, 1)   # emissão aditiva: ONE, ONE
         self._scene(width, height)
         gl.glDisable(0x0BE2)
+        QOpenGLFramebufferObject.blitFramebuffer(self.scene_fbo, self.scene_ms)
+        # 2. Brilho: cada escala desfoca a anterior (1/2, 1/4, 1/8).
+        source = self.scene_fbo
+        for temp, out in self._chain:
+            self._blur_pass(source, temp, (1./source.width(), 0.))
+            self._blur_pass(temp, out, (0., 1./temp.height()))
+            source = out
+        # 3. Fundo, halo e chão; depois cena e brilho somados.
+        gl.glBindFramebuffer(0x8D40, self.defaultFramebufferObject())
+        gl.glViewport(0, 0, width, height)
+        gl.glClearColor(9/255, 9/255, 15/255, 1.); gl.glClear(0x4000)
+        gl.glEnable(0x0BE2); gl.glBlendFunc(1, 1)
+        self._aura(width, height)
+        self._composite()
+        gl.glDisable(0x0BE2)
+
+    def bloom_chain_sizes(self):
+        return [out.size() for _, out in self._chain]
+
+    def _target(self, size, samples=0):
+        fmt = QOpenGLFramebufferObjectFormat(); fmt.setSamples(samples)
+        fbo = QOpenGLFramebufferObject(size, fmt)
+        if not samples:
+            gl = self.gl
+            gl.glBindTexture(_TEXTURE_2D, fbo.texture())
+            for name, value in ((0x2801, _LINEAR), (0x2800, _LINEAR), (0x2802, _CLAMP), (0x2803, _CLAMP)):
+                gl.glTexParameteri(_TEXTURE_2D, name, value)
+            gl.glBindTexture(_TEXTURE_2D, 0)
+        return fbo
+
+    def _ensure_targets(self, width, height, levels):
+        size = QSize(width, height)
+        if self.scene_fbo is None or self.scene_fbo.size() != size:
+            self.scene_ms = self._target(size, 4)
+            self.scene_fbo = self._target(size)
+            self._chain = []
+        if len(self._chain) != levels:
+            self._chain = []
+            for i in range(1, levels+1):
+                small = QSize(max(1, round(width/2**i)), max(1, round(height/2**i)))
+                self._chain.append((self._target(small), self._target(small)))
+
+    def _quad(self, program):
+        self.quad.bind()
+        program.enableAttributeArray('position'); program.setAttributeBuffer('position', _GL_FLOAT, 0, 2, 8)
+        self.gl.glDrawArrays(_STRIP, 0, 4)
+        program.disableAttributeArray('position'); self.quad.release()
+
+    def _blur_pass(self, source, target, step):
+        gl = self.gl; b = self.blur
+        target.bind(); gl.glViewport(0, 0, target.width(), target.height())
+        b.bind()
+        gl.glActiveTexture(0x84C0); gl.glBindTexture(_TEXTURE_2D, source.texture())
+        gl.glUniform1i(b.uniformLocation('image'), 0)
+        gl.glUniform2f(b.uniformLocation('step'), *step)
+        self._quad(b); b.release()
+
+    def _composite(self):
+        gl = self.gl; c = self.composite
+        c.bind()
+        textures = [self.scene_fbo.texture()]+[out.texture() for _, out in self._chain]
+        textures += [self.scene_fbo.texture()]*(4-len(textures))
+        for unit, (name, texture) in enumerate(zip(('scene', 'glow0', 'glow1', 'glow2'), textures)):
+            gl.glActiveTexture(0x84C0+unit); gl.glBindTexture(_TEXTURE_2D, texture)
+            gl.glUniform1i(c.uniformLocation(name), unit)
+        weights = [w if i < len(self._chain) else 0. for i, w in enumerate(GLOW_WEIGHTS)]
+        gl.glUniform3f(c.uniformLocation('weights'), *weights)
+        self._quad(c); c.release()
+        for unit in range(4):
+            gl.glActiveTexture(0x84C0+unit); gl.glBindTexture(_TEXTURE_2D, 0)
+        gl.glActiveTexture(0x84C0)
 
     def _aura(self, width, height):
         """Halo e reflexo no chão (sem textura nesta etapa)."""
@@ -198,7 +280,7 @@ class OrbGL(QOpenGLWidget):
         uniform('relief', 0. if self.reduced else a.relief)
         for name, mode in (('surfaces', _TRIANGLES), ('lines', _TRIANGLES), ('points', _POINTS)):
             buffer, count = self.buffers[name]
-            uniform('isPoint', mode == _POINTS)
+            uniform('isPoint', mode == _POINTS); uniform('groupGain', GROUP_GAIN[name])
             buffer.bind()
             for attr, offset, size in (('position', 0, 3), ('other', 12, 3), ('meta', 24, 4),
                                        ('extra', 40, 2), ('rise', 48, 2)):
@@ -231,6 +313,7 @@ class OrbGL(QOpenGLWidget):
             if buffer is not None:
                 buffer.destroy()
         self.buffers = {}; self.quad = None
-        self.program = self.bloom = None
+        self.scene_ms = self.scene_fbo = None; self._chain = []
+        self.program = self.bloom = self.blur = self.composite = None
         self.doneCurrent()
         self.gl = None

@@ -58,7 +58,7 @@ void main() {
 
 SCENE_FRAGMENT = '''
 #version 120
-uniform float isPoint, eye, tint, rim, flash;
+uniform float isPoint, groupGain, eye, tint, rim, flash;
 varying float vGlow, vLight, vLayer, vSeed;
 const vec3 BASE = vec3(.486, .302, 1.);    // #7C4DFF
 const vec3 EDGE = vec3(.788, .722, 1.);    // #C9B8FF
@@ -72,7 +72,7 @@ void main() {
     }
     vec3 color = mix(BASE, EDGE, clamp(vGlow/1.2, 0., 1.));
     color = mix(color, HOT, clamp((vGlow-1.2)/.8, 0., 1.));
-    gl_FragColor = vec4(color*vGlow*vLight*shape, 0.);
+    gl_FragColor = vec4(color*vGlow*vLight*shape*groupGain, 0.);
 }
 '''
 
@@ -110,7 +110,38 @@ void main() {
     vec2 haloUV=(uv-anchor.xy)*vec2(params.w,1.)/scale;
     float halo = exp(-dot(haloUV,haloUV)*16.0);
     float breathing = 1.0 + aura.z * .10 * sin(aura.x * .95) + aura.y * .20 + aura.w * .08;
-    gl_FragColor=vec4(c*params.z + vec3(.014,.007,.030)*floorGlow*breathing
-                      + vec3(.020,.010,.044)*halo*breathing,0.);
+    // Halo e chão no violeta da orbe (#7C4DFF).
+    gl_FragColor=vec4(c*params.z + vec3(.0146,.0091,.030)*floorGlow*breathing
+                      + vec3(.0214,.0133,.044)*halo*breathing,0.);
+}
+'''
+
+# Desfoque gaussiano separável de 9 amostras; step = (1/largura, 0) ou (0, 1/altura).
+BLUR_FRAGMENT = '''
+#version 120
+uniform sampler2D image;
+uniform vec2 step;
+varying vec2 uv;
+void main() {
+    vec3 c = texture2D(image, uv).rgb*.227027;
+    c += (texture2D(image, uv+step).rgb+texture2D(image, uv-step).rgb)*.1945946;
+    c += (texture2D(image, uv+step*2.).rgb+texture2D(image, uv-step*2.).rgb)*.1216216;
+    c += (texture2D(image, uv+step*3.).rgb+texture2D(image, uv-step*3.).rgb)*.054054;
+    c += (texture2D(image, uv+step*4.).rgb+texture2D(image, uv-step*4.).rgb)*.016216;
+    gl_FragColor = vec4(c, 1.);
+}
+'''
+
+# Cena + brilho em até 3 escalas, somados ao fundo (halo e chão já desenhados).
+COMPOSITE_FRAGMENT = '''
+#version 120
+uniform sampler2D scene, glow0, glow1, glow2;
+uniform vec3 weights;
+varying vec2 uv;
+void main() {
+    vec3 c = texture2D(scene, uv).rgb;
+    c += texture2D(glow0, uv).rgb*weights.x+texture2D(glow1, uv).rgb*weights.y
+         +texture2D(glow2, uv).rgb*weights.z;
+    gl_FragColor = vec4(c, 1.);
 }
 '''

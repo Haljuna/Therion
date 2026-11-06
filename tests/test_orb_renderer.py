@@ -65,3 +65,15 @@ def test_cleanup_is_idempotent(app):
     from therion.interface.orb_renderer import OrbGL
     w = OrbGL(); w.resize(300, 300); w.show(); settle(lambda: w.ready)
     w.cleanup(); w.cleanup(); w.close(); w.cleanup()
+
+
+@gl
+def test_bloom_chain_follows_quality_and_state(app):
+    from therion.interface.orb_renderer import OrbGL
+    w = OrbGL(); w.resize(600, 600); w.show(); w.set_quality('high'); w.set_active(True)
+    settle(lambda: w.ready); pump(.2)
+    sizes = w.bloom_chain_sizes()
+    assert len(sizes) == 3 and sizes[0].width() == round(600*w.devicePixelRatioF()/2)
+    w.set_visual('thinking', 0); pump(.2); assert len(w.bloom_chain_sizes()) == 2
+    w.set_quality('low'); pump(.2); assert len(w.bloom_chain_sizes()) == 1
+    w.close()
