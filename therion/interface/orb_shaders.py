@@ -132,6 +132,18 @@ void main() {
 }
 '''
 
+# Rastro: o quadro anterior apaga aos poucos. max() em vez de soma, para o que está
+# parado não acumular brilho; só o que se move deixa cauda.
+TRAIL_FRAGMENT = '''
+#version 120
+uniform sampler2D scene, previous;
+uniform float keep;
+varying vec2 uv;
+void main() {
+    gl_FragColor = vec4(max(texture2D(scene, uv).rgb, texture2D(previous, uv).rgb*keep), 1.);
+}
+'''
+
 # Cena + brilho em até 3 escalas, somados ao fundo (halo e chão já desenhados).
 COMPOSITE_FRAGMENT = '''
 #version 120

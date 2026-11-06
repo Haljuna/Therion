@@ -77,3 +77,20 @@ def test_bloom_chain_follows_quality_and_state(app):
     w.set_visual('thinking', 0); pump(.2); assert len(w.bloom_chain_sizes()) == 2
     w.set_quality('low'); pump(.2); assert len(w.bloom_chain_sizes()) == 1
     w.close()
+
+
+def test_trail_keep_values():
+    from therion.interface.orb_renderer import trail_keep
+    assert trail_keep(0, 1/60) < .45 and trail_keep(1, 1/60) > .9
+    assert trail_keep(1, 0) == 1 and 0 <= trail_keep(.5, 10) < 1e-6
+
+
+@gl
+def test_reduced_motion_clears_trail_next_frame(app):
+    from therion.interface.orb_renderer import OrbGL
+    w = OrbGL(); w.resize(400, 400); w.show(); w.set_active(True); settle(lambda: w.ready)
+    w.set_visual('executing', 0); pump(1.)
+    assert not w.trail_cleared
+    w.reduced = True; w.update(); pump(.1)
+    assert w.trail_cleared and w.animation.trail == 0
+    w.close()

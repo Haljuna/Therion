@@ -11,7 +11,7 @@ from .graphics import FRAME_INTERVAL_MS
 from .orb_geometry import build_orb, VERTEX_FLOATS
 from .orb_motion import OrbMotion, THINKING_STATES
 from .orb_shaders import (SCENE_VERTEX, SCENE_FRAGMENT, QUAD_VERTEX, BLOOM_FRAGMENT,
-                          BLUR_FRAGMENT, COMPOSITE_FRAGMENT)
+                          BLUR_FRAGMENT, COMPOSITE_FRAGMENT, TRAIL_FRAGMENT)
 from .presentation import QualityController
 from .scene_motion import SceneMotion
 
@@ -30,6 +30,11 @@ def line_width_px(orb_px: float) -> float:
 def detail_level(orb_px: float) -> float:
     t = min(1., max(0., (float(orb_px)-200.)/120.))
     return t*t*(3.-2.*t)
+
+
+def trail_keep(trail: float, dt: float) -> float:
+    """Fração do quadro anterior mantida: ~2 quadros parado, ~0,5 s no giro mais rápido."""
+    return math.exp(-max(0., dt)/(.02+.16*trail))
 
 
 def frame_interval_ms(state: str) -> int:
@@ -62,9 +67,13 @@ class OrbGL(QOpenGLWidget):
         self.reduced = False
         self.ready = False
         self.disabled = False
-        self.program = self.bloom = self.quad = self.blur = self.composite = None
+        self.program = self.bloom = self.quad = self.blur = self.composite = self.trail = None
+        self._trail_fresh = True
         self.scene_ms = self.scene_fbo = None
         self._chain = []   # pares (temporário, saída) por escala de brilho
+        self._trail = []   # dois FBOs alternados para o rastro
+        self.trail_cleared = False
+        self._was_reduced = False
         self.buffers = {}
         self.failure_detail = ''
         self.last_frame = None
@@ -81,6 +90,7 @@ class OrbGL(QOpenGLWidget):
             self.bloom = self._program(QUAD_VERTEX, BLOOM_FRAGMENT)
             self.blur = self._program(QUAD_VERTEX, BLUR_FRAGMENT)
             self.composite = self._program(QUAD_VERTEX, COMPOSITE_FRAGMENT)
+            self.trail = self._program(QUAD_VERTEX, TRAIL_FRAGMENT)
             mesh = build_orb()
             for name in ('surfaces', 'lines', 'points'):
                 data = getattr(mesh, name)
@@ -173,20 +183,39 @@ class OrbGL(QOpenGLWidget):
         self._scene(width, height)
         gl.glDisable(0x0BE2)
         QOpenGLFramebufferObject.blitFramebuffer(self.scene_fbo, self.scene_ms)
-        # 2. Brilho: cada escala desfoca a anterior (1/2, 1/4, 1/8).
-        source = self.scene_fbo
+        # 2. Rastro: o anterior entra apagando, mais longo quanto mais rápido gira.
+        keep = trail_keep(self.animation.trail, dt)
+        clear = self.reduced or (self.reduced != self._was_reduced) or keep < .01 or self._trail_fresh
+        self._was_reduced = self.reduced; self._trail_fresh = False
+        self.trail_cleared = clear
+        source = self._trail_pass(0. if clear else keep)
+        # 3. Brilho: cada escala desfoca a anterior (1/2, 1/4, 1/8).
         for temp, out in self._chain:
             self._blur_pass(source, temp, (1./source.width(), 0.))
             self._blur_pass(temp, out, (0., 1./temp.height()))
             source = out
-        # 3. Fundo, halo e chão; depois cena e brilho somados.
+        # 4. Fundo, halo e chão; depois cena e brilho somados.
         gl.glBindFramebuffer(0x8D40, self.defaultFramebufferObject())
         gl.glViewport(0, 0, width, height)
         gl.glClearColor(9/255, 9/255, 15/255, 1.); gl.glClear(0x4000)
         gl.glEnable(0x0BE2); gl.glBlendFunc(1, 1)
         self._aura(width, height)
-        self._composite()
+        self._composite(self._trail[0])
         gl.glDisable(0x0BE2)
+
+    def _trail_pass(self, keep):
+        gl = self.gl; t = self.trail
+        target, previous = self._trail[1], self._trail[0]
+        target.bind(); gl.glViewport(0, 0, target.width(), target.height())
+        t.bind()
+        for unit, (name, fbo) in enumerate((('scene', self.scene_fbo), ('previous', previous))):
+            gl.glActiveTexture(0x84C0+unit); gl.glBindTexture(_TEXTURE_2D, fbo.texture())
+            gl.glUniform1i(t.uniformLocation(name), unit)
+        gl.glUniform1f(t.uniformLocation('keep'), float(keep))
+        self._quad(t); t.release()
+        gl.glActiveTexture(0x84C1); gl.glBindTexture(_TEXTURE_2D, 0); gl.glActiveTexture(0x84C0)
+        self._trail.reverse()   # o recém-desenhado vira o "anterior" do próximo quadro
+        return self._trail[0]
 
     def bloom_chain_sizes(self):
         return [out.size() for _, out in self._chain]
@@ -207,6 +236,8 @@ class OrbGL(QOpenGLWidget):
         if self.scene_fbo is None or self.scene_fbo.size() != size:
             self.scene_ms = self._target(size, 4)
             self.scene_fbo = self._target(size)
+            self._trail = [self._target(size), self._target(size)]
+            self._trail_fresh = True
             self._chain = []
         if len(self._chain) != levels:
             self._chain = []
@@ -229,11 +260,11 @@ class OrbGL(QOpenGLWidget):
         gl.glUniform2f(b.uniformLocation('step'), *step)
         self._quad(b); b.release()
 
-    def _composite(self):
+    def _composite(self, scene):
         gl = self.gl; c = self.composite
         c.bind()
-        textures = [self.scene_fbo.texture()]+[out.texture() for _, out in self._chain]
-        textures += [self.scene_fbo.texture()]*(4-len(textures))
+        textures = [scene.texture()]+[out.texture() for _, out in self._chain]
+        textures += [scene.texture()]*(4-len(textures))
         for unit, (name, texture) in enumerate(zip(('scene', 'glow0', 'glow1', 'glow2'), textures)):
             gl.glActiveTexture(0x84C0+unit); gl.glBindTexture(_TEXTURE_2D, texture)
             gl.glUniform1i(c.uniformLocation(name), unit)
@@ -313,7 +344,7 @@ class OrbGL(QOpenGLWidget):
             if buffer is not None:
                 buffer.destroy()
         self.buffers = {}; self.quad = None
-        self.scene_ms = self.scene_fbo = None; self._chain = []
-        self.program = self.bloom = self.blur = self.composite = None
+        self.scene_ms = self.scene_fbo = None; self._chain = []; self._trail = []
+        self.program = self.bloom = self.blur = self.composite = self.trail = None
         self.doneCurrent()
         self.gl = None
