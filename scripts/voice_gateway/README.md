@@ -1,6 +1,6 @@
 # Comparação separada de transcrição e Jarvis
 
-**Uso diário adotado em 20/10/2026:** o atalho normal **Therion** agora chama `scripts/Start-Therion.ps1`, com estado permanente em `%LOCALAPPDATA%/Therion/voice/`. Guia vigente: `C:/Users/marcu/Downloads/Segundo-Cerebro/10 - Projetos/Therion/Voz local - Uso diário.md` no cofre. Os procedimentos abaixo preservam a comparação e o histórico dos testes; não são necessários para abrir a aplicação diária.
+**Uso diário adotado em 20/10/2026:** o atalho normal **Therion** agora chama `scripts/Start-Therion.ps1`, com estado permanente em `%LOCALAPPDATA%/Therion/voice/`. Guia vigente: `10 - Projetos/Therion/Voz local - Uso diário.md` no cofre (Segundo Cérebro). Os procedimentos abaixo preservam a comparação e o histórico dos testes; não são necessários para abrir a aplicação diária.
 
 Experimento autorizado em 20/10/2026. Nenhuma configuração do Therion é alterada.
 Reutiliza pesos e dependências instalados no F:, sem download nem importação do aplicativo completo.
