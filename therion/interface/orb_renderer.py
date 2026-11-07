@@ -314,6 +314,8 @@ class OrbGL(QOpenGLWidget):
         uniform('eye', a.eye); uniform('tint', a.tint); uniform('rim', a.rim)
         uniform('flash', a.flash); uniform('assembly', a.assembly); uniform('energy', a.energy)
         uniform('relief', 0. if self.reduced else a.relief)
+        uniform('zoom', 1. if self.reduced else a.zoom); uniform('glow', a.glow)
+        uniform('wobble', *((0., 0.) if self.reduced else a.wobble))
         for name, mode in (('surfaces', _TRIANGLES), ('lines', _TRIANGLES), ('points', _POINTS)):
             buffer, count = self.buffers[name]
             uniform('isPoint', mode == _POINTS); uniform('groupGain', GROUP_GAIN[name])

@@ -27,6 +27,8 @@ SPEECH_STATES = {'synthesizing', 'speaking'}
 WAITING_STATES = {'awaiting_confirmation', 'clarification'}
 _IDLE_RATE, _FAST_RATE = math.tau/40, math.tau/4
 FLASH_COOLDOWN = 4.
+SPIN_EASE = .55  # segundos; acelerar e frear devagar parece menos mecânico
+SPEECH_ZOOM, SPEECH_GLOW = .08, .6
 ASSEMBLY_SECONDS = 1.2
 
 
@@ -102,8 +104,9 @@ class OrbMotion:
         self.phase+=target*dt+(self.speed-target)*.3*(1.-decay)
         self.speed=target+(self.speed-target)*decay
         rate=spin_rate_for(self.state)
-        self.spin+=rate*dt+(self.spin_rate-rate)*.3*(1.-decay)
-        self.spin_rate=rate+(self.spin_rate-rate)*decay
+        ease=math.exp(-dt/SPIN_EASE)
+        self.spin+=rate*dt+(self.spin_rate-rate)*SPIN_EASE*(1.-ease)
+        self.spin_rate=rate+(self.spin_rate-rate)*ease
         self.clock+=dt
         self.flash*=math.exp(-dt/.1); self.flash_ready_in-=dt
         self.assembly=min(1.,self.assembly+dt/ASSEMBLY_SECONDS) if self.state=='preparing' else 1.
@@ -151,3 +154,25 @@ class OrbMotion:
     def relief(self):
         """Amplitude da respiração das placas elevadas."""
         return self._relief_base+.6*self.energy
+
+    @property
+    def speech(self):
+        """Só a voz do próprio Therion: o envelope do áudio enquanto ele fala."""
+        return self.energy*self.activity[2]
+
+    @property
+    def zoom(self):
+        """Respiração lenta e irregular + avanço curto a cada sílaba falada."""
+        c = self.clock
+        return 1.+.010*math.sin(c*1.07)+.006*math.sin(c*.43+2.)+SPEECH_ZOOM*self.speech
+
+    @property
+    def glow(self):
+        return 1.+SPEECH_GLOW*self.speech
+
+    @property
+    def wobble(self):
+        """Inclinação do eixo que vaga devagar (frequências sem múltiplo comum)."""
+        c = self.clock
+        return (.05*math.sin(c*.23)+.025*math.sin(c*.61+1.3),
+                .04*math.sin(c*.17+.7)+.02*math.sin(c*.53))

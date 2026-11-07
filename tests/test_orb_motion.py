@@ -215,3 +215,33 @@ def test_relief_amplitude_follows_state_and_voice():
     m = OrbMotion(); m.set_visual('listening', .8); run(m, 1)
     assert m.relief == pytest.approx(.3+.6*m.energy, abs=.01)
     run(m, .5, reduced=True); assert m.relief == 0
+
+
+def test_speaking_voice_drives_zoom_and_glow():
+    m = OrbMotion(); m.set_visual('speaking', 0); run(m, .5)
+    quiet = (m.zoom, m.glow)
+    m.set_visual('speaking', 1); run(m, .4)
+    assert m.speech == pytest.approx(m.energy*m.activity[2], abs=1e-9) and m.speech > .9
+    assert m.zoom > quiet[0]+.06 and m.glow > quiet[1]+.45
+    m.set_visual('speaking', 0); run(m, .7)   # a voz solta em ~0,6 s
+    assert m.speech < .05
+
+
+def test_only_the_orbs_own_voice_zooms():
+    m = OrbMotion(); m.set_visual('listening', 1); run(m, .5)
+    assert m.speech == 0 and m.glow == 1
+
+
+def test_wobble_drifts_slowly_bounded_and_freezes_when_reduced():
+    m = OrbMotion(); seen = []
+    for _ in range(20):
+        run(m, .5); seen.append(m.wobble)
+    xs, zs = zip(*seen)
+    assert max(map(abs, xs+zs)) < .1 and len(set(xs)) > 15
+    frozen = m.wobble; run(m, 1, reduced=True)
+    assert m.wobble == frozen
+
+
+def test_spin_changes_ease_in_gently():
+    m = OrbMotion(); run(m, 2); m.set_visual('thinking'); run(m, .3)
+    assert m.spin_rate < .55*2*math.pi/6

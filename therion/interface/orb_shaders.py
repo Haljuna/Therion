@@ -9,18 +9,21 @@ attribute vec4 meta;
 attribute vec2 extra;
 attribute vec2 rise;   // elevação desta ponta e da outra
 uniform float spin, clock, detailLevel, lineWidth, pointSize, aspect, fit;
-uniform float eye, tint, rim, flash, assembly, energy, relief;
-uniform vec2 center, viewport;
+uniform float eye, tint, rim, flash, assembly, energy, relief, zoom;
+uniform vec2 center, viewport, wobble;
 varying float vGlow, vLight, vLayer, vSeed, vFlash;
 
 vec3 place(vec3 p, float lift) {
     float layer = meta.y;
-    // Placas elevadas respiram: ±35% da altura, fase e ritmo próprios.
-    float breath = 1.+relief*.35*sin(clock*6.283*(.25+extra.y*.35)+extra.y*6.283);
+    // Placas elevadas respiram: ±35% da altura, fase e ritmo próprios, em duas ondas
+    // de razão irracional para nunca repetir o mesmo compasso.
+    float f = 6.283*(.25+extra.y*.35), ph = extra.y*6.283;
+    float breath = 1.+relief*.35*(.7*sin(clock*f+ph)+.3*sin(clock*f*1.618+ph*2.3));
     p += normalize(p+vec3(1e-6))*lift*breath;
     float grow = smoothstep(extra.y*.6, extra.y*.6+.4, assembly);
     p = mix(p*.05, p, grow);
-    float a = spin*meta.z;
+    // Cada camada deriva um pouco do ritmo exato, para não parecer engrenagem.
+    float a = spin*meta.z+.05*sin(clock*.31+layer*1.7);
     mat2 r = mat2(cos(a), sin(a), -sin(a), cos(a));
     if (abs(layer-4.) < .5) {               // giroscópio: gira no próprio plano e inclina 25°
         p.xy = r*p.xy;
@@ -31,7 +34,10 @@ vec3 place(vec3 p, float lift) {
     } else {
         p.xz = r*p.xz;
     }
-    return p;
+    // Eixo levemente inclinado que vaga, e zoom da respiração e da fala.
+    p.yz = mat2(cos(wobble.x), sin(wobble.x), -sin(wobble.x), cos(wobble.x))*p.yz;
+    p.xy = mat2(cos(wobble.y), sin(wobble.y), -sin(wobble.y), cos(wobble.y))*p.xy;
+    return p*zoom;
 }
 
 vec2 project(vec3 p) {
@@ -61,7 +67,7 @@ void main() {
 
 SCENE_FRAGMENT = '''
 #version 120
-uniform float isPoint, groupGain, eye, tint, rim, flash;
+uniform float isPoint, groupGain, eye, tint, rim, flash, glow;
 varying float vGlow, vLight, vLayer, vSeed, vFlash;
 const vec3 BASE = vec3(.486, .302, 1.);    // #7C4DFF
 const vec3 EDGE = vec3(.788, .722, 1.);    // #C9B8FF
@@ -82,7 +88,7 @@ void main() {
     if (abs(vLayer-1.) < .5) gain *= 1.+1.5*rim;   // aro acende com a voz ou pisca na espera
     color = mix(color, ERROR, .3*tint);
     color = mix(color, SPARK, .4*flash);           // a esfera esfria no clarão
-    float light = vGlow*vLight*shape*groupGain;
+    float light = vGlow*vLight*shape*groupGain*glow;   // fala clareia a orbe
     gl_FragColor = vec4(color*light*gain+SPARK*vFlash*light, 0.);
 }
 '''
