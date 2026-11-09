@@ -7,7 +7,7 @@ PROIBIDO = ['=>', 'let ', 'const ', '`', 'fetch(', 'class ']
 
 class TestPagina(unittest.TestCase):
     def test_es5_apenas(self):
-        for nome in ('estacao.html', 'parear.html'):
+        for nome in ('estacao.html', 'parear.html', 'app/assets/espera.html'):
             texto = (PASTA / nome).read_text(encoding='utf-8')
             for p in PROIBIDO:
                 self.assertNotIn(p, texto, f'{nome}: {p!r}')

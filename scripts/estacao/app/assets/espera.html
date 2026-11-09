@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Estacao Therion</title>
+<style>
+html, body { margin: 0; height: 100%; background: #0d0a18; color: #b9a8ff; font-family: monospace; font-size: 18px; overflow: hidden; }
+#caixa { position: absolute; top: 50%; left: 0; right: 0; margin-top: -170px; text-align: center; }
+#titulo { color: #6e5bd6; margin-bottom: 16px; }
+#aviso { margin-top: 16px; }
+</style>
+</head>
+<body>
+<div id="caixa">
+  <div id="titulo">THERION OS v1 -- ESTACAO 01</div>
+  <svg width="240" height="240" viewBox="-80 -80 160 160" xmlns="http://www.w3.org/2000/svg">
+    <circle r="70" fill="none" stroke="#4b3bb0" stroke-width="1"/>
+    <path d="M 45.1 16.4 A 48 48 0 1 1 45.1 -16.4" fill="none" stroke="#e2738f" stroke-width="1.5"/>
+    <circle r="4" fill="#e2738f"/>
+  </svg>
+  <div id="aviso">AGUARDANDO PORTEIRO...</div>
+</div>
+<script>
+(function () {
+  var busca = location.search.substring(1).split('&'), url = '', semUrl = false;
+  for (var i = 0; i < busca.length; i++) {
+    var par = busca[i].split('=');
+    if (par[0] === 'url') { url = decodeURIComponent(par[1] || ''); }
+    if (par[0] === 'semurl') { semUrl = true; }
+  }
+  if (semUrl || !url) { document.getElementById('aviso').innerHTML = 'SEM ENDERECO DO PORTEIRO'; return; }
+  setInterval(function () { location.replace(url); }, 5000);
+})();
+</script>
+</body>
+</html>
