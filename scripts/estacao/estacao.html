@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Estacao Therion</title>
+<style>
+html, body { margin: 0; padding: 0; height: 100%; background: #0d0a18; color: #b9a8ff; font-family: monospace; font-size: 16px; overflow: hidden; -webkit-user-select: none; -webkit-tap-highlight-color: rgba(0,0,0,0); }
+#esq { position: absolute; left: 0; top: 0; bottom: 0; width: 280px; text-align: center; }
+#dir { position: absolute; left: 280px; right: 0; top: 0; bottom: 0; padding: 14px 16px 14px 0; }
+#centro { position: absolute; top: 50%; left: 0; right: 0; margin-top: -150px; }
+#anel { width: 240px; height: 240px; }
+#rotulo { margin-top: 10px; }
+#cabecalho { color: #6e5bd6; padding: 6px 0; }
+#log { position: absolute; top: 48px; bottom: 170px; left: 0; right: 16px; overflow: hidden; line-height: 1.5; word-wrap: break-word; }
+#pe { position: absolute; bottom: 14px; left: 0; right: 16px; }
+#status { color: #6e5bd6; white-space: pre-wrap; margin-bottom: 10px; }
+.caiu { color: #e2738f; }
+.btn { float: left; width: 49%; margin: 0 2% 8px 0; min-height: 44px; line-height: 44px; border: 1px solid #6e5bd6; color: #d9cfff; text-align: center; box-sizing: border-box; -webkit-box-sizing: border-box; }
+.btn.dir { margin-right: 0; }
+.btn.armado { border-color: #e7e0ff; color: #e7e0ff; }
+@media (orientation: portrait) {
+  #esq, #dir, #log, #pe, #centro { position: static; width: auto; margin: 0; }
+  #esq { padding-top: 44px; }
+  #dir { padding: 0 16px 14px 16px; }
+  #cabecalho { position: absolute; top: 8px; left: 0; right: 0; text-align: center; }
+  #anel { width: 300px; height: 300px; }
+  #log { height: 300px; margin-top: 16px; }
+  #pe { position: absolute; left: 16px; right: 16px; bottom: 14px; }
+}
+</style>
+</head>
+<body>
+<div id="esq">
+  <div id="centro">
+    <svg id="anel" viewBox="-80 -80 160 160" xmlns="http://www.w3.org/2000/svg">
+      <circle r="70" fill="none" stroke="#4b3bb0" stroke-width="1"/>
+      <polyline id="eco" fill="none" stroke="#4b3bb0" stroke-width="1" points=""/>
+      <polyline id="onda" fill="none" stroke="#9b87ff" stroke-width="1.5" points=""/>
+      <circle id="miolo" r="4" fill="#e7e0ff"/>
+    </svg>
+    <div id="rotulo">[ PARADO ]</div>
+  </div>
+</div>
+<div id="dir">
+  <div id="cabecalho">THERION OS v1 -- ESTACAO 01</div>
+  <div id="log"></div>
+  <div id="pe">
+    <div id="status">RAM --  VRAM --  OLLAMA --  VOZ --  TRANSCR --  THERION --</div>
+    <div id="b1" class="btn">[1] LIGAR THERION</div>
+    <div id="b2" class="btn dir">[2] SUBIR OLLAMA</div>
+    <div id="b3" class="btn">[3] REINICIAR OLLAMA</div>
+    <div id="b4" class="btn dir">[4] RELIGAR VOZ</div>
+  </div>
+</div>
+<script>
+(function () {
+  var ROTULOS = { '1': '[1] LIGAR THERION', '2': '[2] SUBIR OLLAMA', '3': '[3] REINICIAR OLLAMA', '4': '[4] RELIGAR VOZ' };
+  var DUPLO = { '3': true, '4': true };
+  var estado = 'offline', ultimoSeq = 0, mensagens = [], acaoEmCurso = null, armado = {}, t = 0;
+
+  function el(id) { return document.getElementById(id); }
+  function escapar(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+
+  function pedir(metodo, url, aoTerminar) {
+    var xhr = new XMLHttpRequest(), feito = false;
+    var limite = setTimeout(function () { if (!feito) { feito = true; xhr.abort(); aoTerminar(0, null); } }, 2500);
+    xhr.onreadystatechange = function () {
+      if (xhr.readyState !== 4 || feito) { return; }
+      feito = true; clearTimeout(limite); aoTerminar(xhr.status, xhr.responseText);
+    };
+    xhr.open(metodo, url, true);
+    if (metodo === 'POST') { xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded'); }
+    xhr.send(metodo === 'POST' ? '' : null);
+  }
+
+  function palavra(nome, valor, ehTherion) {
+    if (valor === true) { return nome + ' ok'; }
+    if (valor === false && !ehTherion) { return nome + ' <span class="caiu">caiu</span>'; }
+    return nome + ' --';
+  }
+
+  function mostrarStatus(s) {
+    el('status').innerHTML = [
+      'RAM ' + (s.ram === null || s.ram === undefined ? '--' : s.ram + '%'),
+      'VRAM ' + (s.vram ? escapar(s.vram) : '--'),
+      palavra('OLLAMA', s.ollama), palavra('VOZ', s.voz), palavra('TRANSCR', s.transcr),
+      palavra('THERION', s.therion, true)
+    ].join('  ');
+  }
+
+  function mostrarLog() {
+    var linhas = [];
+    for (var i = 0; i < mensagens.length; i++) {
+      linhas.push('&gt; ' + escapar(mensagens[i].autor) + ': ' + escapar(mensagens[i].texto));
+    }
+    el('log').innerHTML = linhas.join('<br>');
+  }
+
+  function mostrarBotoes() {
+    for (var id in ROTULOS) {
+      var b = el('b' + id);
+      if (acaoEmCurso === id) { b.innerHTML = '[ ... ]'; b.className = b.className.replace(' armado', ''); }
+      else if (armado[id]) { b.innerHTML = '[ TOQUE DE NOVO ]'; }
+      else { b.innerHTML = ROTULOS[id]; }
+    }
+  }
+
+  function mudarEstado(novo) {
+    estado = novo;
+    el('rotulo').innerHTML = novo === 'parado' ? '[ PARADO ]' : '[ OFFLINE ]';
+  }
+
+  function consultar() {
+    pedir('GET', '/estado?desde=' + ultimoSeq, function (status, texto) {
+      if (status === 403) { location.reload(); return; }
+      if (status !== 200) {
+        el('log').innerHTML = 'PORTEIRO SEM RESPOSTA';
+        mudarEstado('offline');
+        setTimeout(consultar, 3000);
+        return;
+      }
+      var dados = JSON.parse(texto);
+      for (var i = 0; i < dados.mensagens.length; i++) {
+        mensagens.push(dados.mensagens[i]);
+        ultimoSeq = dados.mensagens[i].seq;
+      }
+      while (mensagens.length > 6) { mensagens.shift(); }
+      acaoEmCurso = dados.acao;
+      mudarEstado(dados.estado);
+      mostrarStatus(dados.status);
+      mostrarLog();
+      mostrarBotoes();
+      setTimeout(consultar, 1000);
+    });
+  }
+
+  function tocar(id) {
+    if (acaoEmCurso) { return; }
+    if (DUPLO[id] && !armado[id]) {
+      armado[id] = true;
+      el('b' + id).className += ' armado';
+      mostrarBotoes();
+      setTimeout(function () { armado[id] = false; el('b' + id).className = el('b' + id).className.replace(' armado', ''); mostrarBotoes(); }, 3000);
+      return;
+    }
+    armado[id] = false;
+    el('b' + id).className = el('b' + id).className.replace(' armado', '');
+    acaoEmCurso = id;
+    mostrarBotoes();
+    pedir('POST', '/acao/' + id, function (status) {
+      if (status === 409) { mensagens.push({ autor: 'porteiro', texto: 'ocupado' }); mostrarLog(); }
+    });
+  }
+
+  function ligarBotao(id) { el('b' + id).onclick = function () { tocar(id); }; }
+  for (var id in ROTULOS) { ligarBotao(id); }
+
+  var segurando = null;
+  function comecar(e) { if (e && e.preventDefault) { e.preventDefault(); } soltar(); segurando = setTimeout(function () { location.href = 'estacao://manutencao'; }, 5000); }
+  function soltar() { if (segurando) { clearTimeout(segurando); segurando = null; } }
+  var cab = el('cabecalho');
+  cab.addEventListener('touchstart', comecar, false);
+  cab.addEventListener('touchend', soltar, false);
+  cab.addEventListener('touchcancel', soltar, false);
+  cab.addEventListener('mousedown', comecar, false);
+  cab.addEventListener('mouseup', soltar, false);
+  cab.addEventListener('mouseleave', soltar, false);
+
+  function pontos(raio, de, ate) {
+    var p = [], n = 120;
+    for (var i = 0; i <= n; i++) {
+      var q = de + (ate - de) * i / n, r = raio(q);
+      p.push((Math.cos(q) * r).toFixed(1) + ',' + (Math.sin(q) * r).toFixed(1));
+    }
+    return p.join(' ');
+  }
+
+  function desenhar() {
+    t += 0.08;
+    var onda = el('onda'), eco = el('eco'), miolo = el('miolo');
+    if (estado === 'parado') {
+      var base = 48 + Math.sin(t * 0.8) * 2;
+      onda.setAttribute('stroke', '#9b87ff');
+      onda.setAttribute('points', pontos(function (q) { return base + Math.sin(q * 6 + t) * 1.2; }, 0, Math.PI * 2));
+      eco.setAttribute('points', pontos(function () { return base * 0.7; }, 0, Math.PI * 2));
+      miolo.setAttribute('fill', '#e7e0ff');
+    } else {
+      var desvio = (t % 4) < 0.4 ? 6 : 0;
+      onda.setAttribute('stroke', '#e2738f');
+      onda.setAttribute('points', pontos(function () { return 48 + (Math.random() < 0.03 ? desvio : 0); }, 0.35, Math.PI * 2 - 0.35));
+      eco.setAttribute('points', '');
+      miolo.setAttribute('fill', '#e2738f');
+    }
+  }
+
+  setInterval(desenhar, 100);
+  consultar();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Estacao Therion</title>
+<style>
+html, body { margin: 0; height: 100%; background: #0d0a18; color: #b9a8ff; font-family: monospace; font-size: 18px; }
+#caixa { position: absolute; top: 50%; left: 0; right: 0; margin-top: -110px; text-align: center; }
+#titulo { color: #6e5bd6; margin-bottom: 24px; }
+#codigo { background: #0d0a18; color: #e7e0ff; border: 1px solid #6e5bd6; font-family: monospace; font-size: 32px; letter-spacing: 8px; width: 220px; text-align: center; padding: 8px; }
+#enviar { display: inline-block; margin-top: 20px; min-height: 44px; line-height: 44px; padding: 0 24px; border: 1px solid #6e5bd6; color: #d9cfff; }
+#aviso { margin-top: 16px; color: #e2738f; min-height: 24px; }
+</style>
+</head>
+<body>
+<div id="caixa">
+  <div id="titulo">THERION OS v1 -- ESTACAO 01</div>
+  <div>DIGITE O CODIGO MOSTRADO NO PC</div>
+  <p><input id="codigo" type="tel" maxlength="6" autocomplete="off"></p>
+  <div id="enviar">[ PAREAR ]</div>
+  <div id="aviso"></div>
+</div>
+<script>
+(function () {
+  document.getElementById('enviar').onclick = function () {
+    var xhr = new XMLHttpRequest();
+    xhr.onreadystatechange = function () {
+      if (xhr.readyState !== 4) { return; }
+      if (xhr.status === 204) { location.reload(); }
+      else { document.getElementById('aviso').innerHTML = 'CODIGO INVALIDO OU EXPIRADO'; }
+    };
+    xhr.open('POST', '/parear', true);
+    xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
+    xhr.send('codigo=' + encodeURIComponent(document.getElementById('codigo').value));
+  };
+})();
+</script>
+</body>
+</html>
