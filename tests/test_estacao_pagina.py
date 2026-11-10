@@ -30,6 +30,7 @@ class TestPagina(unittest.TestCase):
         self.assertIn('estacao://manutencao', t)
         self.assertIn('5000', t)
         self.assertIn('orientation: portrait', t)
+        self.assertIn('toques.length >= 5', t)
 
 
 if __name__ == '__main__':

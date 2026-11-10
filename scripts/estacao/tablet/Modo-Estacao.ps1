@@ -14,6 +14,7 @@ $adb = $adbExe.FullName
 $env:ADB_LIBUSB = '1'
 $dados = Join-Path $env:LOCALAPPDATA 'Therion\estacao'
 $banco = '/data/data/com.android.providers.settings/databases/settings.db'
+$fabrica = Join-Path $dados 'bootanimation-fabrica.zip'
 
 function Adb([string[]]$argumentos) {
     # O adb escreve progresso no stderr; com 'Stop' o PowerShell 5.1 trataria isso como erro fatal.
@@ -46,7 +47,13 @@ if ($Desfazer) {
     Passo 'ligar a barra do Android' { Adb @('shell', 'pm enable com.android.systemui') } 'enabled'
     Passo 'ligar o launcher de fábrica' { Adb @('shell', 'pm enable com.android.launcher') } 'enabled'
     Passo 'religar a tela de bloqueio' { Sql "insert or replace into secure(name,value) values('lockscreen.disabled','0');" }
-    Passo 'voltar a animação de fábrica' { Adb @('shell', 'rm -f /data/local/bootanimation.zip') }
+    Passo 'voltar a animação de fábrica' {
+        Adb @('shell', 'rm -f /data/local/bootanimation.zip') | Out-Null
+        if (Test-Path -LiteralPath $fabrica) {
+            Adb @('push', $fabrica, '/data/local/tmp/fabrica.zip') | Out-Null
+            Adb @('shell', "su -c 'mount -o remount,rw /system && cat /data/local/tmp/fabrica.zip > /system/media/bootanimation.zip; chmod 644 /system/media/bootanimation.zip; mount -o remount,ro /system; rm /data/local/tmp/fabrica.zip'")
+        }
+    }
     Passo 'desinstalar o app Estação' { Adb @('shell', 'pm uninstall com.therion.estacao') } 'Success'
     Passo 'reiniciar o tablet' { Adb @('reboot') }
     return
@@ -71,8 +78,11 @@ Passo 'desligar a tela de bloqueio' {
     Sql "insert or replace into secure(name,value) values('lockscreen.disabled','1');"
 }
 Passo 'copiar a animação de inicialização' {
+    # Este tablet monta /data tarde: a primeira animação vem de /system. Troca as duas e guarda a de fábrica.
+    if (-not (Test-Path -LiteralPath $fabrica)) { Adb @('pull', '/system/media/bootanimation.zip', $fabrica) | Out-Null }
     Adb @('push', $boot, '/data/local/bootanimation.zip') | Out-Null
-    Adb @('shell', 'chmod 644 /data/local/bootanimation.zip')
+    Adb @('shell', 'chmod 644 /data/local/bootanimation.zip') | Out-Null
+    Adb @('shell', "su -c 'mount -o remount,rw /system && cat /data/local/bootanimation.zip > /system/media/bootanimation.zip; chmod 644 /system/media/bootanimation.zip; mount -o remount,ro /system'")
 }
 Passo 'desligar a barra do Android' { Adb @('shell', 'pm disable com.android.systemui') } 'disabled'
 Passo 'reiniciar o tablet' { Adb @('reboot') }
