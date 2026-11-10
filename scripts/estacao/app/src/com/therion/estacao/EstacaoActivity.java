@@ -4,7 +4,7 @@ import android.app.Activity;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
-import android.net.Uri;
+
 import android.os.Bundle;
 import android.provider.Settings;
 import android.view.WindowManager;
@@ -57,7 +57,26 @@ public class EstacaoActivity extends Activity {
 
     private void abrir() {
         String url = preferencias().getString("url", null);
-        web.loadUrl(url == null ? ESPERA + "?semurl=1" : url);
+        if (url == null) {
+            mostrarEspera("");
+        } else {
+            web.loadUrl(url);
+        }
+    }
+
+    /** Android 4.0 não abre file:///android_asset/x.html?param, então a URL vai embutida no HTML. */
+    private void mostrarEspera(String url) {
+        String html;
+        try {
+            java.io.InputStream entrada = getAssets().open("espera.html");
+            java.util.Scanner leitor = new java.util.Scanner(entrada, "UTF-8").useDelimiter("\\A");
+            html = leitor.hasNext() ? leitor.next() : "";
+            entrada.close();
+        } catch (java.io.IOException erro) {
+            html = "<body style='background:#0d0a18;color:#e2738f'>AGUARDANDO PORTEIRO...</body>";
+        }
+        String seguro = url.replace("\\", "").replace("'", "").replace("<", "");
+        web.loadDataWithBaseURL(ESPERA, html.replace("__URL__", seguro), "text/html", "utf-8", null);
     }
 
     @Override
@@ -83,8 +102,10 @@ public class EstacaoActivity extends Activity {
 
         @Override
         public void onReceivedError(WebView view, int codigo, String descricao, String urlFalha) {
-            String url = preferencias().getString("url", "");
-            view.loadUrl(ESPERA + "?url=" + Uri.encode(url));
+            if (urlFalha != null && urlFalha.startsWith("file:")) {
+                return; // nunca entrar em loop com a própria tela de espera
+            }
+            mostrarEspera(preferencias().getString("url", ""));
         }
     }
 

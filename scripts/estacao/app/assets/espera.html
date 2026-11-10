@@ -23,13 +23,8 @@ html, body { margin: 0; height: 100%; background: #0d0a18; color: #b9a8ff; font-
 </div>
 <script>
 (function () {
-  var busca = location.search.substring(1).split('&'), url = '', semUrl = false;
-  for (var i = 0; i < busca.length; i++) {
-    var par = busca[i].split('=');
-    if (par[0] === 'url') { url = decodeURIComponent(par[1] || ''); }
-    if (par[0] === 'semurl') { semUrl = true; }
-  }
-  if (semUrl || !url) { document.getElementById('aviso').innerHTML = 'SEM ENDERECO DO PORTEIRO'; return; }
+  var url = '__URL__';
+  if (!url || url.indexOf('http') !== 0) { document.getElementById('aviso').innerHTML = 'SEM ENDERECO DO PORTEIRO'; return; }
   setInterval(function () { location.replace(url); }, 5000);
 })();
 </script>
