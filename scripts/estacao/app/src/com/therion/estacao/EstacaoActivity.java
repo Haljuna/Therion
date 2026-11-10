@@ -55,13 +55,26 @@ public class EstacaoActivity extends Activity {
         return getSharedPreferences("estacao", MODE_PRIVATE);
     }
 
+    private final android.os.Handler relogio = new android.os.Handler();
+    private volatile boolean carregou;
+
     private void abrir() {
-        String url = preferencias().getString("url", null);
+        final String url = preferencias().getString("url", null);
         if (url == null) {
             mostrarEspera("");
-        } else {
-            web.loadUrl(url);
+            return;
         }
+        carregou = false;
+        web.loadUrl(url);
+        // Ligando antes do Wi-Fi, o WebView do Android 4.0 fica pendurado sem erro: vigia de 12 s.
+        relogio.postDelayed(new Runnable() {
+            public void run() {
+                if (!carregou) {
+                    web.stopLoading();
+                    mostrarEspera(url);
+                }
+            }
+        }, 12000);
     }
 
     /** Android 4.0 não abre file:///android_asset/x.html?param, então a URL vai embutida no HTML. */
@@ -98,6 +111,13 @@ public class EstacaoActivity extends Activity {
                 return true;
             }
             return false;
+        }
+
+        @Override
+        public void onPageFinished(WebView view, String url) {
+            if (url != null && url.startsWith("http")) {
+                carregou = true;
+            }
         }
 
         @Override
