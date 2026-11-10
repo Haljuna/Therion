@@ -44,7 +44,7 @@ if ((& $adb get-state 2>&1 | Out-String).Trim() -ne 'device') {
 if ((Adb @('shell', 'su -c id')) -notmatch 'uid=0') { throw 'FALHOU: su não responde' }
 
 if ($Desfazer) {
-    Passo 'ligar a barra do Android' { Adb @('shell', 'pm enable com.android.systemui') } 'enabled'
+    Passo 'ligar a barra do Android' { Adb @('shell', 'pm enable com.android.systemui') | Out-Null; Adb @('shell', 'pm enable com.android.systemui/.SystemUIService') } 'enabled'
     Passo 'ligar o launcher de fábrica' { Adb @('shell', 'pm enable com.android.launcher') } 'enabled'
     Passo 'religar a tela de bloqueio' { Sql "insert or replace into secure(name,value) values('lockscreen.disabled','0');" }
     Passo 'voltar a animação de fábrica' {
@@ -84,5 +84,9 @@ Passo 'copiar a animação de inicialização' {
     Adb @('shell', 'chmod 644 /data/local/bootanimation.zip') | Out-Null
     Adb @('shell', "su -c 'mount -o remount,rw /system && cat /data/local/bootanimation.zip > /system/media/bootanimation.zip; chmod 644 /system/media/bootanimation.zip; mount -o remount,ro /system'")
 }
-Passo 'desligar a barra do Android' { Adb @('shell', 'pm disable com.android.systemui') } 'disabled'
+# Só o serviço da barra: sem o pacote inteiro (papel de parede) o Android 4.0 não acorda a tela depois do boot.
+Passo 'desligar a barra do Android' {
+    Adb @('shell', 'pm enable com.android.systemui') | Out-Null
+    Adb @('shell', 'pm disable com.android.systemui/.SystemUIService')
+} 'disabled'
 Passo 'reiniciar o tablet' { Adb @('reboot') }

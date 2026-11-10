@@ -26,12 +26,19 @@ public class EstacaoActivity extends Activity {
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         CookieSyncManager.createInstance(this);
         CookieManager.getInstance().setAcceptCookie(true);
+        criarWebView();
+        guardarUrl(getIntent());
+        abrir();
+    }
+
+    private void criarWebView() {
+        if (web != null) {
+            web.destroy();
+        }
         web = new WebView(this);
         web.getSettings().setJavaScriptEnabled(true);
         web.setWebViewClient(new Cliente());
         setContentView(web);
-        guardarUrl(getIntent());
-        abrir();
     }
 
     @Override
@@ -65,13 +72,16 @@ public class EstacaoActivity extends Activity {
             return;
         }
         carregou = false;
+        android.util.Log.i("Estacao", "abrindo " + url);
         web.loadUrl(url);
-        // Ligando antes do Wi-Fi, o WebView do Android 4.0 fica pendurado sem erro: vigia de 12 s.
+        // No boot, o WebView do Android 4.0 pode nascer travado (nem erro, nem desenho):
+        // sem página em 12 s, recria o WebView do zero e tenta de novo.
         relogio.postDelayed(new Runnable() {
             public void run() {
                 if (!carregou) {
-                    web.stopLoading();
-                    mostrarEspera(url);
+                    android.util.Log.w("Estacao", "sem página em 12 s; recriando o WebView");
+                    criarWebView();
+                    abrir();
                 }
             }
         }, 12000);
@@ -115,6 +125,7 @@ public class EstacaoActivity extends Activity {
 
         @Override
         public void onPageFinished(WebView view, String url) {
+            android.util.Log.i("Estacao", "página pronta: " + url);
             if (url != null && url.startsWith("http")) {
                 carregou = true;
             }
@@ -129,13 +140,19 @@ public class EstacaoActivity extends Activity {
         }
     }
 
+    // Só o serviço da barra: desligar o pacote inteiro leva junto o papel de parede, e sem ele
+    // o Android 4.0 nunca "acorda" a tela depois do boot (o app fica parado e a tela preta).
+    private static final String SERVICO_BARRA = BARRA + "/.SystemUIService";
+
     private void alternarBarra() {
-        int estado = getPackageManager().getApplicationEnabledSetting(BARRA);
-        final boolean desligada = estado == PackageManager.COMPONENT_ENABLED_STATE_DISABLED
-                || estado == PackageManager.COMPONENT_ENABLED_STATE_DISABLED_USER;
+        int estado = getPackageManager().getComponentEnabledSetting(
+                new android.content.ComponentName(BARRA, BARRA + ".SystemUIService"));
+        final boolean desligada = estado == PackageManager.COMPONENT_ENABLED_STATE_DISABLED;
         new Thread(new Runnable() {
             public void run() {
-                final boolean ok = rodarComoRoot("pm " + (desligada ? "enable " : "disable ") + BARRA);
+                final boolean ok = desligada
+                        ? rodarComoRoot("pm enable " + SERVICO_BARRA + " && am startservice -n " + SERVICO_BARRA)
+                        : rodarComoRoot("pm disable " + SERVICO_BARRA + " && kill " + pidDe(BARRA));
                 runOnUiThread(new Runnable() {
                     public void run() {
                         if (!ok) {
@@ -151,6 +168,26 @@ public class EstacaoActivity extends Activity {
                 });
             }
         }).start();
+    }
+
+    /** PID do processo pelo nome, lendo /proc (o Android 4.0 não tem pidof). */
+    private static String pidDe(String nome) {
+        java.io.File[] pastas = new java.io.File("/proc").listFiles();
+        if (pastas != null) {
+            for (java.io.File pasta : pastas) {
+                try {
+                    java.util.Scanner leitor = new java.util.Scanner(new java.io.File(pasta, "cmdline"));
+                    String linha = leitor.hasNextLine() ? leitor.nextLine() : "";
+                    leitor.close();
+                    if (linha.startsWith(nome) && (linha.length() == nome.length() || linha.charAt(nome.length()) == 0)) {
+                        return pasta.getName();
+                    }
+                } catch (Exception ignorado) {
+                    // processo sumiu ou sem permissão: segue para o próximo
+                }
+            }
+        }
+        return "0";
     }
 
     private static boolean rodarComoRoot(String comando) {
