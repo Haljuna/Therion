@@ -67,6 +67,19 @@ def therion_vivo(repo: Path) -> bool:
     return contem_therion(saida.stdout.splitlines(), repo)
 
 
+def a_cada(segundos: float, sonda: Callable[[], object], relogio: Callable[[], float] = time.monotonic):
+    """Roda a sonda no máximo uma vez por intervalo e repete o último valor no meio."""
+    ultimo = {'quando': None, 'valor': None}
+
+    def medir():
+        agora = relogio()
+        if ultimo['quando'] is None or agora - ultimo['quando'] >= segundos:
+            ultimo['valor'] = sonda()
+            ultimo['quando'] = agora
+        return ultimo['valor']
+    return medir
+
+
 def sondas_padrao(repo: Path) -> dict[str, Callable[[], object]]:
     return {
         'ram': ram_percentual,
@@ -74,7 +87,8 @@ def sondas_padrao(repo: Path) -> dict[str, Callable[[], object]]:
         'ollama': lambda: checar_http(URL_OLLAMA),
         'voz': lambda: checar_http(URL_VOZ),
         'transcr': lambda: checar_http(URL_TRANSCR),
-        'therion': lambda: therion_vivo(repo),
+        # Cada consulta abre um PowerShell (~0,4 s); a cada 2 s isso pesaria o PC o dia todo.
+        'therion': a_cada(15, lambda: therion_vivo(repo)),
     }
 
 

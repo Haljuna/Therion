@@ -93,7 +93,7 @@ class TestPorteiro(unittest.TestCase):
         self.montar()
         status, corpo, _ = self.pedir('GET', '/estado')
         dados = json.loads(corpo)
-        self.assertEqual((status, dados['estado'], dados['confirmacao']), (200, 'parado', None))
+        self.assertEqual((status, dados['estado']), (200, 'parado'))
         for valor in (False, None):
             self.therion[0] = valor
             self.saude.medir()

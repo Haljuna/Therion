@@ -25,7 +25,6 @@ def estado_json(saude: Saude, executor: Executor, registro: Registro, desde: int
         'estado': 'parado' if status.get('therion') is True else 'offline',
         'status': status,
         'mensagens': registro.desde(desde),
-        'confirmacao': None,
         'acao': executor.em_curso(),
     }
 

@@ -32,6 +32,13 @@ class TestSaude(unittest.TestCase):
     def test_checar_http_porta_fechada(self):
         self.assertFalse(saude.checar_http('http://127.0.0.1:9/', timeout=0.2))
 
+    def test_a_cada_repete_o_valor_dentro_do_intervalo(self):
+        chamadas, agora = [], [100.0]
+        sonda = saude.a_cada(15, lambda: chamadas.append(1) or len(chamadas), relogio=lambda: agora[0])
+        self.assertEqual((sonda(), sonda()), (1, 1))
+        agora[0] += 15
+        self.assertEqual(sonda(), 2)
+
     def test_sondas_padrao_tem_todas_as_chaves(self):
         self.assertEqual(set(saude.sondas_padrao(Path('.'))), {'ram', 'vram', 'ollama', 'voz', 'transcr', 'therion'})
 

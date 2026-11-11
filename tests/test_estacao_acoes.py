@@ -36,6 +36,14 @@ class TestAcoes(unittest.TestCase):
         self.assertEqual(len(self.reg.desde(s + 10)), 2)
         self.assertEqual(len(self.reg.desde(-3)), 2)
 
+    def test_erro_inesperado_vira_mensagem(self):
+        def quebra():
+            raise TimeoutError('pc pesado')
+        e = self.exec(therion_vivo=quebra)
+        self.assertEqual(e.disparar('1'), 'aceito')
+        self.esperar(e)
+        self.assertEqual(self.reg.desde(0)[-1]['texto'], 'falhou: erro inesperado')
+
     def test_id_desconhecido(self):
         self.assertEqual(self.exec().disparar('9'), 'desconhecido')
 

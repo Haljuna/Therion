@@ -160,14 +160,16 @@ html, body { margin: 0; padding: 0; height: 100%; background: #0d0a18; color: #b
   // O WebView do Android 4.0 cancela o "segurar" sozinho; 5 toques em 3 s também abrem a manutenção.
   // Contados aqui, não no click: o preventDefault do touchstart faz o click nunca chegar.
   var toques = [];
+  // O WebView ignora a 2ª navegação para o mesmo endereço; a hora no fim deixa cada gesto único.
+  function manutencao() { location.href = 'estacao://manutencao?' + new Date().getTime(); }
   function comecar(e) {
     if (e && e.preventDefault) { e.preventDefault(); }
     soltar();
     var agora = new Date().getTime();
     toques.push(agora);
     while (toques.length && agora - toques[0] > 3000) { toques.shift(); }
-    if (toques.length >= 5) { toques = []; location.href = 'estacao://manutencao'; return; }
-    segurando = setTimeout(function () { location.href = 'estacao://manutencao'; }, 5000);
+    if (toques.length >= 5) { toques = []; manutencao(); return; }
+    segurando = setTimeout(manutencao, 5000);
   }
   function soltar() { if (segurando) { clearTimeout(segurando); segurando = null; } }
   var cab = el('cabecalho');

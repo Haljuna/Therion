@@ -150,9 +150,11 @@ public class EstacaoActivity extends Activity {
         final boolean desligada = estado == PackageManager.COMPONENT_ENABLED_STATE_DISABLED;
         new Thread(new Runnable() {
             public void run() {
+                // Sem processo da barra não há o que matar ("kill 0" falharia e mostraria SEM ROOT à toa).
+                String pid = pidDe(BARRA);
                 final boolean ok = desligada
                         ? rodarComoRoot("pm enable " + SERVICO_BARRA + " && am startservice -n " + SERVICO_BARRA)
-                        : rodarComoRoot("pm disable " + SERVICO_BARRA + " && kill " + pidDe(BARRA));
+                        : rodarComoRoot("pm disable " + SERVICO_BARRA + ("0".equals(pid) ? "" : " && kill " + pid));
                 runOnUiThread(new Runnable() {
                     public void run() {
                         if (!ok) {

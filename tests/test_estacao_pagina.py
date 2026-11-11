@@ -33,6 +33,8 @@ class TestPagina(unittest.TestCase):
         self.assertIn('toques.length >= 5', t)
         # O preventDefault do touchstart some com o click no WebView: os toques contam no próprio touchstart.
         self.assertNotIn("cab.addEventListener('click'", t)
+        # O WebView ignora a 2ª navegação para o mesmo endereço: cada gesto leva a hora junto.
+        self.assertNotIn("location.href = 'estacao://manutencao';", t)
 
 
 if __name__ == '__main__':

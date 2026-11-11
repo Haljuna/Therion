@@ -88,7 +88,11 @@ class Executor:
 
     def _executar(self, acao: Acao) -> None:
         try:
-            self.registro.adicionar('porteiro', self._resultado(acao))
+            try:
+                texto = self._resultado(acao)
+            except Exception:
+                texto = 'falhou: erro inesperado'
+            self.registro.adicionar('porteiro', texto)
         finally:
             with self._trava:
                 self._em_curso = None
