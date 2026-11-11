@@ -31,6 +31,8 @@ class TestPagina(unittest.TestCase):
         self.assertIn('5000', t)
         self.assertIn('orientation: portrait', t)
         self.assertIn('toques.length >= 5', t)
+        # O preventDefault do touchstart some com o click no WebView: os toques contam no próprio touchstart.
+        self.assertNotIn("cab.addEventListener('click'", t)
 
 
 if __name__ == '__main__':

@@ -190,9 +190,19 @@ public class EstacaoActivity extends Activity {
         return "0";
     }
 
+    // O su chamado por um app limpa o ambiente, e o pm/am (Java) quebra ao nascer sem estas variáveis.
+    private static final String[] AMBIENTE = {"LD_LIBRARY_PATH", "BOOTCLASSPATH", "ANDROID_ROOT", "ANDROID_DATA", "PATH"};
+
     private static boolean rodarComoRoot(String comando) {
+        StringBuilder exports = new StringBuilder();
+        for (String nome : AMBIENTE) {
+            String valor = System.getenv(nome);
+            if (valor != null) {
+                exports.append("export ").append(nome).append("='").append(valor).append("'; ");
+            }
+        }
         try {
-            return Runtime.getRuntime().exec(new String[] {"su", "-c", comando}).waitFor() == 0;
+            return Runtime.getRuntime().exec(new String[] {"su", "-c", exports + comando}).waitFor() == 0;
         } catch (Exception erro) {
             return false;
         }

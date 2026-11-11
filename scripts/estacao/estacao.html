@@ -157,17 +157,20 @@ html, body { margin: 0; padding: 0; height: 100%; background: #0d0a18; color: #b
   for (var id in ROTULOS) { ligarBotao(id); }
 
   var segurando = null;
-  function comecar(e) { if (e && e.preventDefault) { e.preventDefault(); } soltar(); segurando = setTimeout(function () { location.href = 'estacao://manutencao'; }, 5000); }
-  function soltar() { if (segurando) { clearTimeout(segurando); segurando = null; } }
-  var cab = el('cabecalho');
   // O WebView do Android 4.0 cancela o "segurar" sozinho; 5 toques em 3 s também abrem a manutenção.
+  // Contados aqui, não no click: o preventDefault do touchstart faz o click nunca chegar.
   var toques = [];
-  cab.addEventListener('click', function () {
+  function comecar(e) {
+    if (e && e.preventDefault) { e.preventDefault(); }
+    soltar();
     var agora = new Date().getTime();
     toques.push(agora);
     while (toques.length && agora - toques[0] > 3000) { toques.shift(); }
-    if (toques.length >= 5) { toques = []; location.href = 'estacao://manutencao'; }
-  }, false);
+    if (toques.length >= 5) { toques = []; location.href = 'estacao://manutencao'; return; }
+    segurando = setTimeout(function () { location.href = 'estacao://manutencao'; }, 5000);
+  }
+  function soltar() { if (segurando) { clearTimeout(segurando); segurando = null; } }
+  var cab = el('cabecalho');
   cab.addEventListener('touchstart', comecar, false);
   cab.addEventListener('touchend', soltar, false);
   cab.addEventListener('touchcancel', soltar, false);
