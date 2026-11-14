@@ -116,14 +116,25 @@ def test_error_turns_the_orb_amber_and_dimmer_than_idle(app):
     assert sum(measured['error']) < sum(measured['idle'])
 
 
-def test_static_fallback_uses_new_shape(app):
-    from PySide6.QtGui import QColor
+def test_static_fallback_draws_dots_and_label(app):
     from therion.interface.constellation import StaticConstellation
-    s = StaticConstellation(); s.resize(300, 300)
-    img = s.grab().toImage()
-    background = QColor('#09090F')
-    lit = sum(img.pixelColor(x, y) != background for x in range(0, 300, 3) for y in range(0, 300, 3))
-    assert lit > 500
+    w = StaticConstellation(); w.resize(400, 400); w.set_state('error')
+    img = w.grab().toImage()
+    lit = sum(1 for y in range(0, 400, 4) for x in range(0, 400, 4) if img.pixelColor(x, y).lightness() > 60)
+    assert lit > 40
+    # erro: a moldura fica âmbar (mais vermelho que azul no arco direito)
+    from therion.interface.hud_style import hud_layout
+    lay = hud_layout(0, 0, 400, 400)
+    arc = img.pixelColor(round(lay.cx+.97*lay.Rf), round(lay.cy))
+    assert arc.red() > arc.blue()+40
+
+
+def test_constellation_passes_state_to_static_fallback(app):
+    from therion.interface.constellation import Constellation
+    c = Constellation(static=True); c.set_visual('listening', .5)
+    assert c.still.state == 'listening'
+    c.set_visual('nada'); assert c.still.state == 'nada'   # cai em repouso ao desenhar
+    c.resize(300, 300); c.still.grab()
 
 
 @gl

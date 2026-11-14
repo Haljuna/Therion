@@ -1,40 +1,56 @@
-"""Moldura da orbe holográfica do Therion. Apenas apresentação; sem acesso a serviços."""
+"""Lugar da Orbe HUD na interface do Therion. Apenas apresentação; sem acesso a serviços."""
 import os
 import numpy as np
-from PySide6.QtCore import Qt, QTimer, QRectF, QPointF
-from PySide6.QtGui import QColor, QPainter, QPen, QRadialGradient
+from PySide6.QtCore import Qt, QTimer, QRectF
+from PySide6.QtGui import QColor, QPainter, QRadialGradient
 from PySide6.QtWidgets import QWidget, QStackedWidget, QLabel
-from .orb_geometry import build_orb
+from .hud_frame import FrameState, paint_hud_frame
+from .hud_style import CORE, DOT, hud_layout, label_for, look_for
+from .orb_geometry import fib_sphere, _rot_x, _rot_y
 from .orb_renderer import OrbGL
+
+STATIC_POINTS = 1800
 
 
 class StaticConstellation(QWidget):
-    """Reserva sem OpenGL: a forma da orbe parada, projetada em 2D."""
+    """Reserva sem OpenGL: a esfera de pontos parada, em 2D, com a moldura e o nome do estado."""
     def __init__(self, parent=None):
         super().__init__(parent)
-        lines = build_orb().lines
-        self.segments = lines[::6, :6]   # um vértice por segmento: ponta e outra ponta
-        self.glow = lines[::6, 10]
+        v = _rot_x(_rot_y(fib_sphere(STATIC_POINTS), .4), .28)
+        k = 3.4/(3.4-v[:, 2])   # mesma perspectiva do shader
+        self.dots = np.column_stack((v[:, 0]*k, -v[:, 1]*k, (v[:, 2]+1.)/2.))[np.argsort(v[:, 2])]
+        self.state = 'idle'
         self.focus_rect = None
         self.setMinimumSize(160, 160)
+
+    def set_state(self, state):
+        # O painel repete o estado a cada 50 ms; só redesenha quando muda.
+        if state != self.state:
+            self.state = state
+            self.update()
 
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
         painter.fillRect(self.rect(), QColor('#09090F'))
         focus = self.focus_rect or QRectF(self.rect())
-        cx, cy = focus.center().x(), focus.center().y()
-        radius = min(focus.width(), focus.height())*.38
-        glow = QRadialGradient(cx, cy, radius*1.25)
-        glow.setColorAt(0, QColor(124, 77, 255, 46))
-        glow.setColorAt(1, QColor(9, 9, 15, 0))
+        lay = hud_layout(focus.x(), focus.y(), focus.width(), focus.height())
+        look = look_for(self.state)
+        glow = QRadialGradient(lay.cx, lay.cy, lay.R*1.25)
+        glow.setColorAt(0, QColor(*CORE, round(255*look.core)))
+        glow.setColorAt(.55, QColor(*CORE, round(255*look.core*.45)))
+        glow.setColorAt(1, QColor(*CORE, 0))
         painter.fillRect(self.rect(), glow)
-        for (x0, y0, z0, x1, y1, _), g in zip(self.segments, self.glow):
-            back = .35 if z0 < 0 else 1.
-            color = QColor(201, 184, 255) if g > .8 else QColor(124, 77, 255)
-            color.setAlpha(int(min(255, 70+150*g*back)))
-            painter.setPen(QPen(color, 1.))
-            painter.drawLine(QPointF(cx+x0*radius, cy-y0*radius), QPointF(cx+x1*radius, cy-y1*radius))
+        painter.setPen(Qt.NoPen)
+        scale = (2600/STATIC_POINTS)**.5*lay.R/170.
+        for x, y, depth in self.dots:   # frente maior e clara, fundo menor e escuro
+            size = max(1., (.8+1.6*depth)*scale)
+            painter.setBrush(QColor(*DOT, round(255*(.12+.88*depth)*.8*look.dim)))
+            painter.drawEllipse(QRectF(lay.cx+x*lay.R-size/2, lay.cy+y*lay.R-size/2, size, size))
+        paint_hud_frame(painter, lay, FrameState(
+            label=label_for(self.state), level=0., arc_deg=look.arc_deg, arc_scale=look.arc_scale,
+            arc_rotation=0., tick_rotation=0., dash_rotation=0., blink=1., amber=look.amber,
+            voice_ring=0., voice=0.))
 
 
 class Constellation(QWidget):
@@ -92,6 +108,7 @@ class Constellation(QWidget):
     def set_visual(self, state, intensity=0.):
         if self.renderer:
             self.renderer.set_visual(state,intensity)
+        self.still.set_state(state)
         self.setAccessibleDescription(state)
 
     def set_scene_pointer(self,x,y):
