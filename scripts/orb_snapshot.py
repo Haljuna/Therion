@@ -1,4 +1,4 @@
-"""Print da orbe holográfica para comparar com a referência.
+"""Print da Orbe HUD para comparar com o protótipo.
 
 Uso: python scripts/orb_snapshot.py --state idle --size 720 --seconds 1 --out orbe.png [--sheet 12]
 """

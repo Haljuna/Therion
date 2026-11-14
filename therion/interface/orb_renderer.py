@@ -1,16 +1,18 @@
-"""Desenho OpenGL da orbe holográfica. Apenas apresentação; sem acesso a serviços."""
+"""Desenho OpenGL da Orbe HUD. Apenas apresentação; sem acesso a serviços."""
 import math
 import time
 import numpy as np
 from PySide6.QtCore import Qt, QTimer, Signal, QRectF, QSize
-from PySide6.QtGui import QSurfaceFormat
+from PySide6.QtGui import QPainter, QSurfaceFormat
 from PySide6.QtOpenGLWidgets import QOpenGLWidget
 from PySide6.QtOpenGL import (QOpenGLBuffer, QOpenGLShader, QOpenGLShaderProgram,
                              QOpenGLFramebufferObject, QOpenGLFramebufferObjectFormat)
 from .graphics import FRAME_INTERVAL_MS
+from .hud_frame import paint_hud_frame
+from .hud_style import AMBER, CORE, DOT, FRAME, HOT, hud_layout, point_count
 from .orb_geometry import build_orb, VERTEX_FLOATS
 from .orb_motion import OrbMotion, THINKING_STATES
-from .orb_shaders import (SCENE_VERTEX, SCENE_FRAGMENT, QUAD_VERTEX, BLOOM_FRAGMENT,
+from .orb_shaders import (SCENE_VERTEX, SCENE_FRAGMENT, QUAD_VERTEX, AURA_FRAGMENT,
                           BLUR_FRAGMENT, COMPOSITE_FRAGMENT, TRAIL_FRAGMENT)
 from .presentation import QualityController
 from .scene_motion import SceneMotion
@@ -20,16 +22,16 @@ STRIDE = VERTEX_FLOATS*4
 _GL_FLOAT, _TRIANGLES, _POINTS, _STRIP = 0x1406, 0x0004, 0x0000, 0x0005
 _TEXTURE_2D, _LINEAR, _CLAMP = 0x0DE1, 0x2601, 0x812F
 GLOW_WEIGHTS = (.55, .45, .35)
-GROUP_GAIN = {'surfaces': .45, 'lines': .85, 'points': 1.}
+# Ponto suave e redondo com luz parecida com a do quadradinho do protótipo (que valia para 2600 pontos e R = 170).
+POINT_SCALE = 2.7
 
 
 def line_width_px(orb_px: float) -> float:
     return max(1., 1.2*max(0., float(orb_px))/500.)
 
 
-def detail_level(orb_px: float) -> float:
-    t = min(1., max(0., (float(orb_px)-200.)/120.))
-    return t*t*(3.-2.*t)
+def point_size_px(radius_px: float, points: int) -> float:
+    return POINT_SCALE*math.sqrt(2600./max(1, points))*max(0., float(radius_px))/170.
 
 
 def trail_keep(trail: float, dt: float) -> float:
@@ -67,7 +69,7 @@ class OrbGL(QOpenGLWidget):
         self.reduced = False
         self.ready = False
         self.disabled = False
-        self.program = self.bloom = self.quad = self.blur = self.composite = self.trail = None
+        self.program = self.aura = self.quad = self.blur = self.composite = self.trail = None
         self._trail_fresh = True
         self.scene_ms = self.scene_fbo = None
         self._chain = []   # pares (temporário, saída) por escala de brilho
@@ -75,6 +77,7 @@ class OrbGL(QOpenGLWidget):
         self.trail_cleared = False
         self._was_reduced = False
         self.buffers = {}
+        self.point_count = 0
         self.failure_detail = ''
         self.last_frame = None
         self.frame_times = []
@@ -87,14 +90,13 @@ class OrbGL(QOpenGLWidget):
         try:
             self.gl = self.context().functions()
             self.program = self._program(SCENE_VERTEX, SCENE_FRAGMENT)
-            self.bloom = self._program(QUAD_VERTEX, BLOOM_FRAGMENT)
+            self.aura = self._program(QUAD_VERTEX, AURA_FRAGMENT)
             self.blur = self._program(QUAD_VERTEX, BLUR_FRAGMENT)
             self.composite = self._program(QUAD_VERTEX, COMPOSITE_FRAGMENT)
             self.trail = self._program(QUAD_VERTEX, TRAIL_FRAGMENT)
-            mesh = build_orb()
-            for name in ('surfaces', 'lines', 'points'):
-                data = getattr(mesh, name)
-                self.buffers[name] = (self._buffer(data.tobytes()), len(data))
+            lines = build_orb(0).lines
+            self.buffers['lines'] = (self._buffer(lines.tobytes()), len(lines))
+            self._ensure_points()
             self.quad = self._buffer(np.array([-1, -1, 1, -1, -1, 1, 1, 1], dtype='float32').tobytes())
             self.context().aboutToBeDestroyed.connect(self.cleanup)
             self.ready = True
@@ -138,9 +140,21 @@ class OrbGL(QOpenGLWidget):
     def _focus(self):
         return (self.focus_rect or QRectF(self.rect())).intersected(QRectF(self.rect()))
 
-    def current_detail(self):
+    def _layout(self):
         focus = self._focus()
-        return detail_level(min(focus.width(), focus.height()))
+        return hud_layout(focus.x(), focus.y(), focus.width(), focus.height())
+
+    def _ensure_points(self):
+        """A quantidade de pontos segue a qualidade e o tamanho; ao mudar, só esse buffer é refeito."""
+        focus = self._focus()
+        wanted = point_count(self.quality.level, min(focus.width(), focus.height()))
+        if wanted == self.point_count and 'points' in self.buffers:
+            return
+        if 'points' in self.buffers:
+            self.buffers['points'][0].destroy()
+        data = build_orb(wanted).points
+        self.buffers['points'] = (self._buffer(data.tobytes()), len(data))
+        self.point_count = wanted
 
     def paintGL(self):
         try:
@@ -158,8 +172,7 @@ class OrbGL(QOpenGLWidget):
             if len(self.frame_times) >= 60:
                 self.metrics.emit({'fps': round(len(self.frame_times)/sum(self.frame_times), 1),
                                    'frame_ms': round(1000*sum(self.frame_times)/len(self.frame_times), 2),
-                                   'quality': self.quality.level,
-                                   'detail': round(self.current_detail(), 2)})
+                                   'quality': self.quality.level, 'points': self.point_count})
                 self.frame_times.clear()
 
     def _paint_frame(self):
@@ -178,6 +191,7 @@ class OrbGL(QOpenGLWidget):
         gl = self.gl
         levels = bloom_levels(self.quality.level, self.state)
         self._ensure_targets(width, height, levels)
+        self._ensure_points()
         gl.glEnable(0x8642)   # tamanho de ponto programável
         gl.glEnable(0x8861)   # point sprites (contexto de compatibilidade)
         # 1. Cena num FBO com MSAA, resolvida para uma textura.
@@ -188,9 +202,11 @@ class OrbGL(QOpenGLWidget):
         self._scene(width, height)
         gl.glDisable(0x0BE2)
         QOpenGLFramebufferObject.blitFramebuffer(self.scene_fbo, self.scene_ms)
-        # 2. Rastro: o anterior entra apagando, mais longo quanto mais rápido gira.
-        keep = trail_keep(self.animation.trail, dt)
-        clear = self.reduced or (self.reduced != self._was_reduced) or keep < .01 or self._trail_fresh
+        # 2. Rastro: só em pensando/executando; no resto borraria os pontos.
+        trail = self.animation.trail
+        keep = trail_keep(trail, dt)
+        clear = (self.reduced or (self.reduced != self._was_reduced) or trail < .01 or keep < .01
+                 or self._trail_fresh)
         self._was_reduced = self.reduced; self._trail_fresh = False
         self.trail_cleared = clear
         source = self._trail_pass(0. if clear else keep)
@@ -199,7 +215,7 @@ class OrbGL(QOpenGLWidget):
             self._blur_pass(source, temp, (1./source.width(), 0.))
             self._blur_pass(temp, out, (0., 1./temp.height()))
             source = out
-        # 4. Fundo, halo e chão; depois cena e brilho somados.
+        # 4. Fundo e núcleo; depois cena e brilho somados; por fim a moldura, nítida, por cima.
         gl.glBindFramebuffer(0x8D40, self.defaultFramebufferObject())
         gl.glViewport(0, 0, width, height)
         gl.glClearColor(9/255, 9/255, 15/255, 1.); gl.glClear(0x4000)
@@ -207,6 +223,9 @@ class OrbGL(QOpenGLWidget):
         self._aura(width, height)
         self._composite(self._trail[0])
         gl.glDisable(0x0BE2)
+        painter = QPainter(self)
+        paint_hud_frame(painter, self._layout(), self.animation.frame_state())
+        painter.end()
 
     def _trail_pass(self, keep):
         gl = self.gl; t = self.trail
@@ -281,50 +300,43 @@ class OrbGL(QOpenGLWidget):
         gl.glActiveTexture(0x84C0)
 
     def _aura(self, width, height):
-        """Halo e reflexo no chão (sem textura nesta etapa)."""
-        b = self.bloom; gl = self.gl
-        b.bind(); self.quad.bind()
-        b.enableAttributeArray('position'); b.setAttributeBuffer('position', _GL_FLOAT, 0, 2, 8)
-        focus = self._focus()
-        gl.glUniform4f(b.uniformLocation('params'), 0., 0., 0., float(width/height))
-        gl.glUniform4f(b.uniformLocation('anchor'),
-                       focus.center().x()/max(1, self.width()),
-                       1.-focus.center().y()/max(1, self.height())+.0275*focus.height()/max(1, self.height()),
-                       focus.height()/max(1, self.height()), focus.width()/max(1, self.width()))
-        a = self.animation
-        gl.glUniform4f(b.uniformLocation('aura'), a.phase, a.energy, float(not self.reduced), a.pulse)
-        gl.glDrawArrays(_STRIP, 0, 4)
-        b.disableAttributeArray('position'); self.quad.release(); b.release()
+        """Núcleo roxo atrás da esfera e halo largo."""
+        b = self.aura; gl = self.gl; a = self.animation; lay = self._layout()
+        b.bind()
+        gl.glUniform4f(b.uniformLocation('anchor'), lay.cx/max(1, self.width()), 1.-lay.cy/max(1, self.height()),
+                       lay.R/max(1, self.height()), float(width/height))
+        gl.glUniform1f(b.uniformLocation('strength'), a.look.core+.35*a.voice+.1*a.energy+.08*a.pulse)
+        gl.glUniform3f(b.uniformLocation('colCore'), *(c/255. for c in CORE))
+        self._quad(b); b.release()
 
     def _scene(self, width, height):
-        p = self.program; gl = self.gl; a = self.animation
-        focus = self._focus()
+        p = self.program; gl = self.gl; a = self.animation; look = a.look; lay = self._layout()
         ratio = self.devicePixelRatioF()
+        still = self.reduced   # modo reduzido: sem ondulação nem giro
         p.bind()
         uniform = lambda name, *v: getattr(gl, f'glUniform{len(v)}f')(p.uniformLocation(name), *map(float, v))
-        uniform('spin', a.spin); uniform('clock', a.clock)
-        uniform('detailLevel', self.current_detail())
-        uniform('lineWidth', line_width_px(min(focus.width(), focus.height()))*ratio)
-        uniform('pointSize', max(1., 2.2*min(focus.width(), focus.height())/500.)*ratio)
-        uniform('aspect', width/height)
-        uniform('fit', min(focus.height()/max(1, self.height()), focus.width()/max(1, self.height())*1.05))
-        uniform('center', 2.*focus.center().x()/max(1, self.width())-1.,
-                1.-2.*focus.center().y()/max(1, self.height())+.055*focus.height()/max(1, self.height()))
+        for name, value in (('spin', a.spin), ('clock', a.clock), ('ripple', 0. if still else look.ripple),
+                            ('sweep', look.sweep), ('sweepPhase', a.sweep_phase),
+                            ('listenWave', look.listen_wave), ('energy', a.energy), ('voice', a.voice),
+                            ('breathe', 0. if still else look.breathe), ('dim', look.dim),
+                            ('amber', look.amber), ('jitter', 0. if still else look.jitter),
+                            ('orbitPhase', a.orbit_phase), ('assembly', a.assembly), ('flash', a.flash),
+                            ('pointSize', point_size_px(lay.R, self.point_count)*ratio),
+                            ('radiusPx', lay.R*ratio), ('lineWidth', line_width_px(lay.R/.215)*ratio),
+                            ('aspect', width/height), ('fit', 2.*lay.R/max(1, self.height()))):
+            uniform(name, value)
+        uniform('center', 2.*lay.cx/max(1, self.width())-1., 1.-2.*lay.cy/max(1, self.height()))
         uniform('viewport', width, height)
-        uniform('eye', a.eye); uniform('tint', a.tint); uniform('rim', a.rim)
-        uniform('flash', a.flash); uniform('assembly', a.assembly); uniform('energy', a.energy)
-        uniform('relief', 0. if self.reduced else a.relief)
-        uniform('zoom', 1. if self.reduced else a.zoom); uniform('glow', a.glow)
-        uniform('wobble', *((0., 0.) if self.reduced else a.wobble))
-        for name, mode in (('surfaces', _TRIANGLES), ('lines', _TRIANGLES), ('points', _POINTS)):
+        for name, color in (('colDot', DOT), ('colHot', HOT), ('colFrame', FRAME), ('colAmber', AMBER)):
+            uniform(name, *(c/255. for c in color))
+        for name, mode in (('lines', _TRIANGLES), ('points', _POINTS)):
             buffer, count = self.buffers[name]
-            uniform('isPoint', mode == _POINTS); uniform('groupGain', GROUP_GAIN[name])
+            uniform('isPoint', mode == _POINTS)
             buffer.bind()
-            for attr, offset, size in (('position', 0, 3), ('other', 12, 3), ('meta', 24, 4),
-                                       ('extra', 40, 2), ('rise', 48, 2)):
+            for attr, offset, size in (('position', 0, 3), ('other', 12, 3), ('meta', 24, 4), ('extra', 40, 2)):
                 p.enableAttributeArray(attr); p.setAttributeBuffer(attr, _GL_FLOAT, offset, size, STRIDE)
             gl.glDrawArrays(mode, 0, count)
-            for attr in ('position', 'other', 'meta', 'extra', 'rise'):
+            for attr in ('position', 'other', 'meta', 'extra'):
                 p.disableAttributeArray(attr)
             buffer.release()
         p.release()
@@ -352,6 +364,6 @@ class OrbGL(QOpenGLWidget):
                 buffer.destroy()
         self.buffers = {}; self.quad = None
         self.scene_ms = self.scene_fbo = None; self._chain = []; self._trail = []
-        self.program = self.bloom = self.blur = self.composite = self.trail = None
+        self.program = self.aura = self.blur = self.composite = self.trail = None
         self.doneCurrent()
         self.gl = None

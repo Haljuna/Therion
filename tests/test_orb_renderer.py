@@ -1,16 +1,11 @@
-"""Desenho da orbe holográfica: funções puras e fumaça com OpenGL real."""
+"""Desenho da Orbe HUD: funções puras e fumaça com OpenGL real."""
 import math
 import os
 import time
 import pytest
 from PySide6.QtWidgets import QApplication
-from therion.interface.orb_renderer import line_width_px, detail_level, frame_interval_ms, bloom_levels
+from therion.interface.orb_renderer import line_width_px, frame_interval_ms, bloom_levels
 from therion.interface.graphics import FRAME_INTERVAL_MS
-
-
-@pytest.fixture(scope='module')
-def app():
-    return QApplication.instance() or QApplication([])
 
 
 def pump(seconds):
@@ -28,13 +23,12 @@ def settle(predicate, timeout=3):
 
 @pytest.mark.parametrize('px', [0, 40, 259, 500, 4000])
 def test_helpers_stay_finite_and_bounded(px):
-    w, d = line_width_px(px), detail_level(px)
-    assert math.isfinite(w) and w >= 1 and math.isfinite(d) and 0 <= d <= 1
+    w = line_width_px(px)
+    assert math.isfinite(w) and w >= 1
 
 
 def test_helper_values_from_spec():
     assert line_width_px(500) == pytest.approx(1.2) and line_width_px(100) == 1
-    assert detail_level(200) == 0 and detail_level(320) == 1 and 0 < detail_level(260) < 1
     assert frame_interval_ms('thinking') == frame_interval_ms('executing') == 33
     assert frame_interval_ms('idle') == FRAME_INTERVAL_MS
     assert bloom_levels('high', 'idle') == 3 and bloom_levels('high', 'thinking') == 2
@@ -110,15 +104,15 @@ def _mean_lit_color(img):
 
 
 @gl
-def test_error_turns_the_orb_redder_and_dimmer_than_idle(app):
+def test_error_turns_the_orb_amber_and_dimmer_than_idle(app):
     from therion.interface.orb_renderer import OrbGL
     measured = {}
     for state in ('idle', 'error'):
         w = OrbGL(); w.resize(300, 300); w.show(); w.set_active(True); settle(lambda: w.ready)
         w.set_visual(state, 0); pump(.8)
         measured[state] = _mean_lit_color(w.grabFramebuffer()); w.close()
-    ratio = {s: r/b for s, (r, _, b) in measured.items()}
-    assert ratio['error'] > ratio['idle']+.07   # mistura de 30% da spec dá ~+0,09
+    warmth = {s: r-b for s, (r, _, b) in measured.items()}   # âmbar puxa para o vermelho
+    assert warmth['error'] > warmth['idle']+10
     assert sum(measured['error']) < sum(measured['idle'])
 
 
@@ -133,14 +127,11 @@ def test_static_fallback_uses_new_shape(app):
 
 
 @gl
-def test_cadence_and_detail_follow_state_and_size(app):
-    from PySide6.QtCore import QRectF
+def test_cadence_follows_state(app):
     from therion.interface.orb_renderer import OrbGL
     w = OrbGL(); w.resize(600, 600); w.show(); w.set_active(True); settle(lambda: w.ready)
     w.set_visual('thinking', 0); pump(.1); assert w.timer.interval() == 33
     w.set_visual('idle', 0); pump(.1); assert w.timer.interval() == FRAME_INTERVAL_MS
-    w.focus_rect = QRectF(0, 0, 150, 150); pump(.2); assert w.current_detail() == 0
-    w.focus_rect = QRectF(0, 0, 500, 500); pump(.2); assert w.current_detail() == 1
     w.close()
 
 
@@ -161,3 +152,46 @@ def test_widget_framebuffer_has_no_extra_msaa(app):
     # A cena já tem MSAA própria; a janela só recebe quadros cheios.
     from therion.interface.orb_renderer import OrbGL
     assert OrbGL().format().samples() == 0
+
+
+@gl
+def test_quality_change_rebuilds_point_count(app):
+    from therion.interface.orb_renderer import OrbGL
+    w = OrbGL(); w.resize(520, 520); w.show(); w.set_quality('high'); w.set_active(True)
+    settle(lambda: w.ready); pump(.1)
+    assert w.point_count == 3200
+    w.set_quality('low'); pump(.1); assert w.point_count == 1800 and w.ready
+    w.set_quality('high'); pump(.1); assert w.point_count == 3200 and w.ready
+    w.close()
+
+
+@gl
+def test_small_orb_uses_fewer_points(app):
+    from therion.interface.orb_renderer import OrbGL
+    w = OrbGL(); w.resize(200, 200); w.show(); w.set_quality('high'); w.set_active(True)
+    settle(lambda: w.ready); pump(.1)
+    assert w.point_count == 1800
+    w.close()
+
+
+@gl
+def test_trail_only_while_thinking(app):
+    from therion.interface.orb_renderer import OrbGL
+    w = OrbGL(); w.resize(400, 400); w.show(); w.set_active(True); settle(lambda: w.ready)
+    w.set_visual('idle', 0); pump(.5); assert w.trail_cleared
+    w.set_visual('thinking', 0); pump(1.); assert not w.trail_cleared
+    w.close()
+
+
+@gl
+def test_frame_label_is_drawn_below_the_orb(app):
+    # A moldura é pintada por cima do OpenGL: tem de haver algo aceso na altura do nome do estado.
+    from therion.interface.hud_style import hud_layout
+    from therion.interface.orb_renderer import OrbGL
+    w = OrbGL(); w.resize(400, 400); w.show(); w.set_active(True); settle(lambda: w.ready); pump(.3)
+    img = w.grabFramebuffer(); scale = img.width()/400
+    lay = hud_layout(0, 0, 400, 400)
+    rows = range(round(lay.label_y*scale), round((lay.label_y+14)*scale))
+    lit = sum(img.pixelColor(x, y).lightness() > 90 for y in rows for x in range(img.width()))
+    assert lit > 30
+    w.close()

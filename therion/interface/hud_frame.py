@@ -75,7 +75,7 @@ def paint_hud_frame(painter: QPainter, layout: HudLayout, frame: FrameState) -> 
         painter.drawRect(QRectF(cx+(i-middle)*gap-size/2, layout.label_y-10*unit, size, size))
     font = QFont(); font.setFamilies(['IBM Plex Mono', 'Consolas']); font.setStyleHint(QFont.Monospace)
     font.setWeight(QFont.Medium)
-    pixels, room, count = max(10., .1*R), 2*1.22*Rf, max(1, len(frame.label))
+    pixels, room, count = max(11., .115*R), 2*1.22*Rf, max(1, len(frame.label))
     font.setPixelSize(round(pixels))
     width = QFontMetricsF(font).horizontalAdvance(frame.label)
     if width > room:   # nome longo em orbe pequena: encolhe a letra só depois de zerar o espaçamento

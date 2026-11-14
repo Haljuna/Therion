@@ -1,95 +1,104 @@
-"""GLSL da orbe holográfica (OpenGL 2.1, #version 120). Apenas texto."""
+"""GLSL da Orbe HUD (OpenGL 2.1, #version 120). Apenas texto."""
 
-# Vértice: posição, outra ponta da linha, meta = (side, layer, spin, detail), extra = (glow, seed).
+# Vértice: posição, outra ponta da linha, meta = (side, layer, índice da órbita, velocidade),
+# extra = (glow, seed). Camadas: 0 pontos da esfera, 1 órbita, 2 eixo, 3 ponto que corre na órbita.
+# Fórmulas de movimento portadas do protótipo (draw() em specs/2026-11-13-orbe-hud-prototipo.html).
 SCENE_VERTEX = '''
 #version 120
 attribute vec3 position;
 attribute vec3 other;
 attribute vec4 meta;
 attribute vec2 extra;
-attribute vec2 rise;   // elevação desta ponta e da outra
-uniform float spin, clock, detailLevel, lineWidth, pointSize, aspect, fit;
-uniform float eye, tint, rim, flash, assembly, energy, relief, zoom;
-uniform vec2 center, viewport, wobble;
-varying float vGlow, vLight, vLayer, vSeed, vFlash;
+uniform float spin, clock, ripple, sweep, sweepPhase, listenWave, energy, voice, breathe;
+uniform float dim, jitter, orbitPhase, assembly, flash;
+uniform float pointSize, radiusPx, lineWidth, aspect, fit, isPoint;
+uniform vec2 center, viewport;
+varying float vLight, vHot, vLayer;
+const float F = 3.4;                              // distância da câmera, em raios
+const vec3 D1 = vec3(.6189, .3094, .7220);
+const vec3 D2 = vec3(-.4364, .8729, .2182);
+const vec3 D3 = vec3(.2074, -.5185, .8296);
 
-vec3 place(vec3 p, float lift) {
-    float layer = meta.y;
-    // Placas elevadas respiram: ±35% da altura, fase e ritmo próprios, em duas ondas
-    // de razão irracional para nunca repetir o mesmo compasso.
-    float f = 6.283*(.25+extra.y*.35), ph = extra.y*6.283;
-    float breath = 1.+relief*.35*(.7*sin(clock*f+ph)+.3*sin(clock*f*1.618+ph*2.3));
-    p += normalize(p+vec3(1e-6))*lift*breath;
-    float grow = smoothstep(extra.y*.6, extra.y*.6+.4, assembly);
-    p = mix(p*.05, p, grow);
-    // Cada camada deriva um pouco do ritmo exato, para não parecer engrenagem.
-    float a = spin*meta.z+.05*sin(clock*.31+layer*1.7);
-    mat2 r = mat2(cos(a), sin(a), -sin(a), cos(a));
-    if (abs(layer-4.) < .5) {               // giroscópio: gira no próprio plano e inclina 25°
-        p.xy = r*p.xy;
-        float t = radians(25.);
-        p.yz = mat2(cos(t), sin(t), -sin(t), cos(t))*p.yz;
-    } else if (abs(layer-5.) < .5) {        // olho: de frente para quem olha
-        p.xy = r*p.xy;
-    } else {
-        p.xz = r*p.xz;
-    }
-    // Eixo levemente inclinado que vaga, e zoom da respiração e da fala.
-    p.yz = mat2(cos(wobble.x), sin(wobble.x), -sin(wobble.x), cos(wobble.x))*p.yz;
-    p.xy = mat2(cos(wobble.y), sin(wobble.y), -sin(wobble.y), cos(wobble.y))*p.xy;
-    return p*zoom;
+vec3 rotY(vec3 p, float a) { float c = cos(a), s = sin(a); return vec3(p.x*c+p.z*s, p.y, -p.x*s+p.z*c); }
+vec3 rotX(vec3 p, float a) { float c = cos(a), s = sin(a); return vec3(p.x, p.y*c-p.z*s, p.y*s+p.z*c); }
+
+// Órbitas acompanham a esfera a 30% do giro; o eixo, a 50% e mais deitado.
+vec3 placeLine(vec3 p, float layer) {
+    return abs(layer-2.) < .5 ? rotX(rotY(p, spin*.5), .75) : rotX(rotY(p, spin*.3), .25);
 }
 
 vec2 project(vec3 p) {
-    float depth = 1./(3.1-p.z*.48);
-    return vec2(p.x*depth*2.05*fit/aspect+center.x, p.y*depth*2.05*fit+center.y);
+    float k = F/(F-p.z);
+    return vec2(p.x*k*fit/aspect+center.x, p.y*k*fit+center.y);
 }
 
 void main() {
-    vec3 p = place(position, rise.x);
-    vec2 a = project(p);
-    vec2 d = (project(place(other, rise.y))-a)*viewport*.5;
-    vec2 n = length(d) > 1e-4 ? normalize(vec2(-d.y, d.x)) : vec2(0.);
-    gl_Position = vec4(a+n*meta.x*lineWidth/viewport, 0., 1.);
-    gl_PointSize = pointSize*(.7+extra.y*.6);
-    // Lado de trás com 35% do brilho; olho e giroscópio ficam de frente.
-    float back = abs(meta.y-5.) < .5 ? 1. : mix(.35, 1., smoothstep(-.1, .1, p.z));
-    float detail = mix(1., detailLevel, meta.w);
-    vLight = back*detail;
-    vGlow = extra.x;
-    vLayer = meta.y;
-    vSeed = extra.y;
-    // Clarão: nasce no olho e alcança o que está perto do centro.
-    float r = length(p.xy);
-    vFlash = flash*3.*exp(-r*r/.08);
+    float layer = meta.y, light, hot = 0.;
+    vec3 p;
+    if (layer < .5) {
+        vec3 b = position;
+        float seed = extra.y;
+        float r = 1.+ripple*.035*sin(dot(b, D1)*5.+clock*1.2)*sin(dot(b, D2)*4.-clock*.8);
+        float lum = .55+.45*sin(clock*2.2+seed*40.);
+        float w = max(0., sin(dot(b, D3)*7.+clock*6.));          // pulso da voz do Therion
+        r += voice*(.06+.12*w); lum += voice*w;
+        float band = b.y-sin(sweepPhase);                        // faixa de luz varrendo
+        lum += sweep*1.4*exp(-band*band/.006);
+        r += breathe*.04*sin(clock*1.6)+jitter*.02*sin(clock*31.+seed*50.);
+        vec3 v = rotX(rotY(b, spin), .28);
+        float ang = acos(clamp(v.z, -1., 1.));                   // ondas correm para quem olha
+        float wave = max(0., sin(ang*9.+clock*6.));
+        r += listenWave*(.03+.05*energy)*wave; lum += listenWave*.8*wave*(1.-ang/3.14159);
+        float grow = smoothstep(seed*.6, seed*.6+.4, assembly);  // montagem: vem de dentro e acende
+        p = v*r*mix(.6, 1., grow);
+        float depth = (v.z+1.)*.5;                               // frente maior e clara, fundo menor e escuro
+        float a = min(1., (.12+.88*depth)*lum*.85);
+        hot = smoothstep(.45, .8, a);
+        light = a*grow*dim;
+        gl_PointSize = max(1.5, pointSize*(.6+1.2*depth));
+    } else {
+        if (layer > 2.5) {
+            float a = 6.2832*orbitPhase*meta.w;
+            p = placeLine(position*cos(a)+other*sin(a), 1.);
+            light = p.z >= 0. ? 1. : .35;
+            gl_PointSize = max(4., radiusPx*.18);
+        } else {
+            p = placeLine(position, layer);
+            light = extra.x*mix(.3, 1., smoothstep(-.1, .1, p.z));   // metade de trás com 30%
+            gl_PointSize = max(3., radiusPx*.04);
+        }
+        hot = isPoint;
+        light *= smoothstep(.3, 1., assembly);
+    }
+    vec2 at = project(p);
+    vec2 n = vec2(0.);
+    if (abs(meta.x) > .5) {
+        vec2 d = (project(placeLine(other, layer))-at)*viewport*.5;
+        if (length(d) > 1e-4) n = normalize(vec2(-d.y, d.x));
+    }
+    gl_Position = vec4(at+n*meta.x*lineWidth/viewport, 0., 1.);
+    vLight = light*(1.+1.5*flash);
+    vHot = hot;
+    vLayer = layer;
 }
 '''
 
 SCENE_FRAGMENT = '''
 #version 120
-uniform float isPoint, groupGain, eye, tint, rim, flash, glow;
-varying float vGlow, vLight, vLayer, vSeed, vFlash;
-const vec3 BASE = vec3(.486, .302, 1.);    // #7C4DFF
-const vec3 EDGE = vec3(.788, .722, 1.);    // #C9B8FF
-const vec3 HOT = vec3(.957, .941, 1.);     // #F4F0FF
-const vec3 SPARK = vec3(.867, .922, 1.);   // #DDEBFF, clarão
-const vec3 ERROR = vec3(1., .420, .478);   // #FF6B7A
+uniform float isPoint, amber;
+uniform vec3 colDot, colHot, colFrame, colAmber;
+varying float vLight, vHot, vLayer;
 void main() {
     float shape = 1.;
     if (isPoint > .5) {
         float r = length(gl_PointCoord-vec2(.5))*2.;
         if (r > 1.) discard;
-        shape = exp(-r*r*3.);
+        shape = vLayer > 2.5 ? (1.-r)*(1.-r) : exp(-r*r*2.5);
     }
-    vec3 color = mix(BASE, EDGE, clamp(vGlow/1.2, 0., 1.));
-    color = mix(color, HOT, clamp((vGlow-1.2)/.8, 0., 1.));
-    // Estado: olho segue o canal eye (0,7 = normal); erro escurece a 60% e avermelha 30%.
-    float gain = abs(vLayer-5.) < .5 ? eye/.7 : 1.-.4*tint;
-    if (abs(vLayer-1.) < .5) gain *= 1.+1.5*rim;   // aro acende com a voz ou pisca na espera
-    color = mix(color, ERROR, .3*tint);
-    color = mix(color, SPARK, .4*flash);           // a esfera esfria no clarão
-    float light = vGlow*vLight*shape*groupGain*glow;   // fala clareia a orbe
-    gl_FragColor = vec4(color*light*gain+SPARK*vFlash*light, 0.);
+    // No alerta só o que é ciano vira âmbar: órbitas, eixo e os pontos mais acesos.
+    vec3 warm = mix(colHot, colAmber, amber);
+    vec3 color = vLayer < .5 ? mix(colDot, warm, vHot) : mix(mix(colFrame, colAmber, amber), warm, vHot);
+    gl_FragColor = vec4(color*vLight*shape, 0.);
 }
 '''
 
@@ -100,36 +109,19 @@ varying vec2 uv;
 void main() { uv = position*.5+.5; gl_Position=vec4(position,0.,1.); }
 '''
 
-BLOOM_FRAGMENT = '''
+# Núcleo: brilho radial atrás da esfera (até 1,25 R) e um halo largo e fraco (até 2,4 R).
+AURA_FRAGMENT = '''
 #version 120
-uniform sampler2D image;
-uniform vec4 params;
-uniform vec4 anchor;
-uniform vec4 aura;
+uniform vec4 anchor;   // centro em uv, raio da esfera em altura de uv, proporção da tela
+uniform float strength;
+uniform vec3 colCore;
 varying vec2 uv;
 void main() {
-    vec2 s=params.xy;
-    vec3 c=vec3(0.);
-    if (params.z > 0.) {
-        c=texture2D(image,uv).rgb*.28;
-        c+=texture2D(image,uv+vec2(s.x,0.)).rgb*.13;
-        c+=texture2D(image,uv-vec2(s.x,0.)).rgb*.13;
-        c+=texture2D(image,uv+vec2(0.,s.y)).rgb*.13;
-        c+=texture2D(image,uv-vec2(0.,s.y)).rgb*.13;
-        c+=texture2D(image,uv+s).rgb*.05;
-        c+=texture2D(image,uv-s).rgb*.05;
-        c+=texture2D(image,uv+vec2(s.x,-s.y)).rgb*.05;
-        c+=texture2D(image,uv+vec2(-s.x,s.y)).rgb*.05;
-    }
-    float scale=max(.15,anchor.z);
-    vec2 floorUV = (uv - vec2(anchor.x,anchor.y-scale*.42)) * vec2(params.w, 8.0)/scale;
-    float floorGlow = exp(-dot(floorUV,floorUV)*20.0);
-    vec2 haloUV=(uv-anchor.xy)*vec2(params.w,1.)/scale;
-    float halo = exp(-dot(haloUV,haloUV)*16.0);
-    float breathing = 1.0 + aura.z * .10 * sin(aura.x * .95) + aura.y * .20 + aura.w * .08;
-    // Halo e chão no violeta da orbe (#7C4DFF).
-    gl_FragColor=vec4(c*params.z + vec3(.0146,.0091,.030)*floorGlow*breathing
-                      + vec3(.0214,.0133,.044)*halo*breathing,0.);
+    float r = length((uv-anchor.xy)*vec2(anchor.w, 1.)/anchor.z);
+    float t = r/1.25;
+    float core = t < .55 ? mix(1., .45, t/.55) : mix(.45, 0., clamp((t-.55)/.45, 0., 1.));
+    float halo = .16*max(0., 1.-r/2.4);
+    gl_FragColor = vec4(colCore*(core*strength+halo), 0.);
 }
 '''
 
