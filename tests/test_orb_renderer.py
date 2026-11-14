@@ -206,3 +206,46 @@ def test_frame_label_is_drawn_below_the_orb(app):
     lit = sum(img.pixelColor(x, y).lightness() > 90 for y in rows for x in range(img.width()))
     assert lit > 30
     w.close()
+
+
+def test_shader_clocks_stay_small_after_days_running():
+    # float32 no shader: relógios enormes fariam o movimento andar aos trancos.
+    from therion.interface.orb_renderer import shader_clocks
+    from therion.interface.orb_motion import OrbMotion
+    m = OrbMotion(); m.clock = 1e6+.3; m.spin = 2e5+.1; m.orbit_phase = 3e5+.7; m.sweep_phase = 4e5+.2
+    c = shader_clocks(m)
+    assert all(0 <= v < 70 for v in c.values())
+    for k in (1.2, .8, 2.2, 6., 1.6, 31.):
+        assert math.sin(k*c['clock']) == pytest.approx(math.sin(k*m.clock), abs=1e-6)
+    for k in (1., .3, .5):
+        assert math.sin(k*c['spin']) == pytest.approx(math.sin(k*m.spin), abs=1e-6)
+    for speed in (.7, .5, -.35):
+        assert math.sin(math.tau*speed*c['orbitPhase']) == pytest.approx(math.sin(math.tau*speed*m.orbit_phase), abs=1e-6)
+    assert math.sin(c['sweepPhase']) == pytest.approx(math.sin(m.sweep_phase), abs=1e-6)
+
+
+@gl
+def test_scene_is_drawn_with_multisampling_on(app):
+    # O QPainter da moldura desliga o multisample; sem religar, órbitas e eixo ficam serrilhados.
+    from therion.interface.orb_renderer import OrbGL
+    w = OrbGL(); w.resize(300, 300); w.show(); w.set_active(True); settle(lambda: w.ready); pump(.2)
+    seen, draw = [], w._scene
+    w._scene = lambda *a: (seen.append(bool(w.gl.glIsEnabled(0x809D))), draw(*a))
+    pump(.2)
+    assert seen and all(seen)
+    w.close()
+
+
+@gl
+def test_frame_arcs_are_antialiased_on_the_gl_path(app):
+    from therion.interface.hud_style import hud_layout
+    from therion.interface.orb_renderer import OrbGL
+    w = OrbGL(); w.resize(400, 400); w.show(); w.set_active(True); settle(lambda: w.ready); pump(.3)
+    img = w.grabFramebuffer(); scale = img.width()/400
+    lay = hud_layout(0, 0, 400, 400)
+    # Faixa só com o arco direito (fora das órbitas, em 1,42 R = 0,88 Rf, e dentro das marquinhas).
+    xs = range(round((lay.cx+.93*lay.Rf)*scale), round((lay.cx+1.01*lay.Rf)*scale))
+    ys = range(round((lay.cy-.25*lay.Rf)*scale), round((lay.cy+.25*lay.Rf)*scale))
+    levels = {img.pixelColor(x, y).blue()//8 for x in xs for y in ys}
+    assert len(levels) >= 14, len(levels)
+    w.close()

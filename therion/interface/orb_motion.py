@@ -38,7 +38,8 @@ class OrbMotion:
             self._excitation = 1.
             if self.state in THINKING_STATES and state in SPEECH_STATES and self.flash_ready_in <= 0:
                 self.flash = 1.; self.flash_ready_in = FLASH_COOLDOWN
-            self.assembly = 0. if state == 'preparing' else 1.
+            if state == 'preparing':
+                self.assembly = 0.
             self.state = state
         reactive = state in VOICE_STATES
         self.target_energy = normalized_level(intensity) if reactive else 0.
@@ -71,11 +72,12 @@ class OrbMotion:
         self.frame_spin += dt*(.15+1.4*look.arc_spin)
         # Os arcos giram só enquanto o estado pede; depois assentam na posição de descanso
         # mais próxima (meia volta é igual, porque são dois arcos opostos).
-        turning = min(1., look.arc_spin)
+        settle = max(0., 1.-look.arc_spin/.1)   # só puxa para o descanso quando o giro quase acabou
         rest = round(self.arc_angle/math.pi)*math.pi
-        self.arc_angle += dt*.78*look.arc_spin-(self.arc_angle-rest)*(1.-turning)*(1.-math.exp(-dt/.4))
+        self.arc_angle += dt*.78*look.arc_spin-(self.arc_angle-rest)*settle*(1.-math.exp(-dt/.4))
         self.flash *= math.exp(-dt/.1); self.flash_ready_in -= dt
-        self.assembly = min(1., self.assembly+dt/ASSEMBLY_SECONDS) if self.state == 'preparing' else 1.
+        # Continua montando mesmo se o estado mudar antes do fim: sair cedo não dá estalo.
+        self.assembly = min(1., self.assembly+dt/ASSEMBLY_SECONDS)
         # A voz sobe rápido e desce devagar.
         tau = .065 if self.target_energy > self.energy else .17
         self.energy = self.target_energy+(self.energy-self.target_energy)*math.exp(-dt/tau)

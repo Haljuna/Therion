@@ -3,7 +3,7 @@ import math
 import time
 import numpy as np
 from PySide6.QtCore import Qt, QTimer, Signal, QRectF, QSize
-from PySide6.QtGui import QPainter, QSurfaceFormat
+from PySide6.QtGui import QImage, QPainter, QSurfaceFormat
 from PySide6.QtOpenGLWidgets import QOpenGLWidget
 from PySide6.QtOpenGL import (QOpenGLBuffer, QOpenGLShader, QOpenGLShaderProgram,
                              QOpenGLFramebufferObject, QOpenGLFramebufferObjectFormat)
@@ -32,6 +32,15 @@ def line_width_px(orb_px: float) -> float:
 
 def point_size_px(radius_px: float, points: int) -> float:
     return POINT_SCALE*math.sqrt(2600./max(1, points))*max(0., float(radius_px))/170.
+
+
+def shader_clocks(animation) -> dict:
+    """Relógios dobrados em períodos exatos: o shader recebe float32, e depois de horas
+    ligada os valores crus perderiam precisão e o movimento andaria aos trancos."""
+    return {'clock': animation.clock % (10.*math.pi),      # todas as frequências são múltiplas de 0,2
+            'spin': animation.spin % (20.*math.pi),        # usado ×1, ×0,3 e ×0,5
+            'orbitPhase': animation.orbit_phase % 20.,     # velocidades 0,7 · 0,5 · 0,35
+            'sweepPhase': animation.sweep_phase % math.tau}
 
 
 def trail_keep(trail: float, dt: float) -> float:
@@ -78,6 +87,7 @@ class OrbGL(QOpenGLWidget):
         self._was_reduced = False
         self.buffers = {}
         self.point_count = 0
+        self._frame_image = None
         self.failure_detail = ''
         self.last_frame = None
         self.frame_times = []
@@ -192,6 +202,7 @@ class OrbGL(QOpenGLWidget):
         levels = bloom_levels(self.quality.level, self.state)
         self._ensure_targets(width, height, levels)
         self._ensure_points()
+        gl.glEnable(0x809D)   # multisample: o QPainter da moldura desliga a cada quadro
         gl.glEnable(0x8642)   # tamanho de ponto programável
         gl.glEnable(0x8861)   # point sprites (contexto de compatibilidade)
         # 1. Cena num FBO com MSAA, resolvida para uma textura.
@@ -223,8 +234,28 @@ class OrbGL(QOpenGLWidget):
         self._aura(width, height)
         self._composite(self._trail[0])
         gl.glDisable(0x0BE2)
+        self._paint_hud()
+
+    def _paint_hud(self):
+        """A moldura é desenhada numa imagem (com suavização de verdade) e colada por cima:
+        o pintor OpenGL do Qt só suaviza com multisample, que a janela não tem."""
+        lay = self._layout(); ratio = self.devicePixelRatioF()
+        reach = 1.25*lay.Rf   # as marcas fixas vão até 1,22 Rf
+        left, top = math.floor(lay.cx-reach), math.floor(lay.cy-reach)
+        width = math.ceil(2*reach)+1
+        height = math.ceil(lay.label_y+max(22., .3*lay.R))-top
+        size = QSize(round(width*ratio), round(height*ratio))
+        if self._frame_image is None or self._frame_image.size() != size:
+            self._frame_image = QImage(size, QImage.Format_ARGB32_Premultiplied)
+            self._frame_image.setDevicePixelRatio(ratio)
+        image = self._frame_image
+        image.fill(0)
+        painter = QPainter(image)
+        painter.translate(-left, -top)
+        paint_hud_frame(painter, lay, self.animation.frame_state())
+        painter.end()
         painter = QPainter(self)
-        paint_hud_frame(painter, self._layout(), self.animation.frame_state())
+        painter.drawImage(left, top, image)
         painter.end()
 
     def _trail_pass(self, keep):
@@ -315,12 +346,12 @@ class OrbGL(QOpenGLWidget):
         still = self.reduced   # modo reduzido: sem ondulação nem giro
         p.bind()
         uniform = lambda name, *v: getattr(gl, f'glUniform{len(v)}f')(p.uniformLocation(name), *map(float, v))
-        for name, value in (('spin', a.spin), ('clock', a.clock), ('ripple', 0. if still else look.ripple),
-                            ('sweep', look.sweep), ('sweepPhase', a.sweep_phase),
+        for name, value in (*shader_clocks(a).items(), ('ripple', 0. if still else look.ripple),
+                            ('sweep', look.sweep),
                             ('listenWave', look.listen_wave), ('energy', a.energy), ('voice', a.voice),
                             ('breathe', 0. if still else look.breathe), ('dim', look.dim),
                             ('amber', look.amber), ('jitter', 0. if still else look.jitter),
-                            ('orbitPhase', a.orbit_phase), ('assembly', a.assembly), ('flash', a.flash),
+                            ('assembly', a.assembly), ('flash', a.flash),
                             ('pointSize', point_size_px(lay.R, self.point_count)*ratio),
                             ('radiusPx', lay.R*ratio), ('lineWidth', line_width_px(lay.R/.215)*ratio),
                             ('aspect', width/height), ('fit', 2.*lay.R/max(1, self.height()))):

@@ -87,3 +87,16 @@ def test_arcs_stop_turning_after_thinking():
     m.set_visual('idle'); run(m, 5)
     a = m.frame_state().arc_rotation; run(m, 1)
     assert abs(m.frame_state().arc_rotation-a) < 1e-3
+
+
+def test_arcs_keep_turning_while_transcribing():
+    m = OrbMotion(); m.set_visual('transcribing'); run(m, 3)
+    a = m.frame_state().arc_rotation; run(m, 3)
+    assert m.frame_state().arc_rotation > a+.3
+
+
+def test_leaving_preparing_early_does_not_pop():
+    m = OrbMotion(); m.set_visual('preparing'); run(m, .3)
+    before = m.assembly; m.set_visual('listening'); m.advance(1/60)
+    assert before < m.assembly < before+.05
+    run(m, 2); assert m.assembly == 1
