@@ -15,6 +15,12 @@ _WARNING = (
 class TestCliAckAfterDisplay(unittest.TestCase):
     """ACK do plan_candidate_id somente após o print de result.message."""
 
+    def setUp(self) -> None:
+        # O Therion aberto no PC segura o mutex real; sem isto main() sai cedo.
+        lock = patch("therion.autonomy.windows.SingleInstance")
+        lock.start().return_value.acquired = True
+        self.addCleanup(lock.stop)
+
     @staticmethod
     def _make_orchestrator(candidate_id: str) -> MagicMock:
         orchestrator = MagicMock()
