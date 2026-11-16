@@ -267,7 +267,7 @@ class Dashboard(QWidget):
         self.calendar_lists, self.task_tabs = [], [];self.task_status_labels=[]
         self._proposal = None
         self._response = ''
-        self.glyph_skins=[];self._clock_value='';self.nav_expanded=True
+        self.glyph_skins=[];self._clock_value='';self.nav_expanded=True;self._quick_room=True
         self.workspace_presentation=WorkspacePresentation();self._orb_target=None
         self.orb_transition=QVariantAnimation(self);self.orb_transition.setDuration(320)
         self.orb_transition.setEasingCurve(QEasingCurve.InOutCubic)
@@ -291,6 +291,7 @@ class Dashboard(QWidget):
         self.menu_toggle.setFixedSize(36,36);self.menu_toggle.setAccessibleName('Expandir navegação')
         self.menu_toggle.setToolTip('Expandir ou recolher navegação');self.menu_toggle.clicked.connect(self.toggle_navigation)
         top.addWidget(self.menu_toggle)
+        self.menu_toggle.hide()   # layout gaveta: a barra da direita é sempre só ícones
         top.addWidget(OrbBrand())
         top.addWidget(label('THERION','brand')); top.addStretch()
         self.organize_button=QToolButton();self.organize_button.setObjectName('headerAction')
@@ -342,9 +343,10 @@ class Dashboard(QWidget):
             badge.setAttribute(Qt.WA_TransparentForMouseEvents);badge.hide();self.nav_badges[key]=badge
         self._badge_counts={}
         nav.insertStretch(nav.indexOf(self.nav_buttons[-1]))
-        middle.addWidget(self.nav)
-        content = QWidget(); center = QVBoxLayout(content); center.setContentsMargins(16,0,24,16); center.setSpacing(8)
+        content = QWidget(); center = QVBoxLayout(content); center.setContentsMargins(24,0,16,16); center.setSpacing(8)
         middle.addWidget(content,1)
+        # Layout gaveta: a barra fica na borda direita e as seções abrem coladas nela.
+        middle.addWidget(self.nav)
         self.pages = QStackedWidget(); center.addWidget(self.pages,1)
         self.home = QWidget(); home = QHBoxLayout(self.home); home.setContentsMargins(0,0,0,0); home.setSpacing(24)
         stage = QWidget(); stage_layout = QVBoxLayout(stage); stage_layout.setContentsMargins(0,0,0,0)
@@ -557,8 +559,8 @@ class Dashboard(QWidget):
         self.fullscreen_button.setToolTip(title+' (F11)');self.fullscreen_button.setAccessibleName(title)
 
     def _update_navigation(self):
-        expanded=self.nav_expanded and self.width()>=1200
-        self.nav.setFixedWidth(192 if expanded else 64)
+        expanded=False   # layout gaveta: só ícones, com o nome na dica
+        self.nav.setFixedWidth(64)
         self.nav_layout.setContentsMargins(6,16,6,16)
         for b,title in zip(self.nav_buttons,SECTION_TITLES):b.setText(title if expanded else '')
         self.mail_nav.setText('E-mails' if expanded else '')
@@ -820,15 +822,17 @@ class Dashboard(QWidget):
         opened=self.workspace.visible_keys()
         visible=not any(key!='calendar' or not self.calendar_compact for key in opened)
         visible=visible and (self.width()>=1280 or not opened)
-        for widget in self.home_copy: widget.setVisible(not opened and bool(self._response))
+        # Layout gaveta: a última resposta é a legenda sob a orbe e fica visível com a gaveta aberta se couber.
+        caption_room=not opened or self.center_region()[1]>=420
+        for widget in self.home_copy: widget.setVisible(caption_room and bool(self._response))
         if hasattr(self,'glance'):
-            # Só na tela inicial e quando sobra espaço ao lado da orbe.
-            self.glance.setVisible(self.active and not opened and self.width()>=1200)
+            # O resumo do dia agora são os números na barra da direita.
+            self.glance.setVisible(False)
         if hasattr(self,'quick_bar'):
             home=self.active and not opened
-            # Em telas estreitas a última resposta ocupa o lugar da saudação e dos atalhos.
-            room=self.wide_home() or not self._response
-            for widget in (self.greeting_kicker,self.greeting_title,self.quick_bar):widget.setVisible(home and room)
+            # A saudação ocupa o lugar da legenda enquanto ainda não há resposta.
+            for widget in (self.greeting_kicker,self.greeting_title):widget.setVisible(home and not self._response)
+            self.quick_bar.setVisible(home and self._quick_room)
             for action in self.quick_actions:action.setEnabled(not self.window._processing)
         # A saudação sob a orbe substitui a frase antiga sobre o campo.
         self.intro.setVisible(False)
@@ -890,39 +894,41 @@ class Dashboard(QWidget):
         return self.width()>=1200
 
     def side_column(self):
-        # Coluna fixa da direita: resumo do dia e última resposta.
+        # Layout gaveta: a faixa da direita, ao lado da barra, é onde a gaveta abre.
         width=340
-        return QRect(self.width()-24-width,96,width,self.height()-96-24)
+        return QRect(self.width()-self.nav.width()-12-width,72,width,self.height()-72-24)
+
+    def drawer_rect(self):
+        """Gaveta colada na barra da direita; e-mail e painel com detalhe pedem mais largura."""
+        workspace=getattr(self,'workspace',None)
+        key=workspace.order[-1] if workspace is not None and workspace.order else ''
+        wide=key=='mail' or bool(workspace is not None and workspace._return_to.get(key))
+        right=self.width()-self.nav.width()-12
+        # E-mail abaixo de 900 px vira lista ou leitura; 920 mantém as duas lado a lado quando cabe.
+        width=max(920 if key=='mail' else 360,min(1100 if wide else 560,round(self.width()*(.62 if wide else .36))))
+        width=min(width,max(300,right-24))
+        return QRect(right-width,72,width,max(240,self.height()-72-24))
 
     def center_region(self):
-        # Área central entre o menu e a coluna da direita (quando existe).
-        # Simétrica: orbe, saudação e campo ficam no centro da janela, com a mesma folga dos dois lados.
-        right=self.side_column().x()-24 if self.wide_home() else self.width()-24
-        margin=max(self.nav.width()+24,self.width()-right)
-        return margin,max(300,self.width()-2*margin)
+        # Entre a borda esquerda e a barra (ou a gaveta aberta): orbe, legenda e campo ficam centrados aí.
+        right=self.width()-self.nav.width()-24
+        workspace=getattr(self,'workspace',None)
+        if workspace is not None and workspace.visible_keys():
+            right=min(right,self.drawer_rect().x()-24)
+        return 24,max(200,right-24)
 
     def workspace_rect(self):
-        # Área livre para mover janelas: abaixo do cabeçalho, à direita do menu
-        # e acima do campo de mensagem e dos controles de voz.
-        area=self.rect().adjusted(8,8,-8,-8)
-        nav=getattr(self,'nav',None);composer=getattr(self,'composer',None)
-        if nav is not None:area.setLeft(max(area.left(),nav.width()+8))
-        area.setTop(max(area.top(),80))
-        if composer is not None and composer.y()-12-area.top()>=300:
-            area.setBottom(composer.y()-12)
-        return area
+        # Área onde as janelas podem ficar: abaixo do cabeçalho e à esquerda da barra.
+        nav=getattr(self,'nav',None)
+        return self.rect().adjusted(8,64,-((nav.width() if nav is not None else 0)+8),-8)
 
     def panel_opening_rect(self):
-        # Reserve a quiet presence rail only when useful space is available.
-        rail=240 if self.width()>=1440 else 0
-        left=self.nav.width()+24+rail
-        bottom=self.composer.y()-24 if self.composer.y()>180 else self.height()-208
-        return QRect(left,80,max(300,self.width()-left-24),max(240,bottom-80))
+        return self.drawer_rect()
 
     def calendar_bounds(self):
         rect=self.panel_opening_rect()
         if self.calendar_compact:
-            rect.setRight(self.width()-28);rect.setBottom(round(self.height()*.755))
+            rect.setBottom(round(self.height()*.755))
         return rect
 
     def _arrange_confirmations(self):
@@ -940,13 +946,12 @@ class Dashboard(QWidget):
         self.constellation.setGeometry(self.rect())
         self.constellation.lower()
         opened=self.workspace.visible_keys()
-        if opened:
-            if self.width()>=1440:
-                target=QRect(self.nav.width()+24,round(self.height()*.28),216,256)
-            else:target=QRect(self.nav.width()+12,4,48,48)
+        # A orbe fica no centro do espaço livre; com a gaveta aberta ela desliza para a esquerda.
+        left,region=self.center_region()
+        side=max(160,min(round(self.height()*.46),region-48))
+        if opened and region<220:
+            target=QRect(left,4,48,48)   # sem espaço ao lado da gaveta: orbe pequena no canto
         else:
-            left,region=self.center_region()
-            side=max(160,min(round(self.height()*.46),region-48))
             target=QRect(left+(region-side)//2,88,side,side)
         anchor=self.hero_container.mapFrom(self,target.topLeft())
         self.hero_space.setGeometry(QRect(anchor,target.size()))
@@ -976,19 +981,15 @@ class Dashboard(QWidget):
         self.greeting_kicker.setGeometry(left,target.bottom()+12,available,22)
         self.greeting_title.setGeometry(left,target.bottom()+36,available,36)
         self.quick_bar.setGeometry(left,composer_y-56,available,40)
-        if self.wide_home():
-            column=self.side_column()
-            glance_height=max(252,self.glance.sizeHint().height())
-            self.glance.setGeometry(column.x(),column.y(),column.width(),glance_height)
-            self.response_preview.setFixedWidth(column.width())
-            self.response_preview.setGeometry(column.x(),column.y()+glance_height+12,column.width(),196)
-            self.last_response.setFixedHeight(132);self.last_response.setStyleSheet('font-size:14px;')
-            self.history_link.setText('Ver tudo')
-        else:
-            self.response_preview.setFixedWidth(width)
-            self.response_preview.setGeometry(x,composer_y-176,width,152)
-            self.last_response.setFixedHeight(96);self.last_response.setStyleSheet('')
-            self.history_link.setText('Ver conversa completa')
+        # Legenda: a última resposta logo abaixo da orbe, sem passar por cima do campo.
+        caption_width=min(640,available)
+        caption_y=min(target.bottom()+12,composer_y-8-152)
+        self.response_preview.setFixedWidth(caption_width)
+        self.response_preview.setGeometry(left+(available-caption_width)//2,caption_y,caption_width,152)
+        self.last_response.setFixedHeight(96);self.last_response.setStyleSheet('font-size:14px;')
+        self.history_link.setText('Ver conversa completa' if caption_width>=560 else 'Ver tudo')
+        below=caption_y+152 if self._response else target.bottom()+80
+        self._quick_room=composer_y-56>=below+8
         self._sync_home_copy()
         for widget in (self.glance,self.response_preview,self.greeting_kicker,self.greeting_title,self.quick_bar):widget.raise_()
         self._place_badges()

@@ -43,7 +43,7 @@ QPushButton[primary="true"] { color:#100C1A; background:#A78BFA; border-color:#C
 QPushButton#nav { border:1px solid transparent; background:transparent; color:#B5B1C5; padding:8px 12px; text-align:left; font-size:13px; }
 QPushButton#nav:hover { background:#1B1727; color:#F1F0F7; }
 QPushButton#nav:checked { background:#282036; color:#DDD6FE; border-color:#625080; }
-QPushButton#nav[windowOpen="true"] { border-left:2px solid #A78BFA; }
+QPushButton#nav[windowOpen="true"] { border-right:2px solid #A78BFA; }
 QFrame#composer { background:rgba(20,19,30,184); border:1px solid #625080; border-radius:16px; }
 QFrame#composer[focused="true"] { border:2px solid #A78BFA; background:rgba(25,22,36,214); }
 QPlainTextEdit#input { font-size:14px; border:0; padding:4px; background:transparent; }

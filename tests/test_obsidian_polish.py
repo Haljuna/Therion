@@ -9,9 +9,9 @@ from therion.interface.design_system import COMPONENT_STYLE
 def test_free_windows_stay_clear_of_header_navigation_and_composer(window):
     d=scene(window);d.navigate(3);tasks=d.workspace.panels['tasks']
     drag(tasks.title_bar,-2000,-2000)
-    assert tasks.y()>=80 and tasks.x()>d.nav.width()
+    assert tasks.y()>=64 and tasks.x()>=8
     drag(tasks.title_bar,3000,3000)
-    assert tasks.geometry().bottom()<d.composer.y()
+    assert tasks.geometry().right()<d.nav.geometry().left()
     assert d.rect().contains(tasks.geometry())
 
 
@@ -36,16 +36,13 @@ def test_agenda_day_navigation_fits_in_one_row(window):
 
 
 def test_home_glance_reuses_loaded_data_and_only_opens_windows(window):
+    # Layout gaveta: o resumo do dia são os números da barra; o cartão continua só abrindo janelas.
     d=scene(window);d.navigate(0);d._arrange_scene();QApplication.processEvents()
-    assert not d.glance.isHidden()
+    assert d.glance.isHidden()
     with patch.object(window,'_send_command') as command:
         d.glance.tasks.click();QApplication.processEvents()
-        assert d.workspace.panels['tasks'].isVisible() and d.glance.isHidden()
+        assert d.workspace.panels['tasks'].isVisible()
         command.assert_not_called()
-    d.navigate(0);QApplication.processEvents()
-    assert not d.glance.isHidden()
-    window.resize(1024,768);QApplication.processEvents();d._arrange_scene()
-    assert d.glance.isHidden()
 
 
 def test_status_reports_disabled_model_and_lists_services(window):
@@ -123,8 +120,8 @@ def test_voice_controls_live_inside_the_composer(window):
 def test_right_column_and_badges_on_wide_home(window):
     d=scene(window);d.navigate(0);d._arrange_scene();QApplication.processEvents()
     column=d.side_column()
-    assert d.glance.geometry().x()==column.x()
-    assert not d.composer.geometry().intersects(column)
+    assert d.glance.isHidden() and not d.composer.geometry().intersects(d.nav.geometry())
+    assert d.response_preview.geometry().top()>d.hero_space.mapTo(d,d.hero_space.rect().bottomLeft()).y()
     d.set_badge('tasks',3);assert d.nav_badges['tasks'].text()=='3' and not d.nav_badges['tasks'].isHidden()
     d.set_badge('tasks',0);assert d.nav_badges['tasks'].isHidden()
     assert not d.greeting_title.isHidden() and d.greeting_title.text()=='Como posso ajudar?'

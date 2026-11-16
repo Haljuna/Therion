@@ -58,3 +58,9 @@ def pytest_runtest_setup(item):
 
 def pytest_runtest_call(item):
     _move_test_windows()
+
+
+def pytest_configure(config):
+    # A gaveta desliza ao abrir; nos testes ela abre já no lugar, para as medidas valerem na hora.
+    from therion.interface.workspace import ScenePanel
+    ScenePanel.SLIDE_MS = 0

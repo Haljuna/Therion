@@ -3,7 +3,7 @@
 Novas superfícies (por exemplo, uma caixa de entrada) registram um QWidget.
 Abrir ou recolher um painel não executa ações no serviço correspondente.
 """
-from PySide6.QtCore import Qt, QObject, Signal, QEvent, QPoint, QRect, QSize
+from PySide6.QtCore import Qt, QObject, Signal, QEvent, QPoint, QRect, QSize, QPropertyAnimation, QEasingCurve
 from PySide6.QtGui import QShortcut, QKeySequence, QPainter, QPen, QColor
 from PySide6.QtWidgets import QFrame, QWidget, QLabel, QPushButton, QVBoxLayout, QHBoxLayout
 from .design_system import PANEL_STYLE
@@ -126,12 +126,25 @@ class ScenePanel(QFrame):
         # Keyboard focus in the main content must not dismiss its detail pane.
         return super().eventFilter(watched,event)
 
+    SLIDE_MS=220   # gaveta entrando pela direita; 0 desliga (testes e movimento reduzido)
+
+    def slide_in(self):
+        if self.SLIDE_MS<=0:return
+        end=self.pos();self._slide=QPropertyAnimation(self,b'pos',self)
+        self._slide.setDuration(self.SLIDE_MS);self._slide.setEasingCurve(QEasingCurve.OutCubic)
+        self._slide.setStartValue(end+QPoint(48,0));self._slide.setEndValue(end);self._slide.start()
+
     def place(self,geometry,*,manual=False):
         limits=self.bounds()
         width=min(max(300,geometry.width()),max(300,limits.width()))
         height=min(max(240,geometry.height()),max(240,limits.height()))
         x=max(limits.left(),min(geometry.x(),limits.right()-width+1))
         y=max(limits.top(),min(geometry.y(),limits.bottom()-height+1))
+        slide=getattr(self,'_slide',None)
+        if slide is not None and slide.state()==QPropertyAnimation.Running:
+            if slide.endValue()==QPoint(x,y) and self.size()==QSize(width,height) and not manual:
+                return   # o mesmo destino: deixa a gaveta terminar de entrar
+            slide.stop()
         self.setGeometry(x,y,width,height)
         self.positioned=True
         self.manually_placed=self.manually_placed or manual
@@ -203,8 +216,11 @@ class SceneWorkspace(QObject):
         for other in self.visible_keys():
             self.panels[other].window_state='minimized';self.panels[other].hide()
         self.order=[]
+        appearing=panel.isHidden()
         panel.window_state='open';panel.show()
         self.activate(key);self.reflow();panel.setFocus(Qt.OtherFocusReason)
+        reduced=getattr(self.host,'reduced',None)
+        if appearing and not (reduced is not None and reduced.isChecked()):panel.slide_in()
         return panel
 
     def toggle(self,key):

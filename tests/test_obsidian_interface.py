@@ -33,17 +33,17 @@ def test_history_theme_keeps_message_literals_and_markup_escaped():
 @pytest.mark.parametrize('size,expanded',[((1440,900),True),((1199,800),False),((1024,768),False),((960,640),False)])
 def test_layout_keeps_composer_and_panels_accessible(window,size,expanded):
     d=show(window,size);d.navigate(1);QApplication.processEvents();d._arrange_scene()
-    assert (d.nav.width()==192)==expanded
+    assert d.nav.width()==64   # layout gaveta: barra só de ícones em qualquer largura
     assert d.rect().contains(d.composer.geometry())
     assert d.rect().contains(d.control_bar.geometry())
     panel=d.workspace.panels['conversations']
     assert d.panel_opening_rect().contains(panel.geometry())
-    assert panel.geometry().bottom()<d.composer.y()
-    assert panel.x()>d.nav.geometry().right()
+    assert not panel.geometry().intersects(d.composer.geometry())
+    assert panel.geometry().right()<d.nav.geometry().left()
     window._input.setPlainText('Linha um\nLinha dois\nLinha três\nLinha quatro')
     QApplication.processEvents();d._arrange_scene()
     assert window._input.height()>40 and d.rect().contains(d.composer.geometry())
-    assert panel.geometry().bottom()<d.composer.y()
+    assert not panel.geometry().intersects(d.composer.geometry())
 
 def test_reading_position_is_preserved_when_a_new_reply_arrives(window):
     d=show(window);d.navigate(1)

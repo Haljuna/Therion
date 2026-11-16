@@ -329,7 +329,8 @@ def test_activity_windows_start_minimized_and_preserve_content_on_reopen(window)
     window.show(); QApplication.processEvents()
     response=d.last_response.toPlainText()
     focus=d.constellation.focus_rect
-    assert all(widget.isHidden() for widget in d.home_copy)
+    # Layout gaveta: a legenda sob a orbe pode ficar visível, mas nunca por baixo da gaveta.
+    assert all(widget.isHidden() or not widget.geometry().intersects(panel.geometry()) for widget in d.home_copy)
     QTest.keyClick(panel,Qt.Key_Escape)
     QApplication.processEvents()
     assert panel.isHidden() and all(not widget.isHidden() for widget in d.home_copy)
@@ -422,8 +423,8 @@ def test_panel_headers_keep_content_outside_navigation_and_composer(window,key):
     d=window._dashboard;settle(lambda:not d.workers)
     panel=d.workspace.open(key);d._arrange_scene()
     assert d.panel_opening_rect().contains(panel.geometry())
-    assert panel.x()>d.nav.geometry().right()
-    assert panel.geometry().bottom()<d.composer.y()
+    # Layout gaveta: colada na barra da direita e ao lado do campo, sem cobri-lo.
+    assert panel.geometry().right()<d.nav.geometry().left() and panel.x()>d.composer.geometry().right()
     assert not panel.manually_placed
 
 
@@ -542,7 +543,8 @@ def test_agenda_uses_main_panel_and_preserves_home_response(window):
     d.toggle_activity('calendar');panel=d.workspace.panels['calendar']
     assert panel.geometry()==d.panel_opening_rect()
     assert d.last_response.toPlainText()=='Resposta preservada'
-    assert d.response_preview.isHidden()
+    # Layout gaveta: a legenda sob a orbe pode ficar visível, mas nunca por baixo da gaveta.
+    assert d.response_preview.isHidden() or not d.response_preview.geometry().intersects(panel.geometry())
     d.navigate(0);assert not d.response_preview.isHidden()
 
 
@@ -564,3 +566,23 @@ def test_singularity_small_navigation_has_room_for_complete_icons(window):
     d=window._dashboard
     assert all(btn.width()>=50 and btn.iconSize().width()==20 for btn in d.nav_buttons)
     assert window.rect().contains(window._send_button.mapTo(window,QPoint(27,27)))
+
+
+def test_drawer_slides_in_from_the_right_and_stops_at_its_place(window, monkeypatch):
+    from therion.interface.workspace import ScenePanel
+    monkeypatch.setattr(ScenePanel, 'SLIDE_MS', 200)
+    window._select_interface('constellation',persist=False)
+    window.resize(1440,900);window.show();QApplication.processEvents()
+    d=window._dashboard;settle(lambda:not d.workers)
+    d.reduced.setChecked(False)
+    panel=d.workspace.open('tasks');target=d.panel_opening_rect()
+    assert panel._slide.startValue().x()==target.x()+48       # começa um pouco à direita
+    d._arrange_scene()                                          # rearranjo no meio não corta a entrada
+    settle(lambda:panel._slide.state()==panel._slide.State.Stopped)
+    assert panel.geometry()==target
+    # Com a orbe no espaço livre, à esquerda da gaveta.
+    settle(lambda:d.orb_transition.state()==d.orb_transition.State.Stopped)
+    assert d.constellation.focus_rect.right()<target.left()
+    panel.dismiss();d.reduced.setChecked(True)
+    panel=d.workspace.open('calendar')
+    assert getattr(panel,'_slide',None) is None or panel._slide.state()==panel._slide.State.Stopped

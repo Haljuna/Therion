@@ -125,9 +125,8 @@ def test_greeting_skips_model_and_returns_structured_ui(mailbox):
 def test_window_states_navigation_and_resize(window):
     window._select_interface('constellation',persist=False);window.resize(1440,900);window.show();QApplication.processEvents()
     d=window._dashboard;settle(lambda:not d.workers)
-    assert d.nav.width()==192 and d.activity_dock.isHidden()
-    d.toggle_navigation();assert d.nav.width()==64
-    d.toggle_navigation();panel=d.workspace.open('tasks');before=panel.geometry()
+    assert d.nav.width()==64 and d.activity_dock.isHidden()   # layout gaveta: sempre só ícones
+    panel=d.workspace.open('tasks');before=panel.geometry()
     from PySide6.QtTest import QTest
     QTest.keyClick(panel.resize_handle,Qt.Key_Left)
     assert panel.width()==before.width()-16 and panel.manually_placed
@@ -150,8 +149,8 @@ def test_scene_repositions_and_returns_without_changing_session(window):
 def test_manual_resize_and_compact_window_recovery(window):
     window._select_interface('constellation',persist=False);window.resize(1440,900);window.show();QApplication.processEvents()
     d=window._dashboard;panel=d.workspace.open('tasks');area=d.panel_opening_rect()
-    panel.place(QRect(area.x(),area.y(),area.width()//2,area.height()),manual=True)
-    d._arrange_scene();assert panel.width()==area.width()//2
+    panel.place(QRect(area.x(),area.y(),area.width()-40,area.height()),manual=True)
+    d._arrange_scene();assert panel.width()==area.width()-40
     d.workspace.open('calendar');d.workspace.organize();window.resize(960,640);QApplication.processEvents()
     d.workspace.organize(['calendar','tasks'])
     assert len(d.workspace.visible_keys())==1 and d.workspace.panels['calendar'].isHidden()
