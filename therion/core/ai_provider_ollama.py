@@ -260,6 +260,10 @@ class OllamaProvider(AIProvider):
             payload['think'] = self.think
         self._send_request(payload, timeout=self.timeout)
 
+    def unload(self):
+        """Tira o modelo da placa de vídeo agora; o próximo pedido o recarrega sozinho."""
+        self._send_request({'model': self.model, 'messages': [], 'stream': False, 'keep_alive': 0}, timeout=15)
+
     def describe_result(self, message: str, evidence: dict, context: dict) -> str:
         payload = self._build_payload(message, {'voice_conversation': True}, [])
         personal = evidence.get('kind')=='personal_context'

@@ -340,7 +340,12 @@ class MainWindow(QMainWindow):
         self._reminder_timer = QTimer(self)
         self._reminder_timer.setInterval(30000)
         self._reminder_timer.timeout.connect(self._poll_reminders)
-        if self._reminders is not None:
+        # Modo jogo (ui.game_mode): em tela cheia, tira o modelo da placa de vídeo.
+        self._game_mode = (self._config.get('ui') or {}).get('game_mode') is True
+        self._game_polls = 0
+        self._game_unloaded = False
+        self._game_thread = None
+        if self._reminders is not None or self._game_mode:
             self._reminder_timer.start()
         self._next_user_channel = 'texto'
         self._command_started_at = None
@@ -1014,11 +1019,34 @@ class MainWindow(QMainWindow):
         worker.presentation_requested.connect(lambda action,payload:self._present_worker(worker,action,payload))
         worker.start()
 
+    def _poll_game_mode(self, full_screen):
+        # Dois ciclos seguidos (~1 min) em tela cheia: é jogo ou vídeo, não uma troca rápida de janela.
+        self._game_polls = self._game_polls + 1 if full_screen else 0
+        if not full_screen:
+            self._game_unloaded = False
+        provider = getattr(getattr(self._orchestrator, 'ai_core', None), '_provider', None)
+        if self._game_polls < 2 or self._game_unloaded or self._processing or not hasattr(provider, 'unload'):
+            return
+        self._game_unloaded = True
+        def unload():
+            try:
+                provider.unload()
+            except Exception:
+                pass  # sem o Ollama no ar não há o que liberar
+        self._game_thread = threading.Thread(target=unload, name='therion-game-mode', daemon=True)
+        self._game_thread.start()
+        self._append('Therion', 'Modo jogo: liberei a placa de vídeo. Meu primeiro pedido depois disso demora um pouco mais.')
+
     def _poll_reminders(self):
-        if self._reminders is None or self._closing or self._quit_requested:
+        if self._closing or self._quit_requested:
             return
         from therion.interface.reminders import do_not_disturb
-        busy = self._processing or self._pending_plan is not None or do_not_disturb()
+        full_screen = do_not_disturb()
+        if self._game_mode:
+            self._poll_game_mode(full_screen)
+        if self._reminders is None:
+            return
+        busy = self._processing or self._pending_plan is not None or full_screen
         for message in self._reminders.due(datetime.now(), busy):
             self._append('Therion', message)
             if self._speech_output is not None:

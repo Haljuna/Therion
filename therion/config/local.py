@@ -109,6 +109,9 @@ def _validate_config(data: dict[str, Any]) -> dict[str, Any]:
     # Aviso falado antes de compromissos do panorama; desligado salvo pedido explícito.
     if type(ui.get('event_reminders')) is not bool:
         ui['event_reminders'] = False
+    # Modo jogo: em tela cheia, descarrega o modelo local da placa de vídeo.
+    if type(ui.get('game_mode')) is not bool:
+        ui['game_mode'] = False
 
     # aliases -> dict
     aliases = validated.get("aliases")

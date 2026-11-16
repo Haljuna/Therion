@@ -76,13 +76,13 @@ def app():
     return QApplication.instance() or QApplication([])
 
 
-def make_window(app, tmp_path, monkeypatch, enabled):
+def make_window(app, tmp_path, monkeypatch, enabled, game_mode=False):
     for variable in ('APPDATA', 'LOCALAPPDATA'):
         folder = tmp_path / variable
         folder.mkdir(exist_ok=True)
         monkeypatch.setenv(variable, str(folder))
     from therion.interface.desktop import MainWindow
-    config = {'ai': {'enabled': False}, 'tts': {'enabled': False}, 'ui': {'event_reminders': enabled}}
+    config = {'ai': {'enabled': False}, 'tts': {'enabled': False}, 'ui': {'event_reminders': enabled, 'game_mode': game_mode}}
     with patch.object(MainWindow, '_setup_tray'):
         return MainWindow(MagicMock(), config=config, config_writer=MagicMock(), log_dir=tmp_path / 'logs')
 
@@ -128,3 +128,48 @@ def test_window_without_the_setting_never_warns(app, tmp_path, monkeypatch):
         window._poll_reminders()
     finally:
         close(app, window)
+
+
+def test_game_mode_unloads_the_model_once_per_full_screen_session(app, tmp_path, monkeypatch):
+    window = make_window(app, tmp_path, monkeypatch, False, game_mode=True)
+    try:
+        assert window._reminder_timer.isActive()
+        window._orchestrator.ai_core = MagicMock()
+        provider = window._orchestrator.ai_core._provider
+        said = []
+        monkeypatch.setattr(window, '_append', lambda sender, text: said.append(text))
+        window._poll_game_mode(True)
+        assert provider.unload.call_count == 0          # um ciclo só pode ser troca de janela
+        window._processing = True
+        window._poll_game_mode(True)
+        assert provider.unload.call_count == 0          # nunca no meio de um pedido
+        window._processing = False
+        window._poll_game_mode(True)
+        window._game_thread.join(5)
+        assert provider.unload.call_count == 1 and said == [
+            'Modo jogo: liberei a placa de vídeo. Meu primeiro pedido depois disso demora um pouco mais.']
+        window._poll_game_mode(True)
+        assert provider.unload.call_count == 1          # uma vez por sessão de tela cheia
+        window._poll_game_mode(False)
+        window._poll_game_mode(True); window._poll_game_mode(True)
+        window._game_thread.join(5)
+        assert provider.unload.call_count == 2
+        provider.unload.side_effect = OSError('Ollama fora do ar')
+        window._poll_game_mode(False)
+        window._poll_game_mode(True); window._poll_game_mode(True)
+        window._game_thread.join(5)                     # falha ao liberar nunca derruba a janela
+    finally:
+        window._processing = False
+        close(app, window)
+
+
+def test_game_mode_is_off_by_default_and_unload_asks_ollama_to_drop_the_model():
+    assert _validate_config({})['ui']['game_mode'] is False
+    assert _validate_config({'ui': {'game_mode': True}})['ui']['game_mode'] is True
+    from therion.core.ai_provider_ollama import OllamaProvider
+    provider = OllamaProvider.__new__(OllamaProvider)
+    provider.model = 'modelo-teste'
+    sent = []
+    provider._send_request = lambda payload, timeout: sent.append((payload, timeout))
+    provider.unload()
+    assert sent == [({'model': 'modelo-teste', 'messages': [], 'stream': False, 'keep_alive': 0}, 15)]
