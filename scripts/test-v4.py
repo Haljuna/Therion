@@ -18,6 +18,7 @@ def main():
         os.environ.setdefault('PLAYWRIGHT_BROWSERS_PATH',os.path.join(os.environ['LOCALAPPDATA'],'ms-playwright'))
     for variable,folder in [('APPDATA','roaming'),('LOCALAPPDATA','local'),('TEMP','temp'),('TMP','temp')]:
         path=state/folder;path.mkdir(exist_ok=True);os.environ[variable]=str(path)
+    os.environ['THERION_TESTS_ISOLATED']='1'  # tests/conftest.py não isola de novo
     os.chdir(root);sys.path.insert(0,str(root))
     import pytest
     print('Fixtures isoladas:',state)
