@@ -2413,6 +2413,15 @@ class Orchestrator(WorkflowSupport, MemorySupport, PersonalContextSupport, Catal
                 self._finalize_session_result(app_status)
                 return app_status
 
+        if self._personal_flow_is_free():
+            from therion.core.local_reports import answer as local_report
+            report = local_report(command, self)
+            if report is not None:
+                result = OrchestrationResult(status='success', message=report)
+                self._complete_task()
+                self._finalize_session_result(result)
+                return result
+
         if current_time_request(command) and self._personal_flow_is_free():
             now = self._calendar_now()
             units = ((now.hour,'hora'),(now.minute,'minuto'),(now.second,'segundo'))

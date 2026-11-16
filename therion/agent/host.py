@@ -398,9 +398,10 @@ class AgentSupport:
         if syntax.malformed:
             return OrchestrationResult(status='clarification', message='Escopo inválido: ' + syntax.reason)
         from therion.context.conversation_frame import personal_request, capabilities_request, current_date_request, current_time_request, app_status_request,app_close_request,app_result_request
+        from therion.core.local_reports import report_request
         status_followup=self._catalog_status_followup(syntax.command)
         if (personal_request(syntax.command,voice=self.voice_conversation) is not None or capabilities_request(syntax.command)
-                or current_date_request(syntax.command) or current_time_request(syntax.command) or app_status_request(syntax.command)
+                or current_date_request(syntax.command) or current_time_request(syntax.command) or app_status_request(syntax.command) or report_request(syntax.command)
                 or app_close_request(syntax.command) or app_result_request(syntax.command)
                 or status_followup):
             # Relógio, capacidades e perfil mantêm seus resolvedores locais.
