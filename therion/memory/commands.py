@@ -41,6 +41,16 @@ def memory_request(command):
         return {'operation': 'discard' if match[1] in {'descarte', 'descartar'} else 'show', 'selector': match[2]}
     if text in {'salve', 'salve isso', 'salve esse candidato', 'salvar candidato', 'grave esse candidato'}:
         return {'operation': 'save'}
+    # "Anota que…" / "anota essa ideia…" entra no mesmo fluxo supervisionado de "lembre que…".
+    note = re.fullmatch(r'\s*(?:por favor[, ]+)?(?:anota|anote|anotar)\s+(?:a[ií]\s+)?'
+                        r'(?:que\s+(.+)|(?:essa|esta|uma|a)\s+(ideia\b.*))', command.strip().rstrip('.!?'), re.I | re.S)
+    if note:
+        body = (note[1] or note[2]).strip()
+        if control(body) == 'ideia':
+            return {'operation': 'clarify'}
+        if re.search(r'\b(?:amanha|hoje|as \d|daqui a|todo dia)\b', control(body)):
+            return {'operation': 'ambiguous'}
+        return {'operation': 'add', 'text': body}
     # Preservar os dados originais; normalização só identifica controle.
     match = re.fullmatch(r'\s*(?:por favor[, ]+)?(?:lembre|lembra|guarde|guarda|memorize)(?:\s+|:\s*)'
                          r'(?:(?:que|disso|isto|isso|esse aprendizado|este aprendizado|essa preferência)\s*:?\s*)?(.+)',
