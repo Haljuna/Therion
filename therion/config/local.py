@@ -106,6 +106,9 @@ def _validate_config(data: dict[str, Any]) -> dict[str, Any]:
     # Nota local da conversa (análise de erros); desligada salvo pedido explícito.
     if type(ui.get('conversation_log')) is not bool:
         ui['conversation_log'] = False
+    # Aviso falado antes de compromissos do panorama; desligado salvo pedido explícito.
+    if type(ui.get('event_reminders')) is not bool:
+        ui['event_reminders'] = False
 
     # aliases -> dict
     aliases = validated.get("aliases")

@@ -6,6 +6,7 @@ import sys
 import threading
 import time
 from therion.voice.echo import strip_spoken_echo_prefix
+from datetime import datetime
 from therion.logging.conversation_log import ConversationLog
 from pathlib import Path
 from typing import Optional
@@ -333,6 +334,14 @@ class MainWindow(QMainWindow):
         self._config = config or {}
         # Nota local da conversa para análise de erros (ui.conversation_log); nunca trava a interface.
         self._conversation_log = ConversationLog(enabled=(self._config.get('ui') or {}).get('conversation_log') is True)
+        # Aviso antes do compromisso (ui.event_reminders); usa só a agenda do panorama pedido pelo usuário.
+        from therion.interface.reminders import EventReminders
+        self._reminders = EventReminders() if (self._config.get('ui') or {}).get('event_reminders') is True else None
+        self._reminder_timer = QTimer(self)
+        self._reminder_timer.setInterval(30000)
+        self._reminder_timer.timeout.connect(self._poll_reminders)
+        if self._reminders is not None:
+            self._reminder_timer.start()
         self._next_user_channel = 'texto'
         self._command_started_at = None
         self._tray_icon: QSystemTrayIcon | None = None
@@ -1005,6 +1014,16 @@ class MainWindow(QMainWindow):
         worker.presentation_requested.connect(lambda action,payload:self._present_worker(worker,action,payload))
         worker.start()
 
+    def _poll_reminders(self):
+        if self._reminders is None or self._closing or self._quit_requested:
+            return
+        from therion.interface.reminders import do_not_disturb
+        busy = self._processing or self._pending_plan is not None or do_not_disturb()
+        for message in self._reminders.due(datetime.now(), busy):
+            self._append('Therion', message)
+            if self._speech_output is not None:
+                self._speech_output.speak(message)
+
     def _present_worker(self,worker,action,payload):
         if worker is not self._command_worker or not self._worker_is_current(worker) or worker.cancelled.is_set() or self._quit_requested or getattr(self,'_workflow_clear_pending',False):return
         if payload and (payload.get('session')!=self._orchestrator.session_id or payload.get('account')!=self._orchestrator._mailbox.identity()):return
@@ -1019,7 +1038,11 @@ class MainWindow(QMainWindow):
                 # Disparar a síntese antes da montagem dos painéis; consultas seguem no worker.
                 self._speech_output.speak(payload['greeting']+' Estou preparando seu panorama.')
             self._dashboard.open_briefing()
-        elif action=='briefing_part':self._dashboard.briefing_part(payload)
+        elif action=='briefing_part':
+            self._dashboard.briefing_part(payload)
+            row=payload.get('result') if payload.get('kind')=='calendar' else None
+            if self._reminders is not None and isinstance(row,dict) and row.get('state')=='ready':
+                self._reminders.arm(row.get('items'),datetime.now())
 
     def _worker_is_current(self, worker):
         if not isinstance(worker, (_CommandWorker, _ConfirmationWorker)):
