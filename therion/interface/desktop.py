@@ -1052,6 +1052,14 @@ class MainWindow(QMainWindow):
             self._unload_model()
             if not self._reminder_timer.isActive():
                 self._reminder_timer.start()   # os avisos guardados saem quando o modo for desligado
+        # A janela vai para o modo compacto com o jogo e volta só se foi o modo jogo que a encolheu.
+        dashboard = self._dashboard if self._dashboard is not None and self._dashboard.active else None
+        if dashboard is not None and on and not dashboard.compact:
+            dashboard.set_compact(True)
+            self._game_compacted = dashboard.compact
+        elif dashboard is not None and not on and getattr(self, '_game_compacted', False):
+            dashboard.set_compact(False)
+            self._game_compacted = False
 
     def _poll_reminders(self):
         if self._closing or self._quit_requested:

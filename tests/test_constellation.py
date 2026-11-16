@@ -586,3 +586,53 @@ def test_drawer_slides_in_from_the_right_and_stops_at_its_place(window, monkeypa
     panel.dismiss();d.reduced.setChecked(True)
     panel=d.workspace.open('calendar')
     assert getattr(panel,'_slide',None) is None or panel._slide.state()==panel._slide.State.Stopped
+
+
+def test_compact_mode_shrinks_to_a_small_window_and_returns_to_the_same_place(window):
+    window._select_interface('constellation',persist=False)
+    window.resize(1440,900);window.move(60,40);window.show();QApplication.processEvents()
+    d=window._dashboard;settle(lambda:not d.workers);before=window.geometry()
+    d.set_badge('tasks',3)
+    d.compact_button.click();QApplication.processEvents();d._arrange_scene()
+    assert d.compact and window.width()==420 and window.height()<=640
+    assert d.compact_button.accessibleName()=='Voltar ao tamanho normal'
+    for hidden in (d.nav,d.search,d.status_pill,d.organize_button,d.fullscreen_button):assert hidden.isHidden()
+    assert not d.compact_bar.isHidden() and d.compact_shortcuts['tasks'][0].text()=='3  tarefas'
+    assert d.rect().contains(d.composer.geometry()) and d.rect().contains(d.compact_bar.geometry())
+    assert d.compact_bar.geometry().bottom()<d.composer.y()
+    assert d.constellation.focus_rect is not None and d._orb_target.bottom()<d.compact_bar.y()
+    panel=d.workspace.open('tasks');d._arrange_scene()
+    assert d.rect().contains(panel.geometry()) and d.compact_bar.isHidden()   # a seção cobre a janela
+    panel.dismiss();QApplication.processEvents()
+    d.compact_button.click();QApplication.processEvents()
+    assert not d.compact and window.geometry()==before and not d.nav.isHidden()
+    assert d.compact_bar.isHidden() and d.compact_button.accessibleName()=='Modo compacto'
+
+
+def test_compact_mode_keeps_caption_shortcuts_and_open_section_clear_of_the_composer(window):
+    window._select_interface('constellation',persist=False)
+    window.resize(1440,900);window.show();QApplication.processEvents()
+    d=window._dashboard;settle(lambda:not d.workers)
+    window._append('Therion','Resposta de exemplo com duas linhas para caber na legenda do modo compacto.')
+    d.set_compact(True);QApplication.processEvents();d._arrange_scene()
+    assert not d.response_preview.isHidden()
+    assert d.response_preview.geometry().bottom()<d.compact_bar.y()
+    assert d.compact_bar.geometry().bottom()<d.composer.y()
+    panel=d.workspace.open('tasks');d._arrange_scene()
+    assert panel.geometry().bottom()<d.composer.y() and panel.y()>=56
+    d.set_compact(False)
+
+
+def test_spoken_game_mode_turns_compact_on_and_back_off(window):
+    from therion.core.orchestrator import OrchestrationResult
+    window._select_interface('constellation',persist=False)
+    window.resize(1440,900);window.move(60,40);window.show();QApplication.processEvents()
+    d=window._dashboard;settle(lambda:not d.workers);before=window.geometry()
+    def game(on):
+        window._apply_command_result(OrchestrationResult(status='success',message='Modo jogo.',ui_action='game_mode',ui_payload={'on':on}))
+        QApplication.processEvents()
+    game(True);assert d.compact and window.width()==420
+    game(False);assert not d.compact and window.geometry()==before
+    # Se o usuário já estava no compacto, sair do modo jogo não muda o tamanho que ele escolheu.
+    d.set_compact(True);game(True);game(False);assert d.compact
+    d.set_compact(False)

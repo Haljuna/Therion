@@ -268,6 +268,7 @@ class Dashboard(QWidget):
         self._proposal = None
         self._response = ''
         self.glyph_skins=[];self._clock_value='';self.nav_expanded=True;self._quick_room=True
+        self.compact=False;self._normal_geometry=None
         self.workspace_presentation=WorkspacePresentation();self._orb_target=None
         self.orb_transition=QVariantAnimation(self);self.orb_transition.setDuration(320)
         self.orb_transition.setEasingCurve(QEasingCurve.InOutCubic)
@@ -316,12 +317,17 @@ class Dashboard(QWidget):
         self.fullscreen_button.setFixedSize(32,32);self.fullscreen_button.setCheckable(True)
         self.fullscreen_button.clicked.connect(w._toggle_full_screen);top.addWidget(self.fullscreen_button)
         self.sync_full_screen(w.isFullScreen())
+        # Modo compacto: janela pequena para o segundo monitor (jogo ou trabalho na tela principal).
+        self.compact_button=QToolButton();self.compact_button.setObjectName('headerAction')
+        self.compact_button.setFixedSize(32,32);self.compact_button.setCheckable(True)
+        self.compact_button.clicked.connect(lambda:self.set_compact(not self.compact));top.addWidget(self.compact_button)
+        self.header_controls={}
         for title,path,callback in [('Buscar',8,self.open_search),('Minimizar',None,w._minimize_window),('Sair',None,w._quit_application)]:
             control=QToolButton();control.setObjectName('headerAction');control.setToolTip(title);control.setAccessibleName(title)
             control.setFixedSize(32,32)
             if path is not None:control.setIcon(icon(path))
             else:control.setText('−' if title=='Minimizar' else '×')
-            control.clicked.connect(callback);top.addWidget(control)
+            control.clicked.connect(callback);top.addWidget(control);self.header_controls[title]=control
         self.find_shortcut=QShortcut(QKeySequence('Ctrl+F'),self);self.find_shortcut.activated.connect(self.open_search)
         root.addWidget(header)
         middle = QHBoxLayout(); middle.setSpacing(0); root.addLayout(middle,1)
@@ -548,7 +554,52 @@ class Dashboard(QWidget):
         dock.addWidget(self.mail_button)
         self.activity_dock.raise_()
         self.activity_dock.hide()
+        # Modo compacto: no lugar da barra, três atalhos com os números do dia.
+        self.compact_bar=QWidget(self);row=QHBoxLayout(self.compact_bar);row.setContentsMargins(0,0,0,0);row.setSpacing(8)
+        self.compact_shortcuts={}
+        for key,title,callback in [('calendar','agenda',lambda:self.navigate(2)),('tasks','tarefas',lambda:self.navigate(3)),
+                                   ('mail','e-mails',lambda:self.open_mail())]:
+            shortcut=QPushButton(title);shortcut.setObjectName('quickAction');shortcut.setCursor(Qt.PointingHandCursor)
+            shortcut.setStyleSheet('QPushButton { background:#14131E; border:1px solid #373244; border-radius:12px; color:#F1F0F7; font-size:12px; padding:0; min-height:44px; max-height:44px; }'
+                                   'QPushButton:hover { border-color:#A78BFA; }')
+            shortcut.clicked.connect(callback);row.addWidget(shortcut);self.compact_shortcuts[key]=(shortcut,title)
+        self.compact_bar.hide()
+        self.sync_compact()
         self.composer.raise_();self.intro.raise_();self.control_bar.raise_()
+
+    def set_compact(self,on):
+        """Janela de 420×640 no segundo monitor (ou no canto deste) e volta ao tamanho de antes."""
+        w=self.window
+        if on==self.compact or w.isFullScreen():
+            self.sync_compact();return
+        self.compact=on
+        if on:
+            if w.isMaximized():w.showNormal()
+            self._normal_geometry=w.geometry()
+            self.setMinimumSize(380,520);w.setMinimumSize(380,520)
+            from PySide6.QtGui import QGuiApplication
+            primary=QGuiApplication.primaryScreen()
+            screen=next((s for s in QGuiApplication.screens() if s is not primary),w.screen())
+            area=screen.availableGeometry()
+            w.resize(420,min(640,area.height()-48));w.move(area.right()-420-24,area.top()+24)
+        else:
+            area=w.screen().availableGeometry()
+            self.setMinimumSize(960,640);w.setMinimumSize(min(960,area.width()),min(640,area.height()))
+            if self._normal_geometry is not None:w.setGeometry(self._normal_geometry)
+        self.sync_compact();self._arrange_scene()
+
+    def sync_compact(self):
+        on=self.compact
+        title='Voltar ao tamanho normal' if on else 'Modo compacto'
+        self.compact_button.setChecked(on);self.compact_button.setIcon(icon(9 if on else 10))
+        self.compact_button.setToolTip(title);self.compact_button.setAccessibleName(title)
+        for widget in (self.organize_button,self.search,self.status_pill,self.fullscreen_button,self.header_controls['Buscar'],self.nav):
+            widget.setVisible(not on)
+        if on:self.clock.setVisible(False)
+        self.compact_bar.setVisible(on and self.active and not self.workspace.visible_keys())
+
+    def _rail(self):
+        return 0 if self.compact else self.nav.width()
 
     def toggle_navigation(self):
         self.nav_expanded=not self.nav_expanded;self._update_navigation();QTimer.singleShot(0,self._arrange_scene)
@@ -833,6 +884,7 @@ class Dashboard(QWidget):
             # A saudação ocupa o lugar da legenda enquanto ainda não há resposta.
             for widget in (self.greeting_kicker,self.greeting_title):widget.setVisible(home and not self._response)
             self.quick_bar.setVisible(home and self._quick_room)
+            self.compact_bar.setVisible(home and self.compact)
             for action in self.quick_actions:action.setEnabled(not self.window._processing)
         # A saudação sob a orbe substitui a frase antiga sobre o campo.
         self.intro.setVisible(False)
@@ -903,6 +955,11 @@ class Dashboard(QWidget):
         workspace=getattr(self,'workspace',None)
         key=workspace.order[-1] if workspace is not None and workspace.order else ''
         wide=key=='mail' or bool(workspace is not None and workspace._return_to.get(key))
+        if self.compact:
+            # Compacto: a seção cobre a orbe e para acima do campo, que continua à mão.
+            composer=getattr(self,'composer',None)
+            bottom=composer.y()-12 if composer is not None and composer.y()>360 else self.height()-8
+            return QRect(8,60,max(300,self.width()-16),max(240,bottom-60))
         right=self.width()-self.nav.width()-12
         # E-mail abaixo de 900 px vira lista ou leitura; 920 mantém as duas lado a lado quando cabe.
         width=max(920 if key=='mail' else 360,min(1100 if wide else 560,round(self.width()*(.62 if wide else .36))))
@@ -911,16 +968,16 @@ class Dashboard(QWidget):
 
     def center_region(self):
         # Entre a borda esquerda e a barra (ou a gaveta aberta): orbe, legenda e campo ficam centrados aí.
-        right=self.width()-self.nav.width()-24
+        right=self.width()-self._rail()-24
         workspace=getattr(self,'workspace',None)
-        if workspace is not None and workspace.visible_keys():
+        if workspace is not None and workspace.visible_keys() and not self.compact:
             right=min(right,self.drawer_rect().x()-24)
         return 24,max(200,right-24)
 
     def workspace_rect(self):
         # Área onde as janelas podem ficar: abaixo do cabeçalho e à esquerda da barra.
         nav=getattr(self,'nav',None)
-        return self.rect().adjusted(8,64,-((nav.width() if nav is not None else 0)+8),-8)
+        return self.rect().adjusted(8,56 if self.compact else 64,-((self._rail() if nav is not None else 0)+8),-8)
 
     def panel_opening_rect(self):
         return self.drawer_rect()
@@ -949,10 +1006,11 @@ class Dashboard(QWidget):
         # A orbe fica no centro do espaço livre; com a gaveta aberta ela desliza para a esquerda.
         left,region=self.center_region()
         side=max(160,min(round(self.height()*.46),region-48))
+        if self.compact:side=max(140,min(round(self.height()*.33),region-40))
         if opened and region<220:
             target=QRect(left,4,48,48)   # sem espaço ao lado da gaveta: orbe pequena no canto
         else:
-            target=QRect(left+(region-side)//2,88,side,side)
+            target=QRect(left+(region-side)//2,64 if self.compact else 88,side,side)
         anchor=self.hero_container.mapFrom(self,target.topLeft())
         self.hero_space.setGeometry(QRect(anchor,target.size()))
         attention=.45 if opened else 1.
@@ -983,15 +1041,17 @@ class Dashboard(QWidget):
         self.quick_bar.setGeometry(left,composer_y-56,available,40)
         # Legenda: a última resposta logo abaixo da orbe, sem passar por cima do campo.
         caption_width=min(640,available)
-        caption_y=min(target.bottom()+12,composer_y-8-152)
+        caption_height=128 if self.compact else 152
+        caption_y=min(target.bottom()+12,composer_y-8-(60 if self.compact else 0)-caption_height)
         self.response_preview.setFixedWidth(caption_width)
-        self.response_preview.setGeometry(left+(available-caption_width)//2,caption_y,caption_width,152)
-        self.last_response.setFixedHeight(96);self.last_response.setStyleSheet('font-size:14px;')
+        self.response_preview.setGeometry(left+(available-caption_width)//2,caption_y,caption_width,caption_height)
+        self.last_response.setFixedHeight(caption_height-56);self.last_response.setStyleSheet('font-size:14px;')
         self.history_link.setText('Ver conversa completa' if caption_width>=560 else 'Ver tudo')
-        below=caption_y+152 if self._response else target.bottom()+80
-        self._quick_room=composer_y-56>=below+8
+        below=caption_y+caption_height if self._response else target.bottom()+80
+        self._quick_room=not self.compact and composer_y-56>=below+8
+        self.compact_bar.setGeometry(left,composer_y-60,available,52)
         self._sync_home_copy()
-        for widget in (self.glance,self.response_preview,self.greeting_kicker,self.greeting_title,self.quick_bar):widget.raise_()
+        for widget in (self.glance,self.response_preview,self.greeting_kicker,self.greeting_title,self.quick_bar,self.compact_bar):widget.raise_()
         self._place_badges()
         self.activity_dock.setGeometry(self.width()-62,round(self.height()*.18),44,156)
         self.activity_dock.hide()
@@ -1295,6 +1355,9 @@ class Dashboard(QWidget):
 
     def set_badge(self,key,count):
         self._badge_counts[key]=count;self._place_badges()
+        if key in getattr(self,'compact_shortcuts',{}):
+            shortcut,title=self.compact_shortcuts[key]
+            shortcut.setText(f'{count}  {title}' if count else title)
 
     def _place_badges(self):
         if not hasattr(self,'nav_badges'):return
