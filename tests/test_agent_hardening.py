@@ -110,6 +110,21 @@ def test_gmail_worker_revalidates_credentials_for_each_read(monkeypatch):
     assert load.call_count==2 and adapter.search.call_count==1
 
 
+def test_gmail_worker_reuses_the_connection_but_still_reloads_credentials(monkeypatch):
+    # 16/11: cada chamada abria conexão nova; a saudação fazia ~15 e levava 7 s sem e-mail novo.
+    from therion.integrations.gmail import GmailSession
+    adapter=Mock();adapter.search.return_value={'messages':[]}
+    load=Mock(return_value=adapter)
+    monkeypatch.setattr(GmailAdapter,'from_token',load)
+    session=GmailSession({'mode':'read','credentials_root':'fixture'})
+    session.dispatch('search',{'query':'Aurora'});session.dispatch('search',{'query':'Aurora'})
+    first,second=(call.kwargs['transport'] for call in load.call_args_list)
+    assert load.call_count==2 and first is second and first is not None
+    closed=[];monkeypatch.setattr(first,'close',lambda:closed.append(1))
+    session.close()
+    assert closed==[1]
+
+
 def test_gmail_account_binding_ignores_refresh_but_not_account_or_scope_change(tmp_path):
     import json
     from therion.integrations.gmail import account_identity
@@ -370,9 +385,12 @@ def test_gmail_pagination_accepts_only_returned_token_for_same_query(tmp_path):
         if page is not None:args['page']=page
         spec,rejection=registry.prepare(ToolCall('gmail_search',args));assert rejection is None
         return await spec.handler(args,CancellationToken())
-    assert asyncio.run(call('Aurora','1')).status=='blocked'
-    client.search.assert_not_called()
-    assert asyncio.run(call('Aurora')).status=='success'
-    assert asyncio.run(call('Atlas','opaque-token')).status=='blocked'
+    # Página inventada na primeira busca: busca a primeira página sem repassar o token.
+    assert asyncio.run(call('Aurora','1')).status=='success'
+    assert client.search.call_args.args==('Aurora',)
+    assert asyncio.run(call('Aurora','2')).status=='blocked'   # continuação inventada
+    assert asyncio.run(call('Atlas','opaque-token')).status=='success'
+    assert client.search.call_args.args==('Atlas',)
     assert asyncio.run(call('Aurora','opaque-token')).status=='success'
-    assert client.search.call_count==2
+    assert client.search.call_args.args==('Aurora','opaque-token')
+    assert client.search.call_count==3

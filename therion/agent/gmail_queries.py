@@ -25,7 +25,8 @@ def recent_mail_request(command,now=None):
     if match:return ('headers',{'um':1,'dois':2,'tres':3,'1':1,'2':2,'3':3}[match[1]])
     match=re.fullmatch(r'(?:(?:le|leia|ler|leu) (?:na integra |completo )?|qual (?:foi |e )?)'
         r'(?:o )?(?:meu )?(ultimo|penultimo|antepenultimo) e[- ]?mail(?: (?:inteiro|completo|na integra))?(?: (?:pra|para) mim)?',text)
-    if match:return ('body' if re.search(r'\b(?:integra|inteiro|completo)\b',text) else 'summary',
+    # "Qual é meu último e-mail?" pergunta qual é: o cabeçalho responde na hora; o resumo pelo modelo fica oferecido.
+    if match:return ('body' if re.search(r'\b(?:integra|inteiro|completo)\b',text) else 'peek' if text.startswith('qual') else 'summary',
         {'ultimo':1,'penultimo':2,'antepenultimo':3}[match[1]])
     return None
 
@@ -150,6 +151,21 @@ class RecentMailProvider:
                     date=datetime.fromtimestamp(int(value)/1000,ZoneInfo('America/Sao_Paulo'))
                 except (ValueError,OverflowError,OSError):raise AgentError('Não confirmei a data de recebimento desse e-mail.')
                 return AgentDecision('final',f'Você recebeu esse e-mail em {date:%d/%m/%Y às %H:%M}, no horário de Brasília. [gmail:{self.ids[0]}]')
+            if self.mode=='peek':
+                from .gmail_presentation import sender_name
+                row=next((row for row in self.headers if row.get('id')==self.ids[0]),None)
+                if row is None:raise AgentError('Não confirmei o cabeçalho da mensagem selecionada.')
+                fields=row.get('headers',{});when=''
+                value=row.get('internal_date')
+                if isinstance(value,(str,int)) and str(value).isdigit():
+                    from datetime import datetime
+                    from zoneinfo import ZoneInfo
+                    when=f", recebido em {datetime.fromtimestamp(int(value)/1000,ZoneInfo('America/Sao_Paulo')):%d/%m às %H:%M}"
+                self.read_offer=dict(self.current_selection,mode='summary')
+                rank={1:'último',2:'penúltimo',3:'antepenúltimo'}[self.position]
+                sender=sender_name(fields.get('from',''))
+                return AgentDecision('final',f'Seu {rank} e-mail é de {sender or "remetente não informado"}, com o assunto '
+                    f'“{fields.get("subject") or "(sem assunto)"}”{when}. Quer que eu resuma?\n\n[gmail:{self.ids[0]}]')
             if self.mode=='headers':
                 self.list_selection=[dict(message_id=identifier,thread=next(row.get('threadId') for row in self.search_rows if row['id']==identifier),query=self.query,snapshot=self.snapshot) for identifier in self.ids]
                 lines=['Assuntos das mensagens da caixa de entrada'+(' '+self.options['label'] if self.options.get('label') else ' mais recentes')+':']

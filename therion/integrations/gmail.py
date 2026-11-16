@@ -95,6 +95,7 @@ class GmailSession:
     def __init__(self,config):
         self.config=config
         if config.get('mode') not in SCOPES:raise ValueError('Modo Gmail inválido.')
+        self._transport=None
 
     def dispatch(self,operation,args):
         if operation not in self.READ|set(self.WRITE):raise ValueError('Operação Gmail não registrada.')
@@ -103,7 +104,11 @@ class GmailSession:
         expected=self.config.get('account')
         if expected is not None and account_identity(self.config['credentials_root'])!=expected:raise ValueError('A conta Gmail mudou desde a preparação.')
         # Carregar novamente também revalida troca/revogação local das credenciais.
-        adapter=GmailAdapter.from_token(self.config['credentials_root'],mode)
+        # Só a conexão TLS é reaproveitada entre as chamadas deste worker.
+        if self._transport is None:
+            from .google_transport import GoogleTransport
+            self._transport=GoogleTransport()
+        adapter=GmailAdapter.from_token(self.config['credentials_root'],mode,transport=self._transport)
         try:
             if expected is not None and account_identity(self.config['credentials_root'])!=expected:raise ValueError('A conta Gmail mudou durante a autenticação.')
             return self._dispatch(adapter,operation,args)
@@ -115,13 +120,14 @@ class GmailSession:
     def _dispatch(adapter,operation,args):
         if operation=='profile':return adapter.profile()
         if operation=='labels':return adapter.labels()
-        if operation=='search':return adapter.search(args['query'],args.get('page'))
+        if operation=='search':return adapter.search(args['query'],args.get('page'),**({'limit':args['limit']} if 'limit' in args else {}))
         if operation in {'thread','draft','metadata','send_draft'}:return getattr(adapter,operation)(args['identifier'])
         if operation=='attachment':return {'base64':base64.b64encode(adapter.attachment(args['message_id'],args['attachment_id'])).decode()}
         if operation=='save_draft':return adapter.save_draft(args)
         return adapter.modify(args['identifier'],args['add'],args['remove'])
 
-    def close(self):pass
+    def close(self):
+        if self._transport:self._transport.close();self._transport=None
 
 
 class RemoteGmailAdapter:
@@ -129,7 +135,8 @@ class RemoteGmailAdapter:
     def __init__(self,worker,token):self.worker,self.token=worker,token
     def profile(self):return self.worker.call('profile',{},self.token)
     def labels(self):return self.worker.call('labels',{},self.token)
-    def search(self,query,page=None):return self.worker.call('search',{'query':query,'page':page},self.token)
+    def search(self,query,page=None,limit=None):
+        return self.worker.call('search',{'query':query,'page':page,**({'limit':limit} if limit else {})},self.token)
     def thread(self,identifier):return self.worker.call('thread',{'identifier':identifier},self.token)
     def draft(self,identifier):return self.worker.call('draft',{'identifier':identifier},self.token)
     def metadata(self,identifier):return self.worker.call('metadata',{'identifier':identifier},self.token)
@@ -156,7 +163,7 @@ class GmailAdapter:
         if self._transport:self._transport.close()
 
     @classmethod
-    def from_token(cls, root, mode='read'):
+    def from_token(cls, root, mode='read', *, transport=None):
         from google.oauth2.credentials import Credentials
         from google.auth.transport.requests import Request
         from googleapiclient.discovery import build
@@ -188,6 +195,9 @@ class GmailAdapter:
             raise ValueError('Gmail requer autenticação.')
         from google_auth_httplib2 import AuthorizedHttp
         from .google_transport import GoogleTransport
+        if transport is not None:
+            # Conexão emprestada pela sessão do worker: quem empresta é quem fecha.
+            return cls(build('gmail','v1',http=AuthorizedHttp(credentials,http=transport,max_refresh_attempts=0),cache_discovery=False))
         transport=GoogleTransport()
         try:return cls(build('gmail','v1',http=AuthorizedHttp(credentials,http=transport,max_refresh_attempts=0),cache_discovery=False),transport=transport)
         except Exception:transport.close();raise
@@ -200,10 +210,13 @@ class GmailAdapter:
         row=self.service.users().getProfile(userId='me').execute()
         return {'email':address(row['emailAddress'])}
 
-    def search(self, query, page=None):
+    def search(self, query, page=None, limit=10):
         if len(query)>1000:
             raise ValueError('Consulta acima do limite.')
-        row=self.service.users().messages().list(userId='me',q=query,maxResults=10,pageToken=page).execute()
+        # Só ids: a contagem do panorama pede 500 por página; leituras seguem com 10.
+        if type(limit) is not int or not 1<=limit<=500:
+            raise ValueError('Limite de busca inválido.')
+        row=self.service.users().messages().list(userId='me',q=query,maxResults=limit,pageToken=page).execute()
         return {'messages':row.get('messages',[]),'next_page':row.get('nextPageToken')}
 
     def thread(self, identifier):

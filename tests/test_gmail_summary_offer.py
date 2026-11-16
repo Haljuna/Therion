@@ -20,7 +20,7 @@ def prepare(host):
     return orch,client
 
 
-@pytest.mark.parametrize('command',['Lê meu último e-mail.','Leu o meu último e-mail.','Qual foi o meu último e-mail?'])
+@pytest.mark.parametrize('command',['Lê meu último e-mail.','Leu o meu último e-mail.'])
 def test_default_interprets_then_offers_reading(host,command):
     orch,client=prepare(host)
     result=orch.process_command(command)

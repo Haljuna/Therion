@@ -15,7 +15,7 @@ def prepare(host):
 
 
 @pytest.mark.parametrize('command,expected',[
-    ('Qual o meu penúltimo e-mail?',('summary',2)),
+    ('Qual o meu penúltimo e-mail?',('peek',2)),
     ('Lê meu antepenúltimo e-mail.',('summary',3)),
     ('Leia meu penúltimo e-mail completo.',('body',2)),
     ('Qual meus últimos três e meios?',('headers',3)),
@@ -41,7 +41,7 @@ def test_list_variants(command,expected):
 
 def test_penultimate_reads_second_message_without_page_argument(host):
     orch,client=prepare(host)
-    result=orch.process_command('Qual o meu penúltimo e-mail?')
+    result=orch.process_command('Lê meu penúltimo e-mail.')
     assert result.status=='success',result.message
     client.search.assert_called_once_with('in:inbox')
     client.metadata.assert_called_once_with('m2')

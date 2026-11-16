@@ -358,8 +358,9 @@ class AgentSupport:
                     if not self._history_sources_allowed(offer['sources']):
                         return OrchestrationResult(status='forbidden',message='A conexão ou a autorização do Gmail mudou. Faça uma nova consulta.')
                     gmail_followup=offer
+                    if control(command) in {'sim','pode'}:gmail_reference_mode=offer.get('mode')
                 elif control(command) in {'nao','no','nao precisa','agora nao'}:
-                    return OrchestrationResult(status='success',message='Tudo bem. Não vou ler o e-mail em voz alta.')
+                    return OrchestrationResult(status='success',message='Tudo bem.' if offer.get('mode') else 'Tudo bem. Não vou ler o e-mail em voz alta.')
                 elif control(command) in {'see','but','point','sim?','nao?'}:
                     self._gmail_read_offer=offer
                     return OrchestrationResult(status='clarification',message='Não reconheci sua resposta. Quer que eu leia esse e-mail? Diga sim ou não.')

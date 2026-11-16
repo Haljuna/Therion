@@ -77,7 +77,7 @@ def test_uncertain_or_potentially_actionable_messages_are_not_hidden(labels,subj
 
 class ChangingMailbox(FakeMailbox):
     def __init__(self):super().__init__();self.arrived=False;self.tagged=False
-    def search(self,query,page=None):
+    def search(self,query,page=None,limit=10):
         result=super().search(query,page)
         if self.arrived and not page and 'projeto' not in query:
             result['messages']=[dict(id='m15',threadId='tm15')]+result['messages'][:9]

@@ -15,7 +15,7 @@ def prepare(host):
     orch._gmail_summary_provider=SummaryProvider()
     def metadata(identifier):
         return {'id':identifier,'internalDate':str(int(datetime(2026,10,21,23,30,tzinfo=ZoneInfo('America/Sao_Paulo')).timestamp()*1000)),
-            'payload':{'headers':[{'name':'Subject','value':'Assunto '+identifier},
+            'payload':{'headers':[{'name':'Subject','value':'Assunto '+identifier},{'name':'From','value':'Ana Souza <ana@example.com>'},
                                   {'name':'Date','value':'Mon, 01 Jan 2001 00:00:00 +0000'}]}}
     client.metadata.side_effect=metadata
     client.thread.side_effect=lambda identifier:{'id':identifier,'version':'v-'+identifier,
@@ -86,6 +86,7 @@ def test_previous_is_relative_to_snapshot_not_new_inbox_positions(host):
 def test_yes_reads_quoted_email_without_turning_its_words_into_effect_claims(host):
     orch,client=prepare(host)
     orch.process_command('Qual foi meu último e-mail?')
+    orch.process_command('Sim.')
     result=orch.process_command('Sim.')
     assert result.status=='success',result.message
     assert 'Eu enviei os documentos' in result.message
@@ -100,12 +101,43 @@ def test_message_and_thread_ids_do_not_mix_body_or_source_references(host):
     client.thread.side_effect=lambda identifier:{'id':identifier,'version':'v','url':'https://mail.google.com/#all/old-thread',
         'messages':[{'id':'old-message','text':'CONTEUDO DE OUTRA MENSAGEM','attachments':[]},
                     {'id':'new-message','text':'CONTEUDO CORRETO','attachments':[]}]}
-    result=orch.process_command('Qual meu penúltimo e-mail?')
+    result=orch.process_command('Lê meu penúltimo e-mail.')
     assert result.status=='success',result.message
     assert 'gmail:new-message' in result.message
     assert 'gmail:old-thread' not in result.message
     assert 'OUTRA MENSAGEM' not in str(orch._gmail_summary_provider.messages)
     assert 'CONTEUDO CORRETO' in str(orch._gmail_summary_provider.messages)
+
+
+def test_which_last_mail_answers_from_headers_without_model_or_body(host):
+    orch,client=prepare(host)
+    result=orch.process_command('qual meu ultimo email?')
+    assert result.status=='success',result.message
+    assert 'Ana Souza' in result.message and 'Assunto m1' in result.message and '21/10 às 23:30' in result.message
+    assert 'Quer que eu resuma?' in result.message and 'gmail:m1' in result.message
+    client.thread.assert_not_called()
+    assert orch._gmail_summary_provider.messages==[]
+    result=orch.process_command('Sim.')
+    assert result.status=='success',result.message
+    client.thread.assert_called_once_with('t1')
+    assert len(orch._gmail_summary_provider.messages)==1
+    assert 'Quer que eu leia' in result.message
+
+
+def test_read_answer_after_peek_reads_whole_mail(host):
+    orch,client=prepare(host)
+    orch.process_command('Qual foi o meu penúltimo e-mail?')
+    result=orch.process_command('Leia.')
+    assert result.status=='success',result.message
+    assert 'Eu enviei os documentos' in result.message
+    assert orch._gmail_summary_provider.messages==[]
+
+
+def test_no_after_peek_does_not_mention_reading_aloud(host):
+    orch,client=prepare(host)
+    orch.process_command('Qual meu último e-mail?')
+    result=orch.process_command('Não.')
+    assert result.status=='success' and result.message=='Tudo bem.'
 
 
 def test_invalid_internal_date_is_not_guessed_from_old_header(host):

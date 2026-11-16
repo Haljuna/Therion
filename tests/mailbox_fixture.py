@@ -11,7 +11,7 @@ class FakeMailbox:
             'Inscrição confirmada','Planejamento de estudos','Revisão final do documento']
     def profile(self):
         self.calls.append(('profile',));return {'email':'marcus-'+self.prefix+'@example.test'}
-    def search(self,query,page=None):
+    def search(self,query,page=None,limit=10):
         self.calls.append(('search',query,page))
         if self.fail:raise OSError('Falha fictícia de conexão')
         if self.empty:return {'messages':[],'next_page':None}

@@ -66,10 +66,13 @@ def register_personal_tools(registry, host,*,read_cache=False):
         async def search(args,token):
             page=args.get('page') or ''
             if page and page not in search_pages.get(args['query'],set()):
-                return ToolResult('blocked',message='Token de página não retornado por esta consulta. Na primeira busca, omita page; depois use somente next_page devolvido para a mesma query.',issue_key='gmail:pagination')
-            data=await cooperative_call(lambda:gmail(token=token).search(args['query'],args['page']) if args.get('page') else gmail(token=token).search(args['query']),token=token)
+                if args['query'] in search_pages:
+                    return ToolResult('blocked',message='Token de página não retornado por esta consulta. Use somente next_page devolvido para a mesma query.',issue_key='gmail:pagination')
+                page=''   # primeira busca com página inventada: o modelo pequeno faz isso; vale a primeira página
+            data=await cooperative_call(lambda:gmail(token=token).search(args['query'],page) if page else gmail(token=token).search(args['query']),token=token)
             token.check()
-            if data.get('next_page'):search_pages.setdefault(args['query'],set()).add(data['next_page'])
+            known=search_pages.setdefault(args['query'],set())
+            if data.get('next_page'):known.add(data['next_page'])
             selected_threads.update(row['threadId'] for row in data['messages'] if row.get('threadId'))
             selected_messages.update(row['id'] for row in data['messages'] if row.get('id'))
             return ToolResult('success',data=data,evidence=({'id':'gmail:search','source':'Gmail'},),resolves=('gmail:pagination',))

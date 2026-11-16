@@ -21,12 +21,55 @@ def test_explicit_greetings_and_panorama(text):assert briefing_command(text)
 def test_other_commands_are_not_greetings(text):assert briefing_command(text) is None
 
 
+class TimedInbox:
+    """Caixa que respeita after:/before: em segundos, como o Gmail, com borda inclusiva ou estrita."""
+    def __init__(self,client,dates,inclusive):
+        self.client,self.dates,self.inclusive=client,dates,inclusive
+    def search(self,query,page=None,limit=10):
+        self.client.calls.append(('search',query,page))
+        if 'after:' not in query:return {'messages':[],'next_page':None}   # página da caixa, fora da contagem
+        after=int(query.split('after:')[1].split()[0]);before=int(query.split('before:')[1].split()[0])
+        lo=(lambda s:s>=after) if self.inclusive else (lambda s:s>after)
+        hi=(lambda s:s<=before) if self.inclusive else (lambda s:s<before)
+        found=[i for i,d in self.dates.items() if lo(d//1000) and hi(d//1000)]
+        start=int(page or 0)
+        return {'messages':[{'id':i,'threadId':'t'+i} for i in found[start:start+limit]],
+                'next_page':str(start+limit) if start+limit<len(found) else None}
+    def metadata(self,identifier):
+        self.client.calls.append(('metadata',identifier))
+        return {'id':identifier,'internalDate':str(self.dates[identifier]),'labelIds':['INBOX']}
+
+
+@pytest.mark.parametrize('inclusive',[True,False])
+def test_new_mail_count_is_exact_without_opening_every_message(mailbox,inclusive):
+    host,client=mailbox;cutoff=1792843200700;previous=cutoff-30*60000+400
+    dates={f'm{i}':cutoff-i*60000 for i in range(1,41)}
+    dates.update(b1=previous,b2=previous-1,b3=cutoff-1,b4=cutoff)
+    inbox=TimedInbox(client,dates,inclusive);client.search=inbox.search;client.metadata=inbox.metadata
+    BriefingMarker(host._agent_root,host._mailbox.identity()).write(previous)
+    result=mail_since(host,CancellationToken(),cutoff)
+    assert result['complete'] and result['count']==31   # m1..m29 + b1 + b3
+    assert sum(call[0]=='metadata' for call in client.calls)<=6   # só as bordas
+
+
+def test_counting_hundreds_of_new_mails_takes_few_gmail_calls(mailbox):
+    # 16/11: 285 e-mails novos a 10 por chamada = 29 chamadas e 26 s de saudação.
+    host,client=mailbox;cutoff=1792843200000
+    dates={f'm{i}':cutoff-i*60000 for i in range(1,601)}   # 600 no intervalo: ainda pagina, a 500 por vez
+    inbox=TimedInbox(client,dates,True);client.search=inbox.search;client.metadata=inbox.metadata
+    BriefingMarker(host._agent_root,host._mailbox.identity()).write(cutoff-11*3600000)
+    result=mail_since(host,CancellationToken(),cutoff)
+    assert result['complete'] and result['count']==600
+    assert sum(call[0]=='search' and 'after:' in call[1] for call in client.calls)<=4   # miolo em 2 + bordas
+
+
 def test_new_mail_count_paginates_and_is_not_unread(mailbox):
     host,client=mailbox;account=host._mailbox.identity();cutoff=1792843200000
+    dates={f'm{i}':cutoff-i*600000 for i in range(1,26)}   # 25 no intervalo: o miolo pagina
+    inbox=TimedInbox(client,dates,True);client.search=inbox.search;client.metadata=inbox.metadata
     marker=BriefingMarker(host._agent_root,account);marker.write(cutoff-5*3600000)
     result=mail_since(host,CancellationToken(),cutoff)
-    assert result['complete'] and result['count']==5
-    assert any(call[:3]==('search',f'in:inbox after:{(cutoff-5*3600000)//1000-1} before:{cutoff//1000+1}','page-2') for call in client.calls)
+    assert result['complete'] and result['count']==25 and 'is:unread' not in str(client.calls)
     assert marker.read()==cutoff-5*3600000
     assert not any(call[0]=='thread' for call in client.calls)
 

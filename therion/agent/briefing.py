@@ -2,7 +2,6 @@
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from hashlib import sha256
 import json
-import math
 import os
 from pathlib import Path
 import re
@@ -68,24 +67,31 @@ def mail_since(host,token,cutoff):
     result=dict(state='ready',page=page,account=account,cutoff_ms=cutoff,first=previous is None,count=0,complete=True)
     if previous is None:return result
     if previous>cutoff:raise ValueError('O relógio está anterior ao último panorama. Marco preservado.')
-    query=f'in:inbox after:{max(0,previous//1000-1)} before:{math.ceil(cutoff/1000)+1}'
-    seen=set();pages=set();next_page=None
+    # O Gmail filtra por segundo: o miolo do intervalo conta só pelos ids; as bordas (2–3 s de cada lado)
+    # conferem a hora exata. Abrir mensagem por mensagem estourava o prazo e o marco nunca avançava.
+    ps,cs=previous//1000,cutoff//1000
+    inner=f'in:inbox after:{ps+1} before:{cs-1}' if cs-1>ps+1 else None
+    edges=(f'in:inbox after:{max(0,ps-1)} before:{ps+2}',f'in:inbox after:{max(0,cs-2)} before:{cs+2}')
     try:
         with box.io_lock:
             with box._adapter(account,token) as adapter:
-                while True:
-                    token.check();box._check(account,token)
-                    row=adapter.search(query,next_page) if next_page else adapter.search(query)
-                    for ref in row.get('messages',[]):
-                        token.check();identifier=ref['id']
-                        if identifier in seen:continue
-                        seen.add(identifier);metadata=adapter.metadata(identifier)
-                        received=int(metadata['internalDate'])
-                        if previous<=received<cutoff and 'INBOX' in metadata.get('labelIds',[]):result['count']+=1
-                    next_page=row.get('next_page')
-                    if not next_page:break
-                    if next_page in pages:raise ValueError('Paginação repetida; contagem incompleta.')
-                    pages.add(next_page)
+                def ids(query):
+                    found=[];pages=set();next_page=None
+                    while True:
+                        token.check();box._check(account,token)
+                        row=adapter.search(query,next_page,limit=500)   # 10 por chamada levava 26 s com 285 e-mails
+                        found+=[ref['id'] for ref in row.get('messages',[])]
+                        next_page=row.get('next_page')
+                        if not next_page:return found
+                        if next_page in pages:raise ValueError('Paginação repetida; contagem incompleta.')
+                        pages.add(next_page)
+                seen=set(ids(inner)) if inner else set()
+                result['count']=len(seen)
+                for identifier in ids(edges[0])+ids(edges[1]):
+                    if identifier in seen:continue
+                    token.check();seen.add(identifier);metadata=adapter.metadata(identifier)
+                    received=int(metadata['internalDate'])
+                    if previous<=received<cutoff and 'INBOX' in metadata.get('labelIds',[]):result['count']+=1
         box._check(account,token)
     except Cancelled:raise
     except (OSError,ValueError,TimeoutError,KeyError,TypeError):
