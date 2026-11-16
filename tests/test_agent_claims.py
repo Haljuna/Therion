@@ -38,3 +38,19 @@ def test_legacy_chat_cannot_publish_passive_effect_without_receipt(case,message)
     assert result.status=='clarification',result.message
     assert 'Não há execução verificada' in result.message
     assert 'foi aberto' not in result.message and 'foi fechado' not in result.message
+
+
+def test_passive_effect_claim_without_any_tool_is_unsupported():
+    # 16/11: fala mal transcrita e o modelo "confirmou" efeitos que nunca existiram.
+    assert unsupported_claim('Entendido, senhor. O passeio foi registrado e o crédito foi aplicado conforme informado.',[])
+    assert unsupported_claim('Entendido, senhor. A tarefa foi encerrada. Até logo.',[])
+    assert unsupported_claim('Os lembretes foram cancelados.',[])
+    assert not unsupported_claim('Nada foi registrado nem alterado.',[])
+    assert not unsupported_claim('A tarefa não foi encerrada.',[])
+
+
+def test_passive_wording_after_a_successful_read_is_not_blocked():
+    # Relatar o que uma leitura mostrou ("foi concluída ontem") não é anunciar efeito.
+    from therion.agent.contracts import ToolCall,ToolResult
+    read=[(ToolCall('list_inbox',{}),ToolResult('success',data={'tasks':[]}))]
+    assert not unsupported_claim('A tarefa foi concluída ontem.',read)

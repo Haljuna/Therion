@@ -190,7 +190,9 @@ class AgentRuntime:
                     if any(result.side_effect_state in {'pending', 'uncertain'} for _, result in results):
                         return finish('uncertain', 'Há uma operação pendente ou incerta. Não confirmei a conclusão. ' + decision.message)
                     footer='\n\nFontes consultadas:\n'+'\n'.join(identifier+' — '+str(source) for identifier,source in list(sources.items())[:10]) if sources else ''
-                    return finish('partial' if failed else 'completed', decision.message+footer)
+                    # O rodapé é do runtime; um rodapé copiado pelo modelo (ao repetir a resposta) sai.
+                    body=decision.message.split('\n\nFontes consultadas:\n',1)[0] if footer else decision.message
+                    return finish('partial' if failed else 'completed', body+footer)
                 fingerprint = tuple(call.fingerprint for call in decision.calls)
                 duplicates = duplicates + 1 if fingerprint == previous else 0
                 previous = fingerprint

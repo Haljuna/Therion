@@ -4,8 +4,16 @@ import re
 
 CLAIMS=re.compile(r'\b(?:enviei|enviamos|mandei|foi enviad[oa]|salvei|salvamos|foi salv[oa]|foi abert[oa]|foram abert[oa]s|foi fechad[oa]|foram fechad[oa]s|fechei|fechamos|abrimos|abri|agendei|arquivei|marquei|adicionei|removi|excluí|exclui)\b',re.I)
 
+# Sem nenhuma ferramenta bem-sucedida no turno, "foi registrado/encerrado" só pode ser invenção.
+# Com leitura bem-sucedida a frase pode relatar o que a fonte mostra, então não entra aqui.
+PASSIVE=re.compile(r'\b(?:foi|foram)\s+(?:registrad|aplicad|encerrad|conclu[ií]d|cancelad|agendad|marcad|adicionad|removid|apagad|exclu[ií]d|atualizad)[oa]s?\b',re.I)
+
 
 def unsupported_claim(message,results):
+    if not any(row.status=='success' for _,row in results):
+        for claim in PASSIVE.finditer(message):
+            clause=re.split(r'[.!?;,\n]|\bmas\b|\be\b',message[:claim.start()],flags=re.I)[-1][-40:]
+            if not re.search(r'\b(?:não|nao|nunca|nada|nenhum\w*)\b',clause,re.I):return True
     # Uma citação literal de e-mail lido não anuncia uma ação do assistente.
     # Só reconhecer trechos presentes nos resultados atuais e bem-sucedidos.
     from .gmail_presentation import readable_body,sender_name

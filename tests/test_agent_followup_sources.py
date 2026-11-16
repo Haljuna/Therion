@@ -128,3 +128,14 @@ def test_history_receipt_never_proves_a_new_effect(tmp_path):
         history_sources=({'id': 'receipt:old', 'source': 'registro operacional local',
                           'operation': 'gmail.send_draft'},)))
     assert result.status == 'partial' and 'Não há recibo verificado' in result.message
+
+
+def test_followup_repeating_previous_answer_keeps_one_sources_footer(tmp_path):
+    # "O quê?": o modelo devolve a resposta anterior inteira, rodapé incluído.
+    host, _ = host_with_read_note(tmp_path, AgentDecision('final',
+        'PONTE-42. Fonte: note:1.\n\nFontes consultadas:\nnote:1 — Aurora.md'))
+    try:
+        result = host.process_command('Qual era o código de conferência do projeto Aurora?')
+        assert result.message.count('Fontes consultadas:') == 1, result.message
+    finally:
+        host.close()
