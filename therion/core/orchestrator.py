@@ -2414,10 +2414,14 @@ class Orchestrator(WorkflowSupport, MemorySupport, PersonalContextSupport, Catal
                 return app_status
 
         if self._personal_flow_is_free():
-            from therion.core.local_reports import answer as local_report
-            report = local_report(command, self)
+            from therion.core.local_reports import answer as local_report, game_mode_request
+            game = game_mode_request(command)
+            report = local_report(command, self) if game is None else (
+                'Modo jogo ligado. Libero a placa de vídeo e seguro os avisos até o senhor mandar sair.' if game
+                else 'Modo jogo desligado.')
             if report is not None:
-                result = OrchestrationResult(status='success', message=report)
+                result = OrchestrationResult(status='success', message=report,
+                    ui_action='game_mode' if game is not None else None, ui_payload={'on': game} if game is not None else None)
                 self._complete_task()
                 self._finalize_session_result(result)
                 return result

@@ -120,3 +120,25 @@ def test_reports_answer_through_the_desktop_worker_without_the_model(case, agent
     assert provider.mock_calls == []
     if agent:
         assert not agent.observations
+
+
+@pytest.mark.parametrize('command,on', [
+    ('Therion, modo de jogo', True), ('modo jogo', True), ('Ativa o modo de jogo.', True), ('entra no modo jogo', True),
+    ('Vou jogar', True), ('Sai do modo de jogo', False), ('desativa o modo jogo', False), ('Parei de jogar', False),
+    ('qual jogo eu jogo', None), ('abre o jogo', None), ('não ativa o modo de jogo', None), ('modo de jogo é bom?', None)])
+def test_game_mode_phrases(command, on):
+    assert local_reports.game_mode_request(command) is on
+
+
+@pytest.mark.parametrize('agent_enabled', [False, True])
+def test_game_mode_command_asks_the_window_to_switch_without_the_model(case, agent_enabled):
+    host, provider, calendar, profile = case
+    agent = enable(host) if agent_enabled else None
+    for command, on in (('Therion, modo de jogo', True), ('Sair do modo de jogo', False)):
+        worker = _CommandWorker(host, command); worker.run()
+        assert not worker.failed and worker.result.status == 'success'
+        assert worker.result.ui_action == 'game_mode' and worker.result.ui_payload == {'on': on}
+        assert worker.result.message.startswith('Modo jogo ligado.' if on else 'Modo jogo desligado.')
+    assert provider.mock_calls == [] and calendar.mock_calls == []
+    if agent:
+        assert not agent.observations

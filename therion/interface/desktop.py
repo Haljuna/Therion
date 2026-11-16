@@ -344,6 +344,7 @@ class MainWindow(QMainWindow):
         self._game_mode = (self._config.get('ui') or {}).get('game_mode') is True
         self._game_polls = 0
         self._game_unloaded = False
+        self._game_forced = False
         self._game_thread = None
         if self._reminders is not None or self._game_mode:
             self._reminder_timer.start()
@@ -1027,6 +1028,13 @@ class MainWindow(QMainWindow):
         provider = getattr(getattr(self._orchestrator, 'ai_core', None), '_provider', None)
         if self._game_polls < 2 or self._game_unloaded or self._processing or not hasattr(provider, 'unload'):
             return
+        self._unload_model()
+        self._append('Therion', 'Modo jogo: liberei a placa de vídeo. Meu primeiro pedido depois disso demora um pouco mais.')
+
+    def _unload_model(self):
+        provider = getattr(getattr(self._orchestrator, 'ai_core', None), '_provider', None)
+        if not hasattr(provider, 'unload'):
+            return
         self._game_unloaded = True
         def unload():
             try:
@@ -1035,7 +1043,15 @@ class MainWindow(QMainWindow):
                 pass  # sem o Ollama no ar não há o que liberar
         self._game_thread = threading.Thread(target=unload, name='therion-game-mode', daemon=True)
         self._game_thread.start()
-        self._append('Therion', 'Modo jogo: liberei a placa de vídeo. Meu primeiro pedido depois disso demora um pouco mais.')
+
+    def _set_game_mode(self, on):
+        """Pedido falado ou digitado ("modo de jogo" / "sair do modo de jogo"); vale até o usuário desligar."""
+        self._game_forced = on
+        self._game_unloaded = False
+        if on:
+            self._unload_model()
+            if not self._reminder_timer.isActive():
+                self._reminder_timer.start()   # os avisos guardados saem quando o modo for desligado
 
     def _poll_reminders(self):
         if self._closing or self._quit_requested:
@@ -1046,7 +1062,7 @@ class MainWindow(QMainWindow):
             self._poll_game_mode(full_screen)
         if self._reminders is None:
             return
-        busy = self._processing or self._pending_plan is not None or full_screen
+        busy = self._processing or self._pending_plan is not None or full_screen or self._game_forced
         for message in self._reminders.due(datetime.now(), busy):
             self._append('Therion', message)
             if self._speech_output is not None:
@@ -1254,6 +1270,8 @@ class MainWindow(QMainWindow):
             from therion.integrations.calendar import account_key
             if payload.get('session')!=self._orchestrator.session_id or payload.get('account')!=self._orchestrator._mailbox.identity() or payload.get('calendar_account')!=account_key(self._orchestrator):
                 result=OrchestrationResult(status='cancelled',message='A conta ou a sessão mudou. Solicite um novo panorama.')
+        if result.ui_action=='game_mode':
+            self._set_game_mode((result.ui_payload or {}).get('on') is True)
         if result.ui_action=='open_mail':
             if self._dashboard is None or not self._dashboard.active:self._select_interface('constellation',persist=False)
             if self._dashboard is not None and self._dashboard.active:self._dashboard.open_mail()

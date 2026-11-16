@@ -23,6 +23,10 @@ _PC = re.compile(
     r'|como (?:esta|ta) (?:a memoria|a saude) do (?:pc|computador)|(?:saude|estado) do (?:pc|computador)' + _POLITE)
 _PROJECT = re.compile(
     r'(?:como (?:esta|ta|anda|vai)|(?:qual (?:e )?)?(?:o )?(?:status|estado|situacao) d[oe]) (?:o |a )?(projeto )?(.+?)' + _POLITE)
+_GAME = r'(?:o )?modo (?:de )?(?:jogo|game)'
+_GAME_ON = re.compile(r'(?:(?:ativa|ative|ativar|liga|ligue|ligar|entra n|entre n|entrar n|coloca n|inicia|inicie)(?:o | o | )?)?' + _GAME + '|vou jogar(?: agora)?' + _POLITE)
+_GAME_OFF = re.compile(r'(?:desativa|desative|desativar|desliga|desligue|desligar|sai d|saia d|sair d|encerra|encerre|tira d)(?:o | o | )?' + _GAME
+                       + r'|parei de jogar|terminei de jogar|modo normal' + _POLITE)
 _GB = 1024 ** 3
 
 
@@ -38,9 +42,20 @@ def configured_projects(config=None):
             if isinstance(name, str) and name.strip() and isinstance(path, str) and Path(path).is_absolute()}
 
 
-def report_request(command, projects=None):
-    """('day',) | ('pc',) | ('project', nome, caminho) | ('unknown_project', nomes) | None."""
+def game_mode_request(command):
+    """True liga, False desliga, None não é sobre o modo jogo."""
     text = control(command).rstrip('?!. ')
+    if _GAME_OFF.fullmatch(text):
+        return False
+    return True if _GAME_ON.fullmatch(text) else None
+
+
+def report_request(command, projects=None):
+    """('day',) | ('pc',) | ('game', ligar) | ('project', nome, caminho) | ('unknown_project', nomes) | None."""
+    text = control(command).rstrip('?!. ')
+    game = game_mode_request(command)
+    if game is not None:
+        return ('game', game)
     if _DAY.fullmatch(text):
         return ('day',)
     if _PC.fullmatch(text):
@@ -196,7 +211,7 @@ def pc_report(measure):
 def answer(command, host):
     """Resposta pronta ou None; `host` é o orquestrador (relógio, tarefas da sessão e agenda)."""
     request = report_request(command)
-    if request is None:
+    if request is None or request[0] == 'game':   # o modo jogo é respondido pelo orquestrador
         return None
     if request[0] == 'day':
         return day_report(host._calendar_now(), tasks=host._session_tasks.list(), calendar=host.calendar_adapter)

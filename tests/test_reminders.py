@@ -173,3 +173,26 @@ def test_game_mode_is_off_by_default_and_unload_asks_ollama_to_drop_the_model():
     provider._send_request = lambda payload, timeout: sent.append((payload, timeout))
     provider.unload()
     assert sent == [({'model': 'modelo-teste', 'messages': [], 'stream': False, 'keep_alive': 0}, 15)]
+
+
+def test_spoken_game_mode_unloads_now_and_holds_warnings_until_switched_off(app, tmp_path, monkeypatch):
+    from therion.core.orchestrator import OrchestrationResult
+    window = make_window(app, tmp_path, monkeypatch, True)     # ui.game_mode desligado: o pedido vale mesmo assim
+    try:
+        window._orchestrator.ai_core = MagicMock()
+        provider = window._orchestrator.ai_core._provider
+        window._reminders = MagicMock()
+        window._reminders.due.return_value = []
+        monkeypatch.setattr(reminders, 'do_not_disturb', lambda: False)
+        window._apply_command_result(OrchestrationResult(status='success', message='Modo jogo ligado.',
+                                                         ui_action='game_mode', ui_payload={'on': True}))
+        window._game_thread.join(5)
+        assert provider.unload.call_count == 1 and window._game_forced is True
+        window._poll_reminders()
+        assert window._reminders.due.call_args.args[1] is True      # segura os avisos sem tela cheia
+        window._apply_command_result(OrchestrationResult(status='success', message='Modo jogo desligado.',
+                                                         ui_action='game_mode', ui_payload={'on': False}))
+        window._poll_reminders()
+        assert window._reminders.due.call_args.args[1] is False and provider.unload.call_count == 1
+    finally:
+        close(app, window)
