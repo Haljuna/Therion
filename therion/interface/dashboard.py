@@ -118,12 +118,24 @@ def scroll_page():
     return scroll, layout
 
 
+_RUNNING_READS = set()
+
+
 class ReadWorker(QThread):
     def __init__(self, function, parent=None):
-        super().__init__(parent)
+        # Sem pai Qt: destruir o painel com a leitura em andamento destruía a thread
+        # ainda rodando, e o Qt derruba o processo. A thread se segura até terminar.
+        super().__init__()
         self.function = function
         self.token = CancellationToken()
         self.result = None
+
+    def start(self, *args):
+        # Solta as que já terminaram aqui, e não no sinal finished: soltar durante o
+        # próprio sinal destruiria a thread antes de os outros ouvintes serem avisados.
+        _RUNNING_READS.difference_update([worker for worker in _RUNNING_READS if not isValid(worker) or worker.isFinished()])
+        _RUNNING_READS.add(self)
+        super().start(*args)
 
     def run(self):
         try:
@@ -1026,7 +1038,7 @@ class Dashboard(QWidget):
         worker.start()
 
     def read_finished(self, kind, worker, epoch, identity, day):
-        if self.workers.get(kind) is not worker:
+        if not isValid(self) or self.workers.get(kind) is not worker:
             return
         self.workers.pop(kind)
         # A primeira leitura pode inicializar o store; a identidade da sessão/conta
@@ -1106,18 +1118,29 @@ class Dashboard(QWidget):
 
     def action(self, operation, arguments):
         w = self.window
-        if w._processing or self.action_worker or w._quit_requested:
+        # O turno que espera a aprovação segura _processing; aprovar ou descartar a proposta é o que o destrava.
+        waiting = operation in {'approve','discard'} and self._turn_awaits_approval()
+        if (w._processing and not waiting) or self.action_worker or w._quit_requested:
             return
         if w._pending_plan is not None:
             return
-        w._set_processing(True); w._update_orbe('executing')
+        if not waiting:
+            w._set_processing(True); w._update_orbe('executing')
         worker = ReadWorker(lambda token:self.source.action(operation,arguments,token),self)
+        worker.turn_reports = waiting
         self.action_worker = worker
         w._poll_workflow_progress()
         worker.finished.connect(lambda:self.action_finished(worker)); worker.start()
 
+    def _turn_awaits_approval(self):
+        runtime = getattr(self.window._orchestrator,'_agent_runtime',None)
+        return getattr(runtime,'waiting_confirmation',False) is True
+
     def action_finished(self, worker):
         self.action_worker = None
+        if worker.turn_reports:
+            # O turno em espera recebe o recibo, publica a resposta e encerra o estado ocupado.
+            worker.deleteLater(); return
         result = worker.result
         self.window._set_processing(False)
         self.window._poll_workflow_progress()
@@ -1184,7 +1207,8 @@ class Dashboard(QWidget):
         self.proposal_bar.setVisible(self._proposal is not None and w._pending_plan is None)
         if self._proposal and self.proposal_text.toPlainText()!=self._proposal.preview:
             self.proposal_text.setPlainText(self._proposal.preview)
-        self.approve.setEnabled(not w._processing); self.discard.setEnabled(not w._processing)
+        free = (not w._processing or self._turn_awaits_approval()) and self.action_worker is None
+        self.approve.setEnabled(free); self.discard.setEnabled(free)
         health=self.service_health()
         text=p.label
         if p.state=='idle' and not health['ai']:text='Pronto · IA desativada'

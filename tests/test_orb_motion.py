@@ -100,3 +100,23 @@ def test_leaving_preparing_early_does_not_pop():
     before = m.assembly; m.set_visual('listening'); m.advance(1/60)
     assert before < m.assembly < before+.05
     run(m, 2); assert m.assembly == 1
+
+
+def _syllables(state, seconds=2.):
+    """5 silabas por segundo (100 ms de voz, 100 ms de pausa), a 60 quadros/s."""
+    motion = OrbMotion(); motion.set_visual(state, 0.); values = []
+    for frame in range(int(seconds*60)):
+        motion.set_visual(state, 1. if (frame/60) % .2 < .1 else 0.)
+        motion.advance(1/60); values.append(motion.energy)
+    return values[60:]   # descarta o primeiro segundo
+
+
+def test_speaking_pulses_on_each_syllable():
+    values = _syllables('speaking')
+    assert max(values) > .8
+    assert min(values) < .4*max(values)   # a superficie volta entre uma silaba e outra
+
+
+def test_listening_stays_smooth_between_syllables():
+    values = _syllables('listening')
+    assert min(values) > .4*max(values)   # o microfone do usuario tem ruido: nao tremer

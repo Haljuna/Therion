@@ -46,6 +46,18 @@ class PanelTests(unittest.TestCase):
         panel.close();window._pause_autonomy()
         self.assertEqual(self.store.state('paused'),'1')
 
+    def test_routine_poll_failure_names_the_error_kind(self):
+        # 14/11: o aviso escondia a causa e não dava para investigar depois.
+        window=self.window();shown=[]
+        window._append=lambda who,text:shown.append(text)
+        def broken():raise PermissionError('C:/caminho/pessoal/config.json')
+        window._routine_scheduler.next_due=broken
+        window._poll_autonomy();self.wait(window)
+        self.assertEqual(len(shown),1)
+        self.assertIn('falha de estado (PermissionError)',shown[0])
+        self.assertNotIn('caminho',shown[0])
+        self.assertFalse(window._v4_timer.isActive())
+
     def test_panel_worker_can_chain_next_job_without_losing_result(self):
         window=self.window();window._show_autonomy();panel=window._autonomy_panel
         observed=[]

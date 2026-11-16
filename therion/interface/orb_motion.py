@@ -78,8 +78,10 @@ class OrbMotion:
         self.flash *= math.exp(-dt/.1); self.flash_ready_in -= dt
         # Continua montando mesmo se o estado mudar antes do fim: sair cedo não dá estalo.
         self.assembly = min(1., self.assembly+dt/ASSEMBLY_SECONDS)
-        # A voz sobe rápido e desce devagar.
-        tau = .065 if self.target_energy > self.energy else .17
+        # A voz sobe rápido e desce devagar. Na fala do Therion (áudio limpo) a resposta é mais
+        # curta para cada sílaba aparecer; no microfone do usuário fica suave por causa do ruído.
+        rise, fall = (.03, .07) if self.state == 'speaking' else (.065, .17)
+        tau = rise if self.target_energy > self.energy else fall
         self.energy = self.target_energy+(self.energy-self.target_energy)*math.exp(-dt/tau)
         # Um sinal de atenção suave na troca de estado, sem reiniciar relógios.
         drive = math.exp(-dt/.28); response = math.exp(-dt/.13)

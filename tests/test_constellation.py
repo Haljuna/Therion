@@ -255,6 +255,48 @@ def test_proposal_expiry_clears_visual_confirmation(window):
     assert d.presentation.state=='idle' and d.proposal_bar.isHidden()
 
 
+def test_waiting_turn_can_be_approved_from_the_proposal_bar(window):
+    # 14/11: o turno esperava a aprovação com a barra visível e os botões desligados; vencia em 180 s.
+    from types import SimpleNamespace
+    from therion.agent.proposals import ActionProposals
+    window._select_interface('constellation',persist=False)
+    d=window._dashboard; settle(lambda:not d.workers)
+    orch=window._orchestrator; effects=[]
+    orch._get_agent_store()
+    orch._agent_proposals=ActionProposals(orch._agent_store,lambda:orch.session_id)
+    orch._agent_proposals.prepare('fixture',{},'Concluir tarefa X',lambda args:effects.append(1),lambda *args:True,lambda args:True)
+    orch._agent_runtime=SimpleNamespace(waiting_confirmation=True,active=True,sources=())
+    window._processing=True
+    try:
+        d.poll()
+        assert not d.proposal_bar.isHidden() and d.approve.isEnabled() and d.discard.isEnabled()
+        d.approve.click(); settle(lambda:d.action_worker is None)
+        assert effects==[1]
+        assert window._processing is True   # quem encerra o estado ocupado é o turno em espera
+    finally:
+        window._processing=False
+
+
+def test_proposal_bar_stays_locked_while_an_ordinary_turn_runs(window):
+    from types import SimpleNamespace
+    from therion.agent.proposals import ActionProposals
+    window._select_interface('constellation',persist=False)
+    d=window._dashboard; settle(lambda:not d.workers)
+    orch=window._orchestrator; effects=[]
+    orch._get_agent_store()
+    orch._agent_proposals=ActionProposals(orch._agent_store,lambda:orch.session_id)
+    orch._agent_proposals.prepare('fixture',{},'Concluir tarefa X',lambda args:effects.append(1),lambda *args:True,lambda args:True)
+    orch._agent_runtime=SimpleNamespace(waiting_confirmation=False,active=True,sources=())
+    window._processing=True
+    try:
+        d.poll()
+        assert not d.approve.isEnabled()
+        d.approve_proposal()
+        assert d.action_worker is None and effects==[]
+    finally:
+        window._processing=False
+
+
 def test_calendar_oauth_is_only_started_by_explicit_button(window):
     window._select_interface('constellation',persist=False)
     d=window._dashboard; settle(lambda:not d.workers)

@@ -876,6 +876,12 @@ class MainWindow(QMainWindow):
             return
         from therion.interface.autonomy_panel import V4Job
         def task():
+            try:
+                return poll()
+            except Exception as error:
+                # Só o tipo: a mensagem do erro pode ter caminho ou dado pessoal.
+                raise RuntimeError(type(error).__name__) from error
+        def poll():
             messages = []
             due = self._routine_scheduler.next_due()
             if due is not None:
@@ -898,7 +904,8 @@ class MainWindow(QMainWindow):
             ok, value = payloads[0] if payloads else (False, '')
             if not ok:
                 self._v4_timer.stop()
-                self._append('Therion', 'Suspendi as rotinas por falha de estado. Confira o painel Autonomia.')
+                kind = f' ({value})' if value else ''
+                self._append('Therion', f'Suspendi as rotinas por falha de estado{kind}. Confira o painel Autonomia.')
                 return
             for message in value:
                 self._append('Therion', message)
@@ -1619,7 +1626,8 @@ class MainWindow(QMainWindow):
                 normalized_answer = text.strip().rstrip('.!?').strip()
                 if self._confirmation_handler.evaluate_response(normalized_answer) is not None:
                     text = normalized_answer
-            self._next_user_channel = 'voz'
+            confidence = getattr(self._voice_pipeline, 'last_confidence', None)
+            self._next_user_channel = 'voz' if not isinstance(confidence, float) else f'voz · confiança {confidence:.2f}'
             self._append('Você', text)
             self._speech_text = ''
             self._conversation_label.setText('Pensando…')
