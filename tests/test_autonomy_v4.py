@@ -146,6 +146,19 @@ class AutonomyTests(unittest.TestCase):
         self.assertEqual(self.store.recent()[0].mode,'simulation')
         self.assertFalse(self.store.ready('open_app',app.id,implementation_version(self.runtime,app.as_dict())))
 
+    def test_updated_app_is_explained_by_name_without_opening(self):
+        # Conversas de 04/11 em diante: "Abre o navegador" falhava com aviso genérico após atualização do Chrome.
+        app=self.app()
+        Path(app.path).write_bytes(b'versao nova')
+        orch=Orchestrator(simulate=True,log_dir=str(self.root/'logs'),autonomy_runtime=self.runtime)
+        result=orch.process_command('abra Editor')
+        self.assertNotEqual(result.status,'awaiting_confirmation')
+        self.assertIn('Editor foi atualizado',result.message)
+        self.assertIn('painel Autonomia',result.message)
+        Path(app.path).unlink()
+        result=orch.process_command('abra Editor')
+        self.assertIn('Não encontrei o programa do Editor',result.message)
+
     def test_ambiguous_name_never_launches(self):
         self.app('Editor');app=self.app('Outro')
         catalog=ApplicationCatalog(self.runtime)

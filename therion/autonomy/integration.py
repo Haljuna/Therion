@@ -142,8 +142,13 @@ class CatalogSupport(CloseSupport):
             new_window=bool((intent.entities or {}).get('new_window'))
             if new_window and Path(app.path).name.casefold()!='chrome.exe':
                 return OrchestrationResult(status='clarification',message='A abertura de nova janela está disponível para o Chrome cadastrado. Para este aplicativo, peça a abertura normal.')
+            if not Path(app.path).exists():
+                raise ValueError(f'Não encontrei o programa do {app.name} no lugar cadastrado, então não abri. '
+                    'Revise o cadastro dele no painel Autonomia.')
             if not self.application_catalog.valid(app):
-                raise ValueError('O executável mudou ou está ausente. Revise seu cadastro no painel Autonomia.')
+                # Atualização automática (Chrome, Steam) troca o arquivo aprovado; a revisão continua sendo do usuário.
+                raise ValueError(f'O {app.name} foi atualizado desde que você o aprovou, então não abri. '
+                    'Revise o cadastro dele no painel Autonomia para eu voltar a abrir.')
             resolved=Intent(action='abrir aplicativo',target=app.id,raw_command=intent.raw_command,
                 requires_confirmation=True,entities={'new_window':True} if new_window else None)
             if not self.permission_manager.is_allowed(resolved):
