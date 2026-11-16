@@ -24,3 +24,37 @@ from PySide6.QtWidgets import QApplication
 @pytest.fixture(scope='session')
 def app():
     return QApplication.instance() or QApplication([])
+
+
+def _move_test_windows():
+    """THERION_TEST_SCREEN=2 abre as janelas dos testes no 2º monitor, para não cobrir o que está em uso."""
+    from PySide6.QtCore import QEvent, QObject, Qt
+    from PySide6.QtWidgets import QWidget
+    number = os.environ.get('THERION_TEST_SCREEN', '')
+    app = QApplication.instance()
+    if not number.isdigit() or not isinstance(app, QApplication) or getattr(app, '_therion_screen_filter', None):
+        return
+    screens = app.screens()
+    if not 1 <= int(number) <= len(screens):
+        return
+    area = screens[int(number) - 1].availableGeometry()
+
+    class Mover(QObject):
+        def eventFilter(self, target, event):
+            # Só janelas e diálogos; menus e dicas ficam onde o Qt os posiciona.
+            if (event.type() == QEvent.Show and isinstance(target, QWidget) and target.isWindow()
+                    and target.windowType() in (Qt.Window, Qt.Dialog)
+                    and not area.contains(target.frameGeometry().center())):
+                target.move(area.x() + 40, area.y() + 40)
+            return False
+
+    app._therion_screen_filter = Mover(app)
+    app.installEventFilter(app._therion_screen_filter)
+
+
+def pytest_runtest_setup(item):
+    _move_test_windows()
+
+
+def pytest_runtest_call(item):
+    _move_test_windows()

@@ -15,7 +15,7 @@ PROJECTS = {'Prismion': 'F:\\Prismion'}
 
 
 @pytest.mark.parametrize('command', ['O que eu fiz hoje?', 'o que a gente fez hoje', 'Me diga o que fiz hoje, por favor',
-                                     'Resumo do meu dia', 'Como foi meu dia?'])
+                                     'Como foi meu dia?'])
 def test_day_phrases(command):
     assert report_request(command, {}) == ('day',)
 
@@ -31,7 +31,7 @@ def test_project_phrases_only_match_registered_names_or_the_word_projeto():
     assert report_request('qual o status do projeto prismion', PROJECTS) == ('project', 'Prismion', 'F:\\Prismion')
     assert report_request('Como está o projeto Atlas?', PROJECTS) == ('unknown_project', ('Prismion',))
     # Sem a palavra "projeto" e sem nome cadastrado, a frase é de outra rota.
-    for other in ('Como está o Chrome?', 'Como está a agenda?', 'O que eu tenho hoje?', 'O que eu fiz ontem?',
+    for other in ('Como está o Chrome?', 'Como está a agenda?', 'O que eu tenho hoje?', 'O que eu fiz ontem?', 'Resume meu dia.', 'Resumo do meu dia',
                   'Não me diga o que eu fiz hoje', 'O PC está ligado?'):
         assert report_request(other, PROJECTS) is None
 

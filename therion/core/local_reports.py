@@ -16,7 +16,7 @@ from therion.context.language import control
 _POLITE = r'(?:,? por favor)?'
 _DAY = re.compile(
     r'(?:me (?:diga|fale|conta|conte) )?'
-    r'(?:o que (?:eu |a gente |nos )?(?:fiz|fizemos|fez) hoje|(?:resumo|resume|resuma) (?:do |o )?meu dia|como foi (?:o )?meu dia)'
+    r'(?:o que (?:eu |a gente |nos )?(?:fiz|fizemos|fez) hoje|como foi (?:o )?meu dia)'
     + _POLITE)
 _PC = re.compile(
     r'(?:(?:por ?que|porque) )?(?:o |meu )?(?:pc|computador) (?:esta|ta|anda|ficou) (?:muito |tao |bem )?(?:lento|travando|devagar|pesado)'
