@@ -123,7 +123,7 @@ def test_reports_answer_through_the_desktop_worker_without_the_model(case, agent
 
 
 @pytest.mark.parametrize('command,on', [
-    ('Therion, modo de jogo', True), ('modo jogo', True), ('Ativa o modo de jogo.', True), ('entra no modo jogo', True),
+    ('Therion, modo de jogo', True), ('modo jogo', True), ('Moda de jogo.', True), ('Modo de jogo.', True), ('Ativa o modo de jogo.', True), ('entra no modo jogo', True),
     ('Vou jogar', True), ('Sai do modo de jogo', False), ('desativa o modo jogo', False), ('Parei de jogar', False),
     ('qual jogo eu jogo', None), ('abre o jogo', None), ('não ativa o modo de jogo', None), ('modo de jogo é bom?', None)])
 def test_game_mode_phrases(command, on):

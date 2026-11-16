@@ -23,7 +23,7 @@ _PC = re.compile(
     r'|como (?:esta|ta) (?:a memoria|a saude) do (?:pc|computador)|(?:saude|estado) do (?:pc|computador)' + _POLITE)
 _PROJECT = re.compile(
     r'(?:como (?:esta|ta|anda|vai)|(?:qual (?:e )?)?(?:o )?(?:status|estado|situacao) d[oe]) (?:o |a )?(projeto )?(.+?)' + _POLITE)
-_GAME = r'(?:o )?modo (?:de )?(?:jogo|game)'
+_GAME = r'(?:o |a )?mod[oa] (?:de )?(?:jogo|game)'  # o Whisper ouve "moda de jogo"
 _GAME_ON = re.compile(r'(?:(?:ativa|ative|ativar|liga|ligue|ligar|entra n|entre n|entrar n|coloca n|inicia|inicie)(?:o | o | )?)?' + _GAME + '|vou jogar(?: agora)?' + _POLITE)
 _GAME_OFF = re.compile(r'(?:desativa|desative|desativar|desliga|desligue|desligar|sai d|saia d|sair d|encerra|encerre|tira d)(?:o | o | )?' + _GAME
                        + r'|parei de jogar|terminei de jogar|modo normal' + _POLITE)
