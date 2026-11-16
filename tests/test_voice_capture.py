@@ -249,3 +249,20 @@ def test_seguranca_do_buffer_corrida_callback_stop():
     if audio is not None:
         assert isinstance(audio, np.ndarray)
         assert audio.dtype == np.float32
+
+
+def test_slow_microphone_open_is_not_reported_as_stalled(monkeypatch):
+    """Abrir o microfone pode levar mais de 3 s; a contagem de silêncio começa quando ele abre."""
+    clock = [100.0]
+    monkeypatch.setattr('therion.voice.capture.time.monotonic', lambda: clock[0])
+
+    class SlowStream(FakeInputStream):
+        def start(self):
+            clock[0] += 5  # abertura lenta do dispositivo
+            super().start()
+
+    service = AudioCaptureService(stream_factory=lambda **kwargs: SlowStream(**kwargs))
+    assert service.start() is True
+    assert not service.input_stalled
+    clock[0] += 3.1  # agora sim: aberto e sem enviar áudio
+    assert service.input_stalled

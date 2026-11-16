@@ -112,11 +112,16 @@ class VoiceTranscriptionService(QObject):
                 initial_prompt=self.INITIAL_PROMPT,
             )
             texts = []
+            self.last_confidence = None
             for segment in segments:
                 # Rejeitar a captura inteira: eliminar só um trecho poderia
                 # apagar uma negação e transformar a frase em autorização.
                 if not self._reliable(segment):
                     raise UnclearAudio()
+                # Menor confiança da captura aceita; só vai para o registro de conversa.
+                value = getattr(segment, 'avg_logprob', None)
+                if value is not None and (self.last_confidence is None or value < self.last_confidence):
+                    self.last_confidence = value
                 texts.append(segment.text.strip())
             transcript = " ".join(texts).strip()
             # Em silêncio o Whisper pode repetir o próprio prompt; isso não é fala do usuário.

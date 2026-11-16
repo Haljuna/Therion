@@ -116,3 +116,13 @@ class TestApplicationVoiceRouting:
         finally:
             orch.close()
             fixture.tearDown()
+
+
+def test_accepted_capture_records_its_weakest_confidence():
+    """A confiança vai para o registro de conversa; sem ela não dá para ajustar o limite."""
+    model = FakeWhisperModel(segments=[segment('Abre o', avg_logprob=-.3), segment('Chrome.', avg_logprob=-.82)])
+    service = VoiceTranscriptionService(model)
+    done = threading.Event()
+    service.transcribed.connect(lambda gen, text: done.set(), Qt.DirectConnection)
+    assert service.transcribe_async(np.zeros(16000, np.float32), 1) and done.wait(5)
+    assert service.last_confidence == pytest.approx(-.82)

@@ -111,6 +111,8 @@ class AudioCaptureService:
         with self._lock:
             self._stream = stream
             self._recording = True
+            # Abrir o dispositivo pode levar segundos; o silêncio só conta a partir daqui.
+            self._last_frame_at = time.monotonic()
         return True
 
     def stop(self) -> np.ndarray | None:

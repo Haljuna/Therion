@@ -170,6 +170,10 @@ class VoicePipeline(QObject):
         return self._capture.has_speech
 
     @property
+    def last_confidence(self):
+        return getattr(self._transcription, 'last_confidence', None)
+
+    @property
     def input_stalled(self):
         return self._capture.input_stalled
 
