@@ -17,7 +17,7 @@ def task_request(command):
     text = normalize(raw)
     if re.fullmatch(r'(?:coloca|coloque|adicione|adiciona|anote|anota)\s+(isso|essa|esta|aquela)(?:\s+tarefa)?\s+(?:na|a)\s+(?:minha |lista de )?lista(?: de tarefas)?', text):
         return {'operation': 'add_reference'}
-    mark = re.fullmatch(r'(?:marque|marca|deixe|deixa)\s+(?:a\s+)?tarefa\s+(\S+)\s+(?:como\s+)?(concluida|concluido|feita|feito|pendente)', text)
+    mark = re.fullmatch(r'(?:marque|marca|deixe|deixa)\s+(?:a\s+)?tarefa\s+(?!como\s)(\S+)\s+(?:como\s+)?(concluida|concluido|feita|feito|pendente)', text)
     if mark:
         return {'operation': 'reopen' if mark[2] == 'pendente' else 'complete', 'id': mark[1]}
     if re.fullmatch(r'(?:conclua|concluir|complete|completar|reabra|reabrir)\s+(?:essa|esta|aquela)\s+tarefa', text):

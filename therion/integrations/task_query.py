@@ -32,7 +32,7 @@ def task_query_request(command):
 
 
 _STATE = re.compile(
-    r'(?:(conclu\w*|complet\w*|finaliz\w*|termin\w*)|(reabr\w*)|marqu\w*|marc\w*|deix\w*)\s+(?:a\s+)?tarefa(?:\s+(.*?))?'
+    r'(?:(conclu\w*|complet\w*|finaliz\w*|termin\w*)|(reabr\w*)|marqu\w*|marc\w*|deix\w*)\s+(?:a\s+)?tarefa(?:\s+(.*?))??'  # ?? : sem nome, "como concluída" é o estado, não o nome
     r'(?:\s+como\s+(concluida|concluido|feita|feito|pendente))?')
 
 

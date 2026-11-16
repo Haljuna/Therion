@@ -94,7 +94,8 @@ class IntentRecognizer:
     )
 
     _CREATE_EVENT_IMPERATIVE_PATTERN = re.compile(
-        r"^(?:therion[,\s]+)?(?:marque|marca|marcar|agende|agenda|agendar|crie|cria|criar)\s+(.+)$",
+        # "Marca a tarefa como concluída" muda tarefa salva, não cria evento.
+        r"^(?:therion[,\s]+)?(?:marque|marca|marcar|agende|agenda|agendar|crie|cria|criar)\s+(?!a\s+tarefa\b)(.+)$",
         re.IGNORECASE,
     )
 

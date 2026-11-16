@@ -16,6 +16,7 @@ PENDING = [{'id': 'a' * 32, 'title': 'Escolher Lugar do date', 'state': 'pending
     ('Conclui a tarefa pendente', 'completed', ''),
     ('conclua a tarefa pendente', 'completed', ''),
     ('marque a tarefa pendente como feita', 'completed', ''),
+    ('marca a tarefa como concluída', 'completed', ''),
     ('finalize a tarefa escolher lugar do date', 'completed', 'escolher lugar do date'),
     ('reabra a tarefa comprar presente', 'pending', 'comprar presente'),
 ])
@@ -109,6 +110,23 @@ def test_real_host_prepares_completion_and_writes_only_after_confirmation(real_h
     approved = orch._agent_proposals.approve_visual(row.id, row.digest, CancellationToken())
     assert approved.status == 'success', approved.message
     assert inbox.get(identifier)['state'] == 'completed'
+
+
+@pytest.mark.parametrize('phrase', ['marca a tarefa como concluída', 'conclua a tarefa escolher lugar do date'])
+def test_real_host_routes_saved_task_completion_without_asking_number(real_host, phrase):
+    # Conversa de 14/11: "como" virava o número da tarefa temporária e o Therion pedia o número.
+    orch, inbox, identifier = real_host
+    result = orch.process_command(phrase)
+    assert result.status == 'awaiting_confirmation', result.message
+    assert 'Escolher Lugar do date' in result.message
+    assert inbox.get(identifier)['state'] == 'pending'
+
+
+def test_numbered_session_task_still_goes_to_temporary_list():
+    from therion.memory.session_tasks import task_request
+    assert task_request('marque a tarefa 3 como concluída') == {'operation': 'complete', 'id': '3'}
+    assert task_request('conclua a tarefa 2') == {'operation': 'complete', 'id': '2'}
+    assert task_request('marca a tarefa como concluída') is None
 
 
 def test_blocked_listing_reports_tool_message():
