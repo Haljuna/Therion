@@ -112,6 +112,9 @@ def _validate_config(data: dict[str, Any]) -> dict[str, Any]:
     # Modo jogo: em tela cheia, descarrega o modelo local da placa de vídeo.
     if type(ui.get('game_mode')) is not bool:
         ui['game_mode'] = False
+    # Vigia do PC: avisa sozinho quando disco C, memória ou placa de vídeo apertam; ligado salvo pedido contrário.
+    if type(ui.get('pc_watch')) is not bool:
+        ui['pc_watch'] = True
 
     # aliases -> dict
     aliases = validated.get("aliases")

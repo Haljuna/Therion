@@ -346,7 +346,13 @@ class MainWindow(QMainWindow):
         self._game_unloaded = False
         self._game_forced = False
         self._game_thread = None
-        if self._reminders is not None or self._game_mode:
+        # Vigia do PC (ui.pc_watch, ligado por padrão): avisa uma vez quando disco C, memória ou placa de vídeo apertam.
+        from therion.interface.pc_watch import PcWatch
+        self._pc_watch = PcWatch() if (self._config.get('ui') or {}).get('pc_watch') is True else None
+        self._pc_watch_ticks = 0
+        self._pc_watch_thread = None
+        self._pc_watch_said = []
+        if self._reminders is not None or self._game_mode or self._pc_watch is not None:
             self._reminder_timer.start()
         self._next_user_channel = 'texto'
         self._command_started_at = None
@@ -1068,6 +1074,8 @@ class MainWindow(QMainWindow):
         full_screen = do_not_disturb()
         if self._game_mode:
             self._poll_game_mode(full_screen)
+        if self._pc_watch is not None:
+            self._poll_pc_watch(full_screen)
         if self._reminders is None:
             return
         busy = self._processing or self._pending_plan is not None or full_screen or self._game_forced
@@ -1075,6 +1083,22 @@ class MainWindow(QMainWindow):
             self._append('Therion', message)
             if self._speech_output is not None:
                 self._speech_output.speak(message)
+
+    def _poll_pc_watch(self, full_screen):
+        if not (self._processing or self._pending_plan is not None):
+            quiet = full_screen or self._game_forced   # no jogo ou em tela cheia só escreve, sem voz
+            while self._pc_watch_said:
+                message = self._pc_watch_said.pop(0)
+                self._append('Therion', message)
+                if not quiet and self._speech_output is not None:
+                    self._speech_output.speak(message)
+        self._pc_watch_ticks += 1
+        busy = self._pc_watch_thread is not None and self._pc_watch_thread.is_alive()
+        if self._pc_watch_ticks % 4 == 1 and not busy:   # 30 s depois de abrir e depois a cada 2 min
+            watch, said = self._pc_watch, self._pc_watch_said
+            self._pc_watch_thread = threading.Thread(target=lambda: said.extend(watch.poll()),
+                                                     name='therion-pc-watch', daemon=True)
+            self._pc_watch_thread.start()
 
     def _present_worker(self,worker,action,payload):
         if worker is not self._command_worker or not self._worker_is_current(worker) or worker.cancelled.is_set() or self._quit_requested or getattr(self,'_workflow_clear_pending',False):return
