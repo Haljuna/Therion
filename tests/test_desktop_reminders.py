@@ -1,6 +1,7 @@
 """A janela toca os lembretes na hora e nunca corta a fala (porta única _speak_when_free)."""
 import os
 from datetime import datetime, timedelta
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -171,3 +172,37 @@ def test_speech_turning_idle_drains_the_queue(window, shared):
     assert spoken(window) == []                       # nunca dentro do próprio stop() de outra fala
     QApplication.processEvents()
     assert spoken(window) == ['Lembrete: tirar a roupa da máquina.']
+
+
+@pytest.mark.parametrize('held', [
+    {'_pending': {'text': 'Sua resposta.'}},       # resposta esperando a voz aquecer (estado ainda "idle")
+    {'_audio_queue': ['parte2.wav']},
+    {'_active_audio': 'parte1.wav'},
+    {'_hold_audio': True, '_held_prefix': 'Bom dia.'},
+    {'_busy': True},
+])
+def test_reply_waiting_for_the_voice_is_not_dropped(window, shared, held):
+    speech = SimpleNamespace(state='idle', speak=MagicMock(), **held)
+    window._speech_output = speech
+    shared.add('tirar a roupa da máquina', SIX_PM, None, SIX_PM - timedelta(hours=1))
+    window._fire_reminders(SIX_PM)
+    assert not speech.speak.called
+    for name in held:
+        setattr(speech, name, [] if name == '_audio_queue' else False if name in ('_hold_audio', '_busy') else None)
+    window._drain_speech()
+    speech.speak.assert_called_once_with('Lembrete: tirar a roupa da máquina.')
+
+
+def test_quiet_rule_is_checked_when_the_queue_drains(window, shared, monkeypatch):
+    window._speech_output.state = 'playing'
+    window._pc_watch_said.append(('O disco C está quase cheio.', False))
+    window._pc_watch = SimpleNamespace(in_game=False, game=lambda on: None, poll=lambda: [], tight=lambda: False)
+    window._pc_watch_ticks = 1                        # não mede de verdade neste tique
+    window._poll_reminders()                          # fora do jogo: entra na fila, a fala toca
+    shared.add('tirar a roupa da máquina', SIX_PM, None, SIX_PM - timedelta(hours=1))
+    window._fire_reminders(SIX_PM)
+    assert spoken(window) == [] and 'O disco C está quase cheio.' in window.said
+    window._game_forced = True                        # entrou no jogo antes de a fila sair
+    window._speech_output.state = 'idle'
+    window._drain_speech()
+    assert spoken(window) == ['Lembrete: tirar a roupa da máquina.']   # o aviso do vigia fica só escrito

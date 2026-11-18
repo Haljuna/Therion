@@ -154,6 +154,15 @@ def test_remove_and_next_time(tmp_path):
     assert store.items() == [a]
 
 
+def test_next_time_stays_the_earliest_after_a_repeat_moves_forward(tmp_path):
+    store = _store(tmp_path)
+    store.add('tomar remédio', datetime(2026, 11, 19, 8, 0), EVERY_DAY, NOW)
+    early = store.add('tirar a roupa da máquina', datetime(2026, 11, 20, 7, 0), None, NOW)
+    store.take_due(datetime(2026, 11, 19, 8, 0))     # o que repete vai para 20/11 08:00, depois do outro
+    assert store.next_time() == early.due
+    assert store.next_time() == _store(tmp_path).next_time()   # relido do arquivo, a ordem continua
+
+
 def test_take_due_on_time_removes_once_and_reschedules_repeat(tmp_path):
     store = _store(tmp_path)
     once = store.add('tirar a roupa da máquina', datetime(2026, 11, 18, 18, 0), None, NOW)

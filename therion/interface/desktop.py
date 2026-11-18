@@ -1124,11 +1124,11 @@ class MainWindow(QMainWindow):
         on_time, late, old = store.take_due(now or datetime.now())
         notice, store.broken_notice = store.broken_notice, None
         if notice:
-            self._speak_when_free(notice)
+            self._speak_when_free(notice, may_speak_quiet=True)
         if late_text := voice_reminders.late_message(late, old):
-            self._speak_when_free(late_text)
+            self._speak_when_free(late_text, may_speak_quiet=True)
         if on_time:
-            self._speak_when_free(voice_reminders.due_message(on_time))
+            self._speak_when_free(voice_reminders.due_message(on_time), may_speak_quiet=True)
             voice_reminders.snooze_window(self._orchestrator, '; '.join(item.text for item in on_time))
         self._arm_reminder_timer()
 
@@ -1141,12 +1141,13 @@ class MainWindow(QMainWindow):
         milliseconds = (due - datetime.now()).total_seconds() * 1000
         self._reminder_shot.start(int(min(max(milliseconds, 0), 2**31 - 1)))   # se acordar cedo, rearma
 
-    def _speak_when_free(self, text, *, write=True):
-        """Única porta das falas que nascem sozinhas: escreve já, fala só quando livre (speak corta o que toca)."""
+    def _speak_when_free(self, text, *, write=True, may_speak_quiet=False):
+        """Única porta das falas que nascem sozinhas: escreve já, fala só quando livre (speak corta o que toca).
+        may_speak_quiet: lembrete e fim do foco falam mesmo em tela cheia/jogo; os outros avisos lá ficam só escritos."""
         if write:
             self._append('Therion', text)
         if self._speech_output is not None:
-            self._spoken_queue.append(text)
+            self._spoken_queue.append((text, may_speak_quiet))
             self._drain_speech()
 
     def _therion_free(self):
@@ -1156,7 +1157,14 @@ class MainWindow(QMainWindow):
     def _voice_busy(self):
         """Fala tocando/gerando, microfone gravando/transcrevendo ou modelo de voz carregando.
         Não usa o is_quiescent da fala: o processo de voz aquecido fica vivo sem falar nada."""
-        if getattr(self._speech_output, 'state', 'idle') in ('warming', 'synthesizing', 'playing'):
+        speech = self._speech_output
+        if getattr(speech, 'state', 'idle') in ('warming', 'synthesizing', 'playing'):
+            return True
+        # Resposta esperando a voz aquecer (o estado continua "idle") ou áudio guardado/na fila: speak() jogaria fora.
+        held = getattr(speech, '__dict__', {})
+        if (held.get('_pending') is not None or held.get('_busy') or held.get('_audio_queue')
+                or held.get('_active_audio') is not None or held.get('_hold_audio') or held.get('_held_prefix') is not None
+                or held.get('_playing')):
             return True
         return any(not getattr(service, 'is_quiescent', True)
                    for service in (self._voice_pipeline, self._voice_service) if service is not None)
@@ -1165,9 +1173,12 @@ class MainWindow(QMainWindow):
         queue = getattr(self, '_spoken_queue', None)
         if not queue or self._speech_output is None or not self._therion_free():
             return
-        text = ' '.join(queue)   # uma fala só: duas chamadas seguidas cortariam a primeira
-        queue.clear()
-        self._speech_output.speak(text)
+        from therion.interface import reminders
+        quiet = self._game_forced or reminders.do_not_disturb()   # vale a regra da hora em que sai, não a da fila
+        texts = [text for text, may_speak_quiet in queue if may_speak_quiet or not quiet]
+        queue.clear()   # os que ficaram de fora já estão escritos
+        if texts:
+            self._speech_output.speak(' '.join(texts))   # uma fala só: duas chamadas seguidas cortariam a primeira
 
     def _drain_speech_later(self):
         # depois do evento atual: o stop() de dentro de outro speak também avisa "idle"
