@@ -14,7 +14,7 @@ from therion.core.voice_reminders import ReminderStore, _clock
 from therion.interface import reminders
 from tests.test_reminders import close, make_window
 
-MAIL = {'count': 6, 'important': [('Fulano', 'Prova de cálculo')]}
+MAIL = {'count': 6, 'important_count': 2, 'important': [('Fulano', 'Prova de cálculo')]}
 
 
 @pytest.fixture
@@ -190,7 +190,7 @@ def test_reopen_after_end_says_it_ended_while_closed(app, tmp_path, monkeypatch,
     try:
         app.processEvents()
         expected = f'Seu foco terminou {_clock(end.hour, end.minute)} enquanto eu estava fechado. Hoje são 1 hora e 20 de foco.'
-        assert win.said == [expected] and spoken(win) == [expected]
+        assert win.said == [expected, 'Avisos que segurei durante o foco:\n• aviso antigo'] and spoken(win) == [expected]
         assert shared.mail_calls == [] and getattr(win._orchestrator, '_focus_offer', None) is None
         assert shared.state().phase == 'off' and shared.today(end.date()) == 80 and win._focus_view is None
     finally:
@@ -223,3 +223,40 @@ def test_stop_right_away_has_no_summary(app, window, shared):
     settle_mail(app, window)
     assert window.said == ['Foco encerrado.'] and spoken(window) == [] and shared.mail_calls == []
     assert getattr(host, '_focus_offer', None) is None
+
+
+def test_pause_offer_starts_only_when_the_summary_is_spoken(app, window, shared, monkeypatch):
+    now = datetime.now().replace(microsecond=0)
+    host = window._orchestrator
+    shared.save(FocusState('focus', now - timedelta(minutes=50), 50, []))
+    window._processing = True                        # um pedido longo em andamento
+    window._focus_due(now)
+    settle_mail(app, window)
+    assert spoken(window) == [] and getattr(host, '_focus_offer', None) is None
+    clock = [time.monotonic() + 180]                 # 3 minutos ocupado
+    monkeypatch.setattr(focus.time, 'monotonic', lambda: clock[0])
+    window._processing = False
+    window._drain_speech()
+    assert spoken(window) == [ended_text(50, 50, MAIL, [], 10)]
+    assert host._focus_offer == (clock[0] + 120, 'pause')    # os 120 s contam a partir da fala
+    assert focus.answer('sim', host, now + timedelta(minutes=3))[1]['phase'] == 'pause'
+
+
+def test_offer_waits_for_a_pending_plan_to_clear(app, window, shared):
+    now = datetime.now().replace(microsecond=0)
+    host = window._orchestrator
+    shared.save(FocusState('pause', now - timedelta(minutes=10), 10, []))
+    window._pending_plan = object()                  # um plano esperando o "sim" dele
+    window._focus_due(now)
+    assert spoken(window) == [] and getattr(host, '_focus_offer', None) is None
+    window._pending_plan = None
+    window._drain_speech()
+    assert spoken(window) == ['Pausa acabou. Mais 50 minutos de foco?'] and host._focus_offer[1] == 'again'
+
+
+def test_without_voice_the_offer_starts_when_written(app, window, shared):
+    now = datetime.now().replace(microsecond=0)
+    window._speech_output = None
+    shared.save(FocusState('pause', now - timedelta(minutes=10), 10, []))
+    window._focus_due(now)
+    assert window.said == ['Pausa acabou. Mais 50 minutos de foco?'] and window._orchestrator._focus_offer[1] == 'again'

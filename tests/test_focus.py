@@ -177,6 +177,8 @@ def test_ended_text_mail_variants():
     assert ended_text(50, 50, {'count': 1, 'important': [('Fulano', '')]}, [], None) == base + ' Chegou 1 e-mail, importante: Fulano.'
     assert ended_text(50, 50, {'count': 9, 'important': [('A', 'x'), ('B', 'y'), ('C', 'z')]}, [], None).endswith(
         'Chegaram 9 e-mails, 3 importantes: A, sobre x; B, sobre y; C, sobre z.')
+    five = {'count': 9, 'important_count': 5, 'important': [('A', 'x'), ('B', 'y'), ('C', 'z')]}
+    assert ended_text(50, 50, five, [], None).endswith('Chegaram 9 e-mails, 5 importantes: A, sobre x; B, sobre y; C, sobre z.')
 
 
 def test_ended_text_many_held_warnings():
@@ -232,7 +234,7 @@ def test_wanted_is_side_effect_free(box, host):
     assert focus.wanted('sim', host) and focus.wanted('sim', host) and host._focus_offer is not None
     assert focus.wanted('foco', host)
     assert not focus.wanted('mais 10 minutos', host)                 # sem foco ligado não é nossa
-    answer('foco', host, NOW)
+    answer('foco', host, datetime.now())                              # wanted() usa o relógio de verdade
     assert focus.wanted('mais 10 minutos', host)
 
 
@@ -347,10 +349,11 @@ def test_focus_mail_counts_and_lists_three_important():
                'c': ('Beltrano <b@example.com>', ''), 'd': ('Outro <o@example.com>', 'Quarto')}
     box = FakeBox(ids=['a', 'b', 'c', 'd', 'e', 'f'], important=['a', 'b', 'c', 'd'], headers=headers)
     mail = focus.focus_mail(SimpleNamespace(_mailbox=box), START, CancellationToken())
-    assert mail == {'count': 6, 'important': [('Fulano', 'Prova de cálculo'), ('sicrano@example.com', 'Entrega'), ('Beltrano', '')]}
+    assert mail == {'count': 6, 'important_count': 4,
+                    'important': [('Fulano', 'Prova de cálculo'), ('sicrano@example.com', 'Entrega'), ('Beltrano', '')]}
     after = int(START.timestamp())
     assert ('in:inbox after:%d' % after, None, 500) in box.queries and ('in:inbox after:%d' % after, 'p2', 500) in box.queries
-    assert any(query == f'in:inbox is:important after:{after}' for query, _, _ in box.queries)
+    assert (f'in:inbox is:important after:{after}', None, 500) in box.queries
     assert not box.io_lock.locked()
 
 
@@ -379,3 +382,15 @@ def test_focus_mail_failure_is_error():
     token = CancellationToken()
     token.cancel()
     assert focus.focus_mail(SimpleNamespace(_mailbox=FakeBox(ids=['a'])), START, token) == {'error': True}
+
+
+def test_focus_mail_unexpected_adapter_error_is_error_without_traceback(monkeypatch):
+    from therion.agent.contracts import CancellationToken
+    hooked = []
+    monkeypatch.setattr(threading, 'excepthook', hooked.append)
+    box = FakeBox(ids=['a'])
+    def broken(query, page=None, limit=None):
+        raise AttributeError('adapter quebrado')
+    monkeypatch.setattr(FakeAdapter, 'search', lambda self, query, page=None, limit=None: broken(query))
+    assert focus.focus_mail(SimpleNamespace(_mailbox=box), START, CancellationToken()) == {'error': True}
+    assert hooked == [] and not box.io_lock.locked()

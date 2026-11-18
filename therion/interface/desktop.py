@@ -1159,14 +1159,18 @@ class MainWindow(QMainWindow):
         milliseconds = (due - datetime.now()).total_seconds() * 1000
         self._reminder_shot.start(int(min(max(milliseconds, 0), 2**31 - 1)))   # se acordar cedo, rearma
 
-    def _speak_when_free(self, text, *, write=True, may_speak_quiet=False):
+    def _speak_when_free(self, text, *, write=True, may_speak_quiet=False, on_spoken=None):
         """Única porta das falas que nascem sozinhas: escreve já, fala só quando livre (speak corta o que toca).
-        may_speak_quiet: lembrete e fim do foco falam mesmo em tela cheia/jogo; os outros avisos lá ficam só escritos."""
+        may_speak_quiet: lembrete e fim do foco falam mesmo em tela cheia/jogo; os outros avisos lá ficam só escritos.
+        on_spoken: roda quando a fala sai de fato (ou já, sem voz) — é aí que uma oferta começa a valer."""
         if write:
             self._append('Therion', text)
-        if self._speech_output is not None:
-            self._spoken_queue.append((text, may_speak_quiet))
-            self._drain_speech()
+        if self._speech_output is None:
+            if on_spoken is not None:
+                on_spoken()
+            return
+        self._spoken_queue.append((text, may_speak_quiet, on_spoken))
+        self._drain_speech()
 
     def _therion_free(self):
         return (not self._processing and self._pending_plan is None and not self._voice_busy()
@@ -1193,10 +1197,13 @@ class MainWindow(QMainWindow):
             return
         from therion.interface import reminders
         quiet = self._game_forced or reminders.do_not_disturb()   # vale a regra da hora em que sai, não a da fila
-        texts = [text for text, may_speak_quiet in queue if may_speak_quiet or not quiet]
+        texts = [text for text, may_speak_quiet, _ in queue if may_speak_quiet or not quiet]
+        callbacks = [on_spoken for _, _, on_spoken in queue if on_spoken is not None]
         queue.clear()   # os que ficaram de fora já estão escritos
         if texts:
             self._speech_output.speak(' '.join(texts))   # uma fala só: duas chamadas seguidas cortariam a primeira
+        for on_spoken in callbacks:
+            on_spoken()   # livre agora: nenhum pedido rodando nem plano esperando o "sim"
 
     def _drain_speech_later(self):
         # depois do evento atual: o stop() de dentro de outro speak também avisa "idle"
@@ -1290,8 +1297,8 @@ class MainWindow(QMainWindow):
         if ended.phase == 'focus':
             self._focus_finished(ended.minutes, ended.start, ended.held)
         else:
-            self._speak_when_free(focus.pause_ended_text(focus.next_focus_minutes()), may_speak_quiet=True)
-            focus.offer(self._orchestrator, 'again')
+            self._speak_when_free(focus.pause_ended_text(focus.next_focus_minutes()), may_speak_quiet=True,
+                                  on_spoken=lambda: focus.offer(self._orchestrator, 'again'))
 
     def _focus_finished(self, minutes_done, start, held):
         """Conta os e-mails numa thread; o resumo sai na thread do Qt (_focus_summary)."""
@@ -1325,9 +1332,10 @@ class MainWindow(QMainWindow):
         except OSError:
             today = minutes_done
         # Fala em tela cheia e no modo jogo, igual ao lembrete; a oferta de pausa é a dona do próximo "sim".
-        self._speak_when_free(focus.ended_text(minutes_done, today, mail, held, focus.pause_minutes()), may_speak_quiet=True)
+        # A oferta só começa a valer quando a fala sai: antes disso o "sim" ainda é de outro.
+        self._speak_when_free(focus.ended_text(minutes_done, today, mail, held, focus.pause_minutes()), may_speak_quiet=True,
+                              on_spoken=lambda: focus.offer(self._orchestrator, 'pause'))
         self._write_held(held)
-        focus.offer(self._orchestrator, 'pause')
 
     def _write_held(self, held):
         if held:
@@ -1352,6 +1360,7 @@ class MainWindow(QMainWindow):
         except OSError:
             return
         self._speak_when_free(focus.closed_text(end, today), may_speak_quiet=True)   # sem e-mails nem oferta
+        self._write_held(ended.held)   # só escritos: são de antes de fechar
 
     def _present_worker(self,worker,action,payload):
         if worker is not self._command_worker or not self._worker_is_current(worker) or worker.cancelled.is_set() or self._quit_requested or getattr(self,'_workflow_clear_pending',False):return

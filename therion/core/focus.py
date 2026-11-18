@@ -338,7 +338,8 @@ def _mail_text(mail):
     if not important:
         return head + '.'
     items = '; '.join(f'{who}, sobre {subject}' if subject else who for who, subject in important)
-    label = 'importante' if count == 1 else _plural(len(important), 'importante')
+    total = max(mail.get('important_count') or 0, len(important))   # o número é o total; a lista, até 3
+    label = 'importante' if count == 1 else _plural(total, 'importante')
     return f'{head}, {label}: {items}.'
 
 
@@ -390,22 +391,21 @@ def _count_mail(box, account, after, token):
     with box.io_lock:
         with box._adapter(account, token) as adapter:
             count = len(set(_mail_ids(box, account, adapter, token, f'in:inbox after:{after}')))
+            important_ids = list(dict.fromkeys(_mail_ids(box, account, adapter, token, f'in:inbox is:important after:{after}')))
             important = []
-            row = adapter.search(f'in:inbox is:important after:{after}', None, limit=3)
-            for ref in row.get('messages', [])[:3]:
+            for identifier in important_ids[:3]:
                 token.check()
                 headers = {str(item.get('name', '')).lower(): mail_header(item.get('value', ''))
-                           for item in adapter.metadata(ref['id'])['payload']['headers']}
+                           for item in adapter.metadata(identifier)['payload']['headers']}
                 important.append((sender_name(headers.get('from', '')), headers.get('subject', '')))
     box._check(account, token)
-    return {'count': count, 'important': important}
+    return {'count': count, 'important_count': len(important_ids), 'important': important}
 
 
 def focus_mail(host, start, token, timeout=10.):
     """E-mails desde o começo do foco: None sem conta; {'count', 'important'}; {'error': True} em falha ou
     prazo. Não abre corpo de e-mail e não mexe no marco da saudação (BriefingMarker)."""
     from therion.agent.briefing import DeadlineToken
-    from therion.agent.contracts import Cancelled
     box = host._mailbox
     account = box.identity()
     if account is None:
@@ -416,7 +416,7 @@ def focus_mail(host, start, token, timeout=10.):
     def fetch():
         try:
             result['mail'] = _count_mail(box, account, int(start.timestamp()), deadline)
-        except (OSError, ValueError, TimeoutError, KeyError, TypeError, Cancelled):
+        except Exception:   # qualquer falha da caixa (inclusive Cancelled): o resto da fala sai normalmente
             result['mail'] = {'error': True}
 
     # Uma chamada presa no Gmail não confere o prazo: a espera é por fora, e o token cancela o resto.
