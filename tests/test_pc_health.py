@@ -49,3 +49,11 @@ def test_full_reading_names_the_top_vram_users_and_survives_without_pdh(monkeypa
 
     monkeypatch.setattr(pc_health, 'vram_by_pid', lambda: {})
     assert pc_health.full_reading()['top_vram'] == []
+
+
+def test_quick_reading_reports_the_total_of_disk_c_for_the_panel_bar(monkeypatch):
+    usage = type('Usage', (), {'free': 4 * GB, 'total': 100 * GB})()
+    monkeypatch.setattr(pc_health.shutil, 'disk_usage', lambda path: usage)
+    monkeypatch.setattr(pc_health, 'gpu_memory', lambda: None)
+    reading = pc_health.quick_reading()
+    assert reading['c_free'] == 4 * GB and reading['c_total'] == 100 * GB

@@ -2,12 +2,13 @@
 
 `screens` são as áreas úteis (sem barra de tarefas).
 """
+import ctypes
 import json
 import os
 import threading
 
 from PySide6.QtCore import QPoint, QRect, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QGuiApplication, QPainter, QRadialGradient, QRegion
+from PySide6.QtGui import QColor, QCursor, QGuiApplication, QPainter, QRadialGradient, QRegion
 from PySide6.QtWidgets import QFrame, QLabel, QMenu, QProgressBar, QVBoxLayout, QWidget
 
 from therion.core.local_reports import _gb
@@ -92,8 +93,9 @@ def _nearest(point: QPoint, screens: list[QRect]) -> QRect:
     return min(screens, key=lambda screen: _distance(screen, point))
 
 
-ORB_PX = 72
+ORB_PX = 96
 DRAG_PX = 4
+VK_LBUTTON, VK_ESCAPE = 0x01, 0x1B
 GLASS = ('background: rgba(20,19,30,184); border: 1px solid rgba(255,255,255,23); border-radius: 14px;'
          ' color: #F1F0F7; font-size: 12px;')
 NO_FOCUS = Qt.Tool | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.WindowDoesNotAcceptFocus
@@ -105,6 +107,10 @@ def _floating(widget):
     widget.setAttribute(Qt.WA_TranslucentBackground)
 
 
+def _key_down(vk):
+    return bool(ctypes.windll.user32.GetAsyncKeyState(vk) & 0x8000)
+
+
 def _screens():
     return [screen.availableGeometry() for screen in QGuiApplication.screens()]
 
@@ -114,10 +120,9 @@ def _size_text(used, total):
 
 
 class _Panel(QFrame):
-    def __init__(self, on_escape):
+    def __init__(self):
         super().__init__()
         _floating(self)
-        self._on_escape = on_escape
         self.setObjectName('panel')
         self.setFixedWidth(320)
         self.setStyleSheet('QFrame#panel {' + GLASS + '} QLabel { border: none; background: transparent; }'
@@ -134,9 +139,8 @@ class _Panel(QFrame):
             row = QLabel(name)
             layout.addWidget(row)
             self.rows[key] = (row, name)
-            if key != 'c':   # a leitura só traz o espaço livre do C, sem total para uma barra honesta
-                self.bars[key] = QProgressBar(maximum=1000, textVisible=False)
-                layout.addWidget(self.bars[key])
+            self.bars[key] = QProgressBar(maximum=1000, textVisible=False)
+            layout.addWidget(self.bars[key])
         self.tops = {}
         for key, name in (('top_ram', 'Quem mais usa RAM'), ('top_vram', 'Quem mais usa VRAM')):
             head = QLabel(name)
@@ -145,17 +149,13 @@ class _Panel(QFrame):
             self.tops[key] = QLabel('lendo…')
             layout.addWidget(self.tops[key])
 
-    def keyPressEvent(self, event):
-        if event.key() == Qt.Key_Escape:
-            self._on_escape()
-        else:
-            super().keyPressEvent(event)
-
     def show_reading(self, reading):
         def line(key, text, fraction, amber=False):
             label, name = self.rows[key]
             label.setText(f'{name}  ·  {text}')
             label.setStyleSheet('color: #F2B544;' if amber else '')
+            if key in self.bars:
+                self.bars[key].setStyleSheet('QProgressBar::chunk { background: #F2B544; border-radius: 3px; }' if amber else '')
             if key in self.bars:
                 self.bars[key].setValue(round(1000 * min(max(fraction or 0, 0), 1)))
         line('ram', _size_text(reading.get('ram_used'), reading.get('ram_total')), reading.get('ram'))
@@ -167,8 +167,9 @@ class _Panel(QFrame):
         used, total = reading.get('commit_used'), reading.get('commit_total')
         line('commit', _size_text(used, total), used / total if total and used is not None else 0)
         free = reading.get('c_free')
-        line('c', 'indisponível' if free is None else f'{_gb(free)} livres', 0,
-             amber=free is not None and free < 5 * 1024 ** 3)
+        c_total = reading.get('c_total')
+        line('c', 'indisponível' if free is None else f'{_gb(free)} livres',
+             1 - free / c_total if free is not None and c_total else 0, amber=free is not None and free < 5 * 1024 ** 3)
         for key, label in self.tops.items():
             rows = reading.get(key) or []
             label.setText('\n'.join(f'{name}  ·  {_gb(size)}' for name, size in rows) or 'indisponível')
@@ -178,11 +179,13 @@ class _Panel(QFrame):
 class MiniOrb(QWidget):
     reading_ready = Signal(dict)
 
-    def __init__(self, *, path, renderer_factory=OrbGL, readers=(quick_reading, full_reading), on_open_main=None):
+    def __init__(self, *, path, renderer_factory=OrbGL, readers=(quick_reading, full_reading), on_open_main=None,
+                 key_state=_key_down, cursor_pos=QCursor.pos):
         super().__init__()
         _floating(self)
         self.setFixedSize(ORB_PX, ORB_PX)
         self._path, self._readers, self._on_open_main = path, readers, on_open_main
+        self._key_state, self._cursor_pos, self._last_quick = key_state, cursor_pos, None
         self._visual, self._busy, self._pending = 'idle', False, None
         self._thread, self._press, self._dragged = None, None, False
         self._hover = self._quiet = self._game_hidden = self._dismissed = self._shut = False
@@ -190,10 +193,13 @@ class MiniOrb(QWidget):
         _floating(self.label)
         self.label.setAttribute(Qt.WA_TransparentForMouseEvents)
         self.label.setStyleSheet(GLASS + ' font-size: 11px; padding: 6px 10px;')
-        self.panel = _Panel(self._close_panel)
+        self.panel = _Panel()
         self.refresh_timer = QTimer(self)
         self.refresh_timer.setInterval(3000)
         self.refresh_timer.timeout.connect(lambda: self._request('full'))
+        self.watch_timer = QTimer(self)   # sem foco não há Esc nem clique fora: olha o teclado e o mouse
+        self.watch_timer.setInterval(100)
+        self.watch_timer.timeout.connect(self._watch)
         self.reading_ready.connect(self._deliver)
         self._renderer = renderer_factory() if renderer_factory else None
         if isinstance(self._renderer, QWidget):
@@ -214,7 +220,6 @@ class MiniOrb(QWidget):
             point = default_position(screens, QGuiApplication.primaryScreen().availableGeometry(), self.size())
         if point is not None:
             self.move(clamp(point, self.size(), screens))
-        QGuiApplication.instance().applicationStateChanged.connect(self._app_state)
 
     # ---- estado visual ----
     def set_state(self, state, tight):
@@ -262,7 +267,7 @@ class MiniOrb(QWidget):
         glow.setColorAt(1, color.darker(200))
         paint.setBrush(glow)
         paint.setPen(Qt.NoPen)
-        paint.drawEllipse(self.rect().adjusted(6, 6, -6, -6))
+        paint.drawEllipse(self.rect().adjusted(8, 8, -8, -8))
 
     # ---- mouse: clique abre o painel, arrastar só move ----
     def mousePressEvent(self, event):
@@ -273,7 +278,7 @@ class MiniOrb(QWidget):
         if self._press is None:
             return
         target = event.globalPosition().toPoint() - self._press
-        if not self._dragged and (target - self.pos()).manhattanLength() < DRAG_PX:
+        if not self._dragged and (target - self.pos()).manhattanLength() <= DRAG_PX:
             return
         if not self._dragged:
             self._dragged = True
@@ -303,13 +308,10 @@ class MiniOrb(QWidget):
         self.hide()
         self._sync_renderer()
 
-    def keyPressEvent(self, event):
-        if event.key() == Qt.Key_Escape:
-            self._close_panel()
-
     def enterEvent(self, event):
         self._hover = True
         if not self.panel.isVisible():
+            self._show_label(self._last_quick)
             self._request('quick')
 
     def leaveEvent(self, event):
@@ -330,15 +332,27 @@ class MiniOrb(QWidget):
         self._place(self.panel)
         self.panel.show()
         self.refresh_timer.start()
+        self.watch_timer.start()
         self._request('full')
 
     def _close_panel(self):
         self.refresh_timer.stop()
+        self.watch_timer.stop()
         self.panel.hide()
 
-    def _app_state(self, state):
-        if state != Qt.ApplicationActive:
+    def _watch(self):
+        if self._key_state(VK_ESCAPE):
             self._close_panel()
+        elif self._key_state(VK_LBUTTON):
+            point = self._cursor_pos()
+            if not (self.frameGeometry().contains(point) or self.panel.frameGeometry().contains(point)):
+                self._close_panel()
+
+    def _show_label(self, reading):
+        if reading is not None and not self.panel.isVisible():
+            self.label.setText(label_text(reading))
+            self._place(self.label)
+            self.label.show()
 
     # ---- leituras fora da thread da janela ----
     def _request(self, kind):
@@ -370,10 +384,10 @@ class MiniOrb(QWidget):
             if self.panel.isVisible():
                 self.panel.show_reading(reading)
                 self._place(self.panel)
-        elif self._hover and reading.get('ram') is not None and not self.panel.isVisible():
-            self.label.setText(label_text(reading))
-            self._place(self.label)
-            self.label.show()
+        elif reading.get('ram') is not None:
+            self._last_quick = reading
+            if self._hover:
+                self._show_label(reading)
         pending, self._pending = self._pending, None
         if pending:
             self._request(pending)
@@ -384,6 +398,7 @@ class MiniOrb(QWidget):
             return
         self._shut = True
         self.refresh_timer.stop()
+        self.watch_timer.stop()
         if self._thread is not None:
             self._thread.join(2)
         if self._renderer is not None:

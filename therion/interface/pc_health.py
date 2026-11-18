@@ -79,11 +79,12 @@ def quick_reading():
     if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(stat)) and stat.ullTotalPhys:
         ram = 1 - stat.ullAvailPhys / stat.ullTotalPhys
     try:
-        c_free = shutil.disk_usage('C:\\').free
+        disk = shutil.disk_usage('C:\\')
+        c_free, c_total = disk.free, disk.total
     except OSError:
-        c_free = None
+        c_free = c_total = None
     gpu = gpu_memory()
-    return {'ram': ram, 'vram': gpu[0] / gpu[1] if gpu else None, 'c_free': c_free}
+    return {'ram': ram, 'vram': gpu[0] / gpu[1] if gpu else None, 'c_free': c_free, 'c_total': c_total}
 
 
 def _name(exe):

@@ -82,6 +82,7 @@ def make(tmp_path, **kwargs):
         return FULL
 
     kwargs.setdefault('renderer_factory', None)
+    kwargs.setdefault('key_state', lambda vk: False)
     return MiniOrb(path=str(tmp_path / 'pos.json'), readers=(quick, full), **kwargs), calls
 
 
@@ -97,7 +98,7 @@ def test_click_opens_and_closes_the_panel_but_a_drag_only_moves(app, tmp_path):
     window, _ = make(tmp_path)
     window.move(300, 300)
     window.show()
-    center = QPoint(36, 36)
+    center = QPoint(48, 48)
     QTest.mouseClick(window, Qt.LeftButton, Qt.NoModifier, center)
     assert window.panel.isVisible()
     QTest.mouseClick(window, Qt.LeftButton, Qt.NoModifier, center)
@@ -127,10 +128,10 @@ def test_panel_refreshes_every_three_seconds_only_while_open(app, tmp_path):
     window.show()
     assert window.refresh_timer.interval() == 3000
     assert not window.refresh_timer.isActive()
-    QTest.mouseClick(window, Qt.LeftButton, Qt.NoModifier, QPoint(36, 36))
+    QTest.mouseClick(window, Qt.LeftButton, Qt.NoModifier, QPoint(48, 48))
     assert window.refresh_timer.isActive()
     assert wait_for(app, lambda: calls['full'] >= 1)
-    QTest.mouseClick(window, Qt.LeftButton, Qt.NoModifier, QPoint(36, 36))
+    QTest.mouseClick(window, Qt.LeftButton, Qt.NoModifier, QPoint(48, 48))
     assert not window.refresh_timer.isActive()
     window.shut()
 
@@ -157,3 +158,50 @@ def test_shut_saves_the_position_and_can_run_twice(app, tmp_path):
     window.shut()
     window.shut()
     assert json.loads((tmp_path / 'pos.json').read_text(encoding='utf-8')) == {'x': 200, 'y': 100}
+
+
+def test_escape_closes_the_panel_without_focus(app, tmp_path):
+    pressed = set()
+    window, _ = make(tmp_path, key_state=lambda vk: vk in pressed)
+    window.show()
+    QTest.mouseClick(window, Qt.LeftButton, Qt.NoModifier, QPoint(48, 48))
+    assert window.panel.isVisible() and window.watch_timer.isActive() and window.watch_timer.interval() == 100
+    window._watch()
+    assert window.panel.isVisible()
+    pressed.add(0x1B)
+    window._watch()
+    assert not window.panel.isVisible() and not window.watch_timer.isActive()
+    window.shut()
+
+
+def test_a_click_outside_closes_the_panel_but_inside_does_not(app, tmp_path):
+    state = {'point': QPoint(0, 0)}
+    window, _ = make(tmp_path, key_state=lambda vk: vk == 0x01, cursor_pos=lambda: state['point'])
+    window.move(300, 300)
+    window.show()
+    QTest.mouseClick(window, Qt.LeftButton, Qt.NoModifier, QPoint(48, 48))
+    state['point'] = window.frameGeometry().center()
+    window._watch()
+    assert window.panel.isVisible()
+    state['point'] = window.panel.frameGeometry().center()
+    window._watch()
+    assert window.panel.isVisible()
+    state['point'] = QPoint(window.frameGeometry().right() + 900, 5)
+    window._watch()
+    assert not window.panel.isVisible()
+    window.shut()
+
+
+def test_a_four_pixel_move_is_still_a_click_and_hover_shows_the_last_value_at_once(app, tmp_path):
+    window, _ = make(tmp_path)
+    window.show()
+    before = window.pos()
+    QTest.mousePress(window, Qt.LeftButton, Qt.NoModifier, QPoint(48, 48))
+    QTest.mouseMove(window, QPoint(52, 48))
+    QTest.mouseRelease(window, Qt.LeftButton, Qt.NoModifier, QPoint(52, 48))
+    assert window.pos() == before and window.panel.isVisible()
+    QTest.mouseClick(window, Qt.LeftButton, Qt.NoModifier, QPoint(48, 48))
+    window._last_quick = QUICK
+    QApplication.sendEvent(window, QEvent(QEvent.Enter))
+    assert window.label.isVisible() and window.label.text() == 'RAM 62% · VRAM 18% · C 2,5 GB'
+    window.shut()
