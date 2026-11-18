@@ -302,7 +302,7 @@ class ReminderStore:
         try:
             os.replace(self._path, kept)
         except OSError:
-            return []
+            return None   # sem mover, nada grava: o arquivo estragado nunca é sobrescrito
         self.broken_notice = f'Não consegui ler seus lembretes antigos; guardei o arquivo como {kept.name}.'
         return []
 

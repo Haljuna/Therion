@@ -912,20 +912,36 @@ class Orchestrator(WorkflowSupport, MemorySupport, PersonalContextSupport, Catal
             if ((cancelled is not None and cancelled.is_set())
                     or session_id != self._session_id or confirmation_id != self._confirmation_id):
                 return self._stale_confirmation()
-            self._workflow_cancel_event=cancelled if cancelled is not None else threading.Event()
-            navigation=self._mail_navigation(command,cancelled,presentation)
-            if navigation is not None:return navigation
-            agent_result = self._dispatch_agent(command, cancelled)
-            if agent_result is not None:
-                return agent_result
-            confirmation=self._confirmation_id
-            self._agent_begin_legacy(confirmation)
-            try:result = self._process_command(command, cancelled=cancelled)
-            except BaseException:
-                self._agent_finish_legacy(confirmation);raise
-            self._agent_finish_legacy(confirmation,result)
-            self._record_legacy_history(command, result)
-            return result
+            before = self._pendings()
+            try:
+                self._workflow_cancel_event=cancelled if cancelled is not None else threading.Event()
+                navigation=self._mail_navigation(command,cancelled,presentation)
+                if navigation is not None:return navigation
+                agent_result = self._dispatch_agent(command, cancelled)
+                if agent_result is not None:
+                    return agent_result
+                confirmation=self._confirmation_id
+                self._agent_begin_legacy(confirmation)
+                try:result = self._process_command(command, cancelled=cancelled)
+                except BaseException:
+                    self._agent_finish_legacy(confirmation);raise
+                self._agent_finish_legacy(confirmation,result)
+                self._record_legacy_history(command, result)
+                return result
+            finally:
+                self._spend_pendings(before)
+
+    _PENDINGS = ('_reminder_pending', '_reminder_snooze', '_focus_offer', '_pc_cleanup_offer')
+
+    def _pendings(self):
+        return [getattr(self, name, None) for name in self._PENDINGS]
+
+    def _spend_pendings(self, before):
+        """Perguntas e ofertas valem só para a próxima frase, mesmo quando outra rota (memória, agente,
+        agenda) a responde. A que foi rearmada nesta frase, ou pela janela no meio dela, é outro objeto e fica."""
+        for name, value in zip(self._PENDINGS, before):
+            if value is not None and getattr(self, name, None) is value:
+                setattr(self, name, None)
 
     def confirm_session_proposal(self, plan, confirmed, session_id, confirmation_id, cancelled=None):
         with self._operation_lock:
@@ -2208,20 +2224,24 @@ class Orchestrator(WorkflowSupport, MemorySupport, PersonalContextSupport, Catal
 
     def process_command(self, command: str) -> OrchestrationResult:
         with self._operation_lock:
-            navigation=self._mail_navigation(command)
-            if navigation is not None:return navigation
-            self._sync_knowledge_access()
-            agent_result = self._dispatch_agent(command)
-            if agent_result is not None:
-                return agent_result
-            confirmation=self._confirmation_id
-            self._agent_begin_legacy(confirmation)
-            try:result = self._process_command(command)
-            except BaseException:
-                self._agent_finish_legacy(confirmation);raise
-            self._agent_finish_legacy(confirmation,result)
-            self._record_legacy_history(command, result)
-            return result
+            before = self._pendings()
+            try:
+                navigation=self._mail_navigation(command)
+                if navigation is not None:return navigation
+                self._sync_knowledge_access()
+                agent_result = self._dispatch_agent(command)
+                if agent_result is not None:
+                    return agent_result
+                confirmation=self._confirmation_id
+                self._agent_begin_legacy(confirmation)
+                try:result = self._process_command(command)
+                except BaseException:
+                    self._agent_finish_legacy(confirmation);raise
+                self._agent_finish_legacy(confirmation,result)
+                self._record_legacy_history(command, result)
+                return result
+            finally:
+                self._spend_pendings(before)
 
     def _process_command(self, command: str, cancelled=None) -> OrchestrationResult:
         self._workflow_cancel_event = cancelled if cancelled is not None else threading.Event()

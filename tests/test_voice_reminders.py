@@ -214,6 +214,24 @@ def test_corrupt_file_is_kept_and_reported(tmp_path):
     assert bad[0].name in store.broken_notice
 
 
+def test_corrupt_file_that_cannot_be_moved_is_never_overwritten(tmp_path, monkeypatch):
+    path = tmp_path / 'lembretes.json'
+    path.write_text('{x', encoding='utf-8')
+    real = os.replace
+
+    def locked_bad(source, target):   # só mover o arquivo estragado falha; gravar funcionaria
+        if '.bad-' in str(target):
+            raise PermissionError('em uso')
+        return real(source, target)
+    monkeypatch.setattr(os, 'replace', locked_bad)
+    store = ReminderStore(path)
+    assert store.items() == [] and store.broken_notice is None
+    with pytest.raises(OSError):
+        store.add('novo', NOW + timedelta(hours=2), None, NOW)
+    assert path.read_text(encoding='utf-8') == '{x'
+    assert not list(tmp_path.glob('lembretes.json.bad-*'))
+
+
 def test_mtime_and_reload(tmp_path):
     store = _store(tmp_path)
     assert store.mtime() is None

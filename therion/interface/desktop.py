@@ -1227,8 +1227,7 @@ class MainWindow(QMainWindow):
                 self._append('Therion', message)
                 if cleanup:   # o "sim" da próxima frase limpa os temporários seguros (core/pc_cleanup)
                     from therion.core.pc_cleanup import offer
-                    offer(self._orchestrator)
-                    self._orchestrator._focus_offer = None   # um dono só para o "sim"
+                    offer(self._orchestrator)   # um dono só para o "sim": a oferta derruba as outras pendências
                 if not quiet:
                     self._speak_when_free(message, write=False)
                 self._update_orbe(self._orbe_state)   # o âmbar da mini orbe acompanha o problema recém-avisado

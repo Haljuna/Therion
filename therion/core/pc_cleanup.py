@@ -161,8 +161,11 @@ def run():
 
 
 def offer(host):
-    """Vale por 2 min e só para a próxima frase; um "sim" depois disso não apaga nada."""
+    """Vale por 2 min e só para a próxima frase; um "sim" depois disso não apaga nada.
+    Só uma pendência é dona do "sim": a pausa do foco e a pergunta do lembrete caem."""
     host._pc_cleanup_offer = time.monotonic() + OFFER_SECONDS
+    host._focus_offer = None
+    host._reminder_pending = None
 
 
 def wanted(command, host):
