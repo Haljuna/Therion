@@ -331,6 +331,21 @@ def test_only_the_orb_and_its_ring_show_with_no_cut_out_around(app, tmp_path):
     window.shut()
 
 
+def test_mini_orb_forwards_timer_to_renderer(app, tmp_path):
+    from therion.core.focus import TimerLook
+    fake = FakeRenderer()
+    fake.timers = []
+    fake.set_timer = fake.timers.append
+    window, _ = make(tmp_path, renderer_factory=lambda: fake)
+    look = TimerLook(.5, '25', 'focus', False)
+    window.set_timer(look)
+    window.set_timer(None)
+    assert fake.timers == [look, None]
+    window.shut()
+    window.set_timer(look)                          # depois de fechar não mexe mais no renderizador
+    assert fake.timers == [look, None]
+
+
 def test_a_screen_going_away_pulls_the_orb_back_inside(app, tmp_path, monkeypatch):
     from therion.interface import mini_orb
     window, _ = make(tmp_path)

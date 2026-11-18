@@ -250,6 +250,11 @@ class MiniOrb(QWidget):
         self._renderer.min_interval_ms = 100 if self._visual in ('idle', 'error') else 33
         self._renderer.set_visual(self._visual, .5)
 
+    def set_timer(self, look):
+        """Foco/pausa: minutos no centro e arco por fora do anel (core.focus.TimerLook); None apaga."""
+        if not self._shut and self._renderer is not None:
+            self._renderer.set_timer(look)
+
     def set_quiet(self, quiet):
         if self._shut:
             return

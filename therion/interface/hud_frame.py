@@ -2,10 +2,13 @@
 import math
 from dataclasses import dataclass
 from PySide6.QtCore import Qt, QPointF, QRectF
-from PySide6.QtGui import QColor, QFont, QFontMetricsF, QPainter, QPen
+from PySide6.QtGui import QColor, QFont, QFontMetricsF, QPainter, QPen, QRadialGradient
+from therion.core.focus import TimerLook
 from .hud_style import AMBER, FRAME, HudLayout
 
 LEVEL_DOTS = 25
+PAUSE_GREEN = (140, 230, 170)
+TIMER_RADIUS = 1.30   # × Rf: por fora das marcas fixas da moldura, que vão até 1,22
 
 
 @dataclass(frozen=True)
@@ -92,4 +95,57 @@ def paint_hud_frame(painter: QPainter, layout: HudLayout, frame: FrameState, lab
     # O espaçamento também sobra depois da última letra; meio espaçamento recentra.
     box = QRectF(cx-room/2+spacing/2, layout.label_y, room, 4*pixels)
     painter.drawText(box, Qt.AlignHCenter | Qt.AlignTop | Qt.TextDontClip, frame.label)
+    painter.restore()
+
+
+def _timer_rgb(look: TimerLook):
+    return AMBER if look.warn else PAUSE_GREEN if look.phase == 'pause' else FRAME
+
+
+def _timer_pen(rgb, alpha, width):
+    color = QColor(*rgb); color.setAlphaF(min(1., max(0., alpha)))
+    return QPen(color, width, Qt.SolidLine, Qt.RoundCap)
+
+
+def _timer_ring(layout: HudLayout) -> QRectF:
+    r = TIMER_RADIUS*layout.Rf
+    return QRectF(layout.cx-r, layout.cy-r, 2*r, 2*r)
+
+
+def paint_timer(painter: QPainter, layout: HudLayout, look: TimerLook, unit: float, pulse: float) -> None:
+    """Modelo E, por cima da moldura: arco fino por fora dela (cheio no topo, esvazia no sentido do relógio)
+    e os minutos no centro, sobre um disco escuro. O traço tem 2·`unit`; `pulse` é o alfa do âmbar."""
+    cx, cy, R = layout.cx, layout.cy, layout.R
+    rgb = _timer_rgb(look)
+    painter.save()
+    painter.setRenderHints(QPainter.Antialiasing | QPainter.TextAntialiasing)
+    painter.setBrush(Qt.NoBrush)
+    ring = _timer_ring(layout)
+    painter.setPen(_timer_pen(rgb, .12, 2*unit)); painter.drawEllipse(ring)   # a trilha: o caminho todo
+    fraction = min(1., max(0., look.fraction))
+    if fraction > 0:
+        painter.setPen(_timer_pen(rgb, pulse if look.warn else .95, 2*unit))
+        painter.drawArc(ring, 90*16, round(360*16*fraction))   # sobra do topo para trás: some no sentido do relógio
+    disc = QRadialGradient(cx, cy, .55*R)
+    for stop, alpha in ((0., 128), (.7, 128), (1., 0)):
+        disc.setColorAt(stop, QColor(0, 0, 0, alpha))
+    painter.setPen(Qt.NoPen); painter.setBrush(disc)
+    painter.drawEllipse(QPointF(cx, cy), .55*R, .55*R)
+    font = QFont(); font.setFamilies(['Space Grotesk', 'Segoe UI']); font.setWeight(QFont.DemiBold)
+    font.setPixelSize(max(6, round(.9*R)))
+    painter.setFont(font)
+    color = QColor(*(round(c+(255-c)*.45) for c in rgb)); color.setAlphaF(.95)
+    painter.setPen(color)
+    box = QFontMetricsF(font).tightBoundingRect(look.label)   # centra o desenho dos algarismos, não a linha
+    painter.drawText(QPointF(cx-box.center().x(), cy-box.center().y()), look.label)
+    painter.restore()
+
+
+def paint_timer_flash(painter: QPainter, layout: HudLayout, look: TimerLook, unit: float, progress: float) -> None:
+    """Fim do foco/pausa: o anel inteiro brilha e se apaga (alfa 1→0, traço ×2) ao longo de `progress` 0→1."""
+    painter.save()
+    painter.setRenderHint(QPainter.Antialiasing)
+    painter.setBrush(Qt.NoBrush)
+    painter.setPen(_timer_pen(_timer_rgb(look), 1.-progress, 2*unit*(1.+progress)))
+    painter.drawEllipse(_timer_ring(layout))
     painter.restore()

@@ -157,6 +157,50 @@ def test_focus_end_while_busy_waits_but_orb_leaves_focus_on_time(app, window, sh
     assert spoken(window) == [ended_text(50, 50, MAIL, [], 10)]
 
 
+class TimerOrb:
+    def __init__(self):
+        self.looks = []
+
+    def set_timer(self, look):
+        self.looks.append(look)
+
+
+def test_both_orbs_get_the_timer_every_second_only_during_focus(app, window, shared):
+    mini, big = TimerOrb(), TimerOrb()
+    window._mini_orb = mini
+    window._dashboard = SimpleNamespace(constellation=big)
+    try:
+        assert not window._timer_tick.isActive()
+        now = datetime.now().replace(microsecond=0)
+        start_focus(window, shared, now - timedelta(minutes=18))
+        assert window._timer_tick.isActive() and window._timer_tick.interval() == 1000
+        look = mini.looks[-1]
+        assert big.looks[-1] == look and look.phase == 'focus' and look.label == '32' and not look.warn
+        window._timer_tick.timeout.emit()
+        assert len(mini.looks) == len(big.looks) == 2
+        window._apply_focus({'phase': 'pause', 'minutes': 10, 'start': now.isoformat()})
+        assert window._timer_tick.isActive() and mini.looks[-1].phase == 'pause'
+        window._apply_focus({'phase': 'off', 'minutes': 0, 'start': None})
+        assert not window._timer_tick.isActive() and mini.looks[-1] is None and big.looks[-1] is None
+    finally:
+        window._mini_orb = None
+        window._dashboard = None
+
+
+def test_the_timer_leaves_the_orbs_when_the_focus_ends(app, window, shared):
+    mini = TimerOrb()
+    window._mini_orb = mini
+    try:
+        now = datetime.now().replace(microsecond=0)
+        start_focus(window, shared, now - timedelta(minutes=49, seconds=30))
+        assert mini.looks[-1].label in ('30', '31') and mini.looks[-1].warn
+        window._focus_due(now + timedelta(seconds=31))
+        assert mini.looks[-1] is None and not window._timer_tick.isActive()
+        settle_mail(app, window)
+    finally:
+        window._mini_orb = None
+
+
 def test_pause_end_offers_again(app, window, shared):
     now = datetime.now().replace(microsecond=0)
     shared.save(FocusState('focus', now - timedelta(minutes=60), 50, []))   # o último foco foi de 50

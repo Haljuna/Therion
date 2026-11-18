@@ -1,6 +1,7 @@
 """Desenho OpenGL da Orbe HUD. Apenas apresentação; sem acesso a serviços."""
 import math
 import time
+from dataclasses import replace
 import numpy as np
 from PySide6.QtCore import Qt, QTimer, Signal, QRectF, QSize
 from PySide6.QtGui import QImage, QPainter, QSurfaceFormat
@@ -8,7 +9,7 @@ from PySide6.QtOpenGLWidgets import QOpenGLWidget
 from PySide6.QtOpenGL import (QOpenGLBuffer, QOpenGLShader, QOpenGLShaderProgram,
                              QOpenGLFramebufferObject, QOpenGLFramebufferObjectFormat)
 from .graphics import FRAME_INTERVAL_MS
-from .hud_frame import paint_hud_frame
+from .hud_frame import paint_hud_frame, paint_timer, paint_timer_flash
 from .hud_style import AMBER, CORE, DOT, FRAME, HOT, hud_layout, point_count
 from .orb_geometry import build_orb, VERTEX_FLOATS
 from .orb_motion import OrbMotion, THINKING_STATES
@@ -18,6 +19,8 @@ from .presentation import QualityController
 from .scene_motion import SceneMotion
 
 THINKING_INTERVAL_MS = 33
+TIMER_FLASH_S = .6     # brilho do arco quando o foco/pausa zera
+AMBER_PULSE_S = 1.1
 STRIDE = VERTEX_FLOATS*4
 _GL_FLOAT, _TRIANGLES, _POINTS, _STRIP = 0x1406, 0x0004, 0x0000, 0x0005
 _TEXTURE_2D, _LINEAR, _CLAMP = 0x0DE1, 0x2601, 0x812F
@@ -91,6 +94,8 @@ class OrbGL(QOpenGLWidget):
         self.buffers = {}
         self.point_count = 0
         self._frame_image = None
+        self.timer_look = None     # foco/pausa: minutos no centro e arco por fora da moldura (set_timer)
+        self._timer_end = None     # (início, último look) do brilho de quando zera
         self.failure_detail = ''
         self.last_frame = None
         self.frame_times = []
@@ -162,7 +167,37 @@ class OrbGL(QOpenGLWidget):
 
     def _layout(self):
         focus = self._focus()
-        return hud_layout(focus.x(), focus.y(), focus.width(), focus.height())
+        lay = hud_layout(focus.x(), focus.y(), focus.width(), focus.height())
+        if not self.show_label and (self.timer_look is not None or self.timer_flash() is not None):
+            # Mini orbe: com o centro em 0,44 da altura o arco do tempo, por fora da moldura, sairia por cima.
+            shift = focus.y()+focus.height()/2-lay.cy
+            lay = replace(lay, cy=lay.cy+shift, label_y=lay.label_y+shift)
+        return lay
+
+    def set_timer(self, look):
+        """Foco/pausa (core.focus.TimerLook) ou None. Ao zerar, o arco brilha 600 ms e some (não no modo reduzido)."""
+        if look is not None:
+            self._timer_end = None
+        elif self.timer_look is not None and not self.reduced:
+            self._timer_end = (time.monotonic(), self.timer_look)
+        self.timer_look = look
+        self.update()
+
+    def timer_flash(self):
+        """(progresso 0→1, último look) enquanto o brilho do fim dura; senão None."""
+        if self._timer_end is None:
+            return None
+        progress = (time.monotonic()-self._timer_end[0])/TIMER_FLASH_S
+        if progress >= 1. or self.reduced:
+            self._timer_end = None
+            return None
+        return progress, self._timer_end[1]
+
+    def timer_pulse(self):
+        """Alfa do âmbar dos últimos 5 min: 0,6–1,0 a cada 1,1 s; fixo no modo reduzido."""
+        if self.reduced:
+            return 1.
+        return .8+.2*math.sin(math.tau*time.monotonic()/AMBER_PULSE_S)
 
     def _ensure_points(self):
         """A quantidade de pontos segue a qualidade e o tamanho; ao mudar, só esse buffer é refeito."""
@@ -253,8 +288,16 @@ class OrbGL(QOpenGLWidget):
     def _paint_hud(self):
         """A moldura é desenhada numa imagem (com suavização de verdade) e colada por cima:
         o pintor OpenGL do Qt só suaviza com multisample, que a janela não tem."""
+        left, top, image = self._hud_image()
+        painter = QPainter(self)
+        painter.drawImage(left, top, image)
+        painter.end()
+
+    def _hud_image(self):
         lay = self._layout(); ratio = self.devicePixelRatioF()
-        reach = 1.25*lay.Rf   # as marcas fixas vão até 1,22 Rf
+        timer, flash = self.timer_look, self.timer_flash()
+        # As marcas fixas vão até 1,22 Rf; o arco do tempo, a 1,30 Rf, pede um pouco mais.
+        reach = (1.34 if timer is not None or flash is not None else 1.25)*lay.Rf
         left, top = math.floor(lay.cx-reach), math.floor(lay.cy-reach)
         width = math.ceil(2*reach)+1
         height = math.ceil(lay.label_y+max(22., .3*lay.R))-top
@@ -267,10 +310,13 @@ class OrbGL(QOpenGLWidget):
         painter = QPainter(image)
         painter.translate(-left, -top)
         paint_hud_frame(painter, lay, self.animation.frame_state(), label=self.show_label)
+        unit = max(.75, lay.R/170.)*(1. if self.show_label else .75)   # traço 2·unit: 1,5 na mini
+        if timer is not None:
+            paint_timer(painter, lay, timer, unit, self.timer_pulse())
+        elif flash is not None:
+            paint_timer_flash(painter, lay, flash[1], unit, flash[0])
         painter.end()
-        painter = QPainter(self)
-        painter.drawImage(left, top, image)
-        painter.end()
+        return left, top, image
 
     def _trail_pass(self, keep):
         gl = self.gl; t = self.trail

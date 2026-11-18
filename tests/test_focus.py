@@ -394,3 +394,27 @@ def test_focus_mail_unexpected_adapter_error_is_error_without_traceback(monkeypa
     monkeypatch.setattr(FakeAdapter, 'search', lambda self, query, page=None, limit=None: broken(query))
     assert focus.focus_mail(SimpleNamespace(_mailbox=box), START, CancellationToken()) == {'error': True}
     assert hooked == [] and not box.io_lock.locked()
+
+
+def test_timer_look_shows_minutes_and_fraction():
+    state = FocusState('focus', START, 50, [])
+    look = focus.timer_look(state, START + timedelta(minutes=18, seconds=10))
+    assert look == focus.TimerLook(fraction=pytest.approx((31*60+50)/3000), label='32', phase='focus', warn=False)
+    assert focus.timer_look(state, START).label == '50' and focus.timer_look(state, START).fraction == 1
+
+
+def test_timer_look_last_minute_shows_seconds():
+    state = FocusState('focus', START, 50, [])
+    assert focus.timer_look(state, end_at(state) - timedelta(seconds=44.2)).label == '45'
+    assert focus.timer_look(state, end_at(state) - timedelta(seconds=61)).label == '2'
+    assert focus.timer_look(state, end_at(state)) is None                  # zerou: nada a desenhar
+    assert focus.timer_look(FocusState('off', None, 0, []), START) is None
+
+
+def test_timer_look_warn_last_five_minutes():
+    state = FocusState('focus', START, 50, [])
+    assert not focus.timer_look(state, end_at(state) - timedelta(seconds=301)).warn
+    assert focus.timer_look(state, end_at(state) - timedelta(seconds=300)).warn
+    pause = FocusState('pause', START, 10, [])
+    look = focus.timer_look(pause, end_at(pause) - timedelta(seconds=120))
+    assert look.phase == 'pause' and not look.warn                        # a pausa não fica âmbar

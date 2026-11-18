@@ -276,3 +276,91 @@ def test_frame_arcs_are_antialiased_on_the_gl_path(app):
     levels = {img.pixelColor(x, y).blue()//8 for x in xs for y in ys}
     assert len(levels) >= 14, len(levels)
     w.close()
+
+
+def _old_hud_image(w):
+    """A imagem da moldura como era antes do tempo na orbe (centro em 0,44 da altura, reach 1,25 Rf)."""
+    from PySide6.QtGui import QImage, QPainter
+    from therion.interface.hud_frame import paint_hud_frame
+    from therion.interface.hud_style import hud_layout
+    lay = hud_layout(0, 0, w.width(), w.height()); ratio = w.devicePixelRatioF()
+    reach = 1.25*lay.Rf
+    left, top = math.floor(lay.cx-reach), math.floor(lay.cy-reach)
+    height = math.ceil(lay.label_y+max(22., .3*lay.R))-top
+    image = QImage(round((math.ceil(2*reach)+1)*ratio), round(height*ratio), QImage.Format_ARGB32_Premultiplied)
+    image.setDevicePixelRatio(ratio); image.fill(0)
+    p = QPainter(image); p.translate(-left, -top)
+    paint_hud_frame(p, lay, w.animation.frame_state(), label=w.show_label); p.end()
+    return left, top, image
+
+
+@pytest.mark.parametrize('size, label', [(110, False), (400, True)])
+def test_set_timer_none_draws_nothing_new(app, size, label):
+    from therion.core.focus import TimerLook
+    from therion.interface.orb_renderer import OrbGL
+    w = OrbGL(); w.show_label = label; w.setMinimumSize(0, 0); w.resize(size, size); w.reduced = True   # reduzido: sem o brilho do fim
+    before = _old_hud_image(w)
+    assert w._hud_image()[:2] == before[:2] and w._hud_image()[2] == before[2]
+    w.set_timer(TimerLook(.5, '25', 'focus', False))
+    assert w._hud_image()[2] != before[2]
+    w.set_timer(None)
+    assert w._hud_image()[:2] == before[:2] and w._hud_image()[2] == before[2]
+    w.deleteLater()
+
+
+def test_with_a_timer_the_frame_image_grows_to_hold_the_arc(app):
+    from therion.core.focus import TimerLook
+    from therion.interface.orb_renderer import OrbGL
+    w = OrbGL(); w.resize(400, 400)
+    w.set_timer(TimerLook(1., '50', 'focus', False))
+    lay = w._layout(); left, top, image = w._hud_image()
+    assert left <= lay.cx-1.32*lay.Rf and top <= lay.cy-1.32*lay.Rf
+    from therion.interface.hud_style import hud_layout
+    assert lay == hud_layout(0, 0, 400, 400)                      # grande: o centro não muda
+    w.deleteLater()
+
+
+def test_the_mini_centers_only_while_the_timer_shows(app):
+    from therion.core.focus import TimerLook
+    from therion.interface.orb_renderer import OrbGL
+    w = OrbGL(); w.show_label = False; w.setMinimumSize(0, 0); w.resize(110, 110); w.reduced = True
+    assert w._layout().cy == pytest.approx(.44*110)
+    w.set_timer(TimerLook(1., '50', 'focus', False))
+    assert w._layout().cy == pytest.approx(55)                     # o arco por fora não cabe com o centro em 0,44
+    w.set_timer(None)
+    assert w._layout().cy == pytest.approx(.44*110)
+    w.deleteLater()
+
+
+def test_timer_end_flash_lasts_600ms_and_skips_when_reduced(app, monkeypatch):
+    from therion.core.focus import TimerLook
+    from therion.interface import orb_renderer
+    clock = [100.]
+    monkeypatch.setattr(orb_renderer.time, 'monotonic', lambda: clock[0])
+    w = orb_renderer.OrbGL(); w.resize(300, 300)
+    look = TimerLook(.01, '3', 'focus', True)
+    w.set_timer(None)
+    assert w.timer_flash() is None                                   # sem foco antes: nada a apagar
+    w.set_timer(look); w.set_timer(None)
+    assert w.timer_flash()[0] == pytest.approx(0) and w.timer_flash()[1] == look
+    clock[0] += .3; assert w.timer_flash()[0] == pytest.approx(.5)
+    clock[0] += .31; assert w.timer_flash() is None
+    w.set_timer(None); assert w.timer_flash() is None              # um None repetido não reacende
+    w.reduced = True
+    w.set_timer(look); w.set_timer(None)
+    assert w.timer_flash() is None
+    w.deleteLater()
+
+
+def test_amber_pulse_breathes_and_holds_when_reduced(app, monkeypatch):
+    from therion.interface import orb_renderer
+    clock = [0.]
+    monkeypatch.setattr(orb_renderer.time, 'monotonic', lambda: clock[0])
+    w = orb_renderer.OrbGL()
+    seen = set()
+    for i in range(12):
+        clock[0] = i*.1; seen.add(round(w.timer_pulse(), 2))
+    assert min(seen) >= .6 and max(seen) <= 1. and max(seen)-min(seen) > .3
+    w.reduced = True
+    assert w.timer_pulse() == 1.
+    w.deleteLater()

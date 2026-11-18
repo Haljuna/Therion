@@ -179,6 +179,28 @@ def remaining(state, now):
     return max(0.0, (end_at(state) - now).total_seconds())
 
 
+WARN_SECONDS = 300
+
+
+@dataclass(frozen=True)
+class TimerLook:
+    """O que a orbe desenha durante foco/pausa (interface/hud_frame.paint_timer)."""
+    fraction: float   # 1 → 0: quanto ainda falta
+    label: str        # minutos que faltam; no último minuto, os segundos
+    phase: str        # 'focus' | 'pause'
+    warn: bool        # últimos 5 minutos do foco
+
+
+def timer_look(state, now):
+    """None fora do foco/pausa ou quando já zerou."""
+    left = remaining(state, now)
+    if state.phase not in ('focus', 'pause') or state.minutes <= 0 or left <= 0:
+        return None
+    label = str(math.ceil(left)) if left < 60 else str(math.ceil(left / 60))
+    return TimerLook(min(1.0, left / (state.minutes * 60)), label, state.phase,
+                     state.phase == 'focus' and left <= WARN_SECONDS)
+
+
 def _config_minutes(key, default, low, high):
     """focus.<key> do config.json; fora do intervalo ou ausente vale o padrão."""
     try:

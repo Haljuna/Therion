@@ -121,6 +121,11 @@ class Constellation(QWidget):
         if self.renderer:
             self.renderer.set_active(active)
 
+    def set_timer(self, look):
+        """Foco/pausa na orbe grande (core.focus.TimerLook); None apaga. A reserva estática fica sem o tempo."""
+        if self.renderer:
+            self.renderer.set_timer(look)
+
     def set_focus_rect(self, rect):
         rect=QRectF(rect)
         if self.focus_rect!=rect:

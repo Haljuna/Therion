@@ -373,7 +373,10 @@ class MainWindow(QMainWindow):
         self._focus_shot.setSingleShot(True)
         self._focus_shot.setTimerType(Qt.PreciseTimer)
         self._focus_shot.timeout.connect(self._focus_due)
-        self._focus_view = None   # payload do foco/pausa ligado (a orbe desenha daqui na Task 7); None = desligado
+        self._focus_view = None   # payload do foco/pausa ligado (as orbes desenham o tempo daqui); None = desligado
+        self._timer_tick = QTimer(self)   # minutos e arco nas duas orbes: 1 vez por segundo, só com foco/pausa
+        self._timer_tick.setInterval(1000)
+        self._timer_tick.timeout.connect(self._show_timer)
         self._focus_mail_thread = None
         self._focus_mail_token = None
         self._focus_mail_ready.connect(self._focus_summary)
@@ -1253,9 +1256,27 @@ class MainWindow(QMainWindow):
         elif payload.get('ended'):
             self._focus_finished(payload.get('minutes') or 0, datetime.fromisoformat(payload['start']),
                                  payload.get('held') or [])
+        self._show_timer()
 
     def _timer_look(self):
-        return None   # Task 7 desenha o tempo na orbe
+        view = self._focus_view
+        if view is None:
+            return None
+        from therion.core import focus
+        state = focus.FocusState(view['phase'], datetime.fromisoformat(view['start']), view['minutes'], [])
+        return focus.timer_look(state, datetime.now())
+
+    def _show_timer(self):
+        """As duas orbes mostram o tempo do foco/pausa; o tique de 1 s só roda enquanto há tempo a mostrar."""
+        look = self._timer_look()
+        dashboard = getattr(self, '_dashboard', None)
+        for orb in (getattr(self, '_mini_orb', None), getattr(dashboard, 'constellation', None)):
+            if orb is not None:
+                orb.set_timer(look)
+        if look is None:
+            self._timer_tick.stop()
+        elif not self._timer_tick.isActive():
+            self._timer_tick.start()
 
     def _focus_hold(self, message):
         """Com foco ligado guarda o aviso (vigia, agenda, resumo pós-jogo, modo jogo automático) para o fim,
@@ -1291,9 +1312,11 @@ class MainWindow(QMainWindow):
             else:
                 self._focus_shot.stop()
                 self._focus_view = None
+                self._show_timer()
             return
         self._focus_shot.stop()
         self._focus_view = None
+        self._show_timer()
         if ended.phase == 'focus':
             self._focus_finished(ended.minutes, ended.start, ended.held)
         else:
