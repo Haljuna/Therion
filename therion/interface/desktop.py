@@ -360,8 +360,14 @@ class MainWindow(QMainWindow):
             self._mini_orb = MiniOrb(path=os.path.join(os.environ.get('LOCALAPPDATA', ''), 'Therion', 'mini_orb.json'),
                                      on_open_main=self._show_window)
             self._mini_orb.show()
-        if self._reminders is not None or self._game_mode or self._pc_watch is not None or self._mini_orb is not None:
-            self._reminder_timer.start()
+        # Lembretes por voz e foco não têm chave de config: o tique de 30 s roda sempre (reserva do disparo na hora).
+        self._reminder_timer.start()
+        self._reminder_shot = QTimer(self)   # disparo na hora: armado até o próximo lembrete
+        self._reminder_shot.setSingleShot(True)
+        self._reminder_shot.setTimerType(Qt.PreciseTimer)
+        self._reminder_shot.timeout.connect(self._fire_reminders)
+        self._reminders_mtime = None
+        self._spoken_queue = []   # falas que nasceram sozinhas, esperando o Therion ficar livre
         self._next_user_channel = 'texto'
         self._command_started_at = None
         self._tray_icon: QSystemTrayIcon | None = None
@@ -405,6 +411,7 @@ class MainWindow(QMainWindow):
             orch_kwargs['assistant_identity'] = self._config['assistant_identity']
         self._orchestrator = Orchestrator(**orch_kwargs)
         self._orchestrator._agent_ui_confirmations=True
+        self._orchestrator.desktop_timers = True   # lembretes e foco só existem com a janela
         self._v4_worker = None
         self._autonomy_panel = None
         self._autonomy_runtime = autonomy_runtime
@@ -493,6 +500,7 @@ class MainWindow(QMainWindow):
         self._interface_stack = None
         if self._config.get('ui', {}).get('interface') == 'constellation':
             self._select_interface('constellation', persist=False)
+        QTimer.singleShot(0, self, self._fire_reminders)   # atrasados de quando o Therion estava fechado
 
     def _select_interface(self, interface, *, persist=True):
         """Troca somente a apresentação; os donos da sessão e do áudio permanecem."""
@@ -1093,13 +1101,78 @@ class MainWindow(QMainWindow):
             self._poll_game_mode(full_screen)
         if self._pc_watch is not None:
             self._poll_pc_watch(full_screen)
-        if self._reminders is None:
+        from therion.core import voice_reminders
+        store = voice_reminders.store()
+        mtime = store.mtime()
+        if mtime != self._reminders_mtime:   # reserva: alguém gravou o arquivo por fora
+            self._reminders_mtime = mtime
+            store.reload()
+        self._fire_reminders()
+        if self._reminders is not None:
+            busy = self._processing or self._pending_plan is not None or full_screen or self._game_forced
+            for message in self._reminders.due(datetime.now(), busy):
+                self._append('Therion', message)
+                self._speak_when_free(message, write=False)
+        self._drain_speech()
+
+    def _fire_reminders(self, now=None):
+        """Lembretes vencidos (na hora ou atrasados) entram na porta de fala; fura tela cheia, jogo e foco."""
+        if self._closing or self._quit_requested:
             return
-        busy = self._processing or self._pending_plan is not None or full_screen or self._game_forced
-        for message in self._reminders.due(datetime.now(), busy):
-            self._append('Therion', message)
-            if self._speech_output is not None:
-                self._speech_output.speak(message)
+        from therion.core import voice_reminders
+        store = voice_reminders.store()
+        on_time, late, old = store.take_due(now or datetime.now())
+        notice, store.broken_notice = store.broken_notice, None
+        if notice:
+            self._speak_when_free(notice)
+        if late_text := voice_reminders.late_message(late, old):
+            self._speak_when_free(late_text)
+        if on_time:
+            self._speak_when_free(voice_reminders.due_message(on_time))
+            voice_reminders.snooze_window(self._orchestrator, '; '.join(item.text for item in on_time))
+        self._arm_reminder_timer()
+
+    def _arm_reminder_timer(self):
+        from therion.core import voice_reminders
+        due = voice_reminders.store().next_time()
+        if due is None:
+            self._reminder_shot.stop()
+            return
+        milliseconds = (due - datetime.now()).total_seconds() * 1000
+        self._reminder_shot.start(int(min(max(milliseconds, 0), 2**31 - 1)))   # se acordar cedo, rearma
+
+    def _speak_when_free(self, text, *, write=True):
+        """Única porta das falas que nascem sozinhas: escreve já, fala só quando livre (speak corta o que toca)."""
+        if write:
+            self._append('Therion', text)
+        if self._speech_output is not None:
+            self._spoken_queue.append(text)
+            self._drain_speech()
+
+    def _therion_free(self):
+        return (not self._processing and self._pending_plan is None and not self._voice_busy()
+                and self._orbe_state not in ('listening', 'transcribing', 'awaiting_confirmation', 'clarification'))
+
+    def _voice_busy(self):
+        """Fala tocando/gerando, microfone gravando/transcrevendo ou modelo de voz carregando.
+        Não usa o is_quiescent da fala: o processo de voz aquecido fica vivo sem falar nada."""
+        if getattr(self._speech_output, 'state', 'idle') in ('warming', 'synthesizing', 'playing'):
+            return True
+        return any(not getattr(service, 'is_quiescent', True)
+                   for service in (self._voice_pipeline, self._voice_service) if service is not None)
+
+    def _drain_speech(self):
+        queue = getattr(self, '_spoken_queue', None)
+        if not queue or self._speech_output is None or not self._therion_free():
+            return
+        text = ' '.join(queue)   # uma fala só: duas chamadas seguidas cortariam a primeira
+        queue.clear()
+        self._speech_output.speak(text)
+
+    def _drain_speech_later(self):
+        # depois do evento atual: o stop() de dentro de outro speak também avisa "idle"
+        if getattr(self, '_spoken_queue', None):
+            QTimer.singleShot(0, self, self._drain_speech)
 
     def _poll_pc_watch(self, full_screen):
         quiet = full_screen or self._game_forced   # no jogo ou em tela cheia só escreve, sem voz
@@ -1114,8 +1187,9 @@ class MainWindow(QMainWindow):
                 if cleanup:   # o "sim" da próxima frase limpa os temporários seguros (core/pc_cleanup)
                     from therion.core.pc_cleanup import offer
                     offer(self._orchestrator)
-                if not quiet and self._speech_output is not None:
-                    self._speech_output.speak(message)
+                    self._orchestrator._focus_offer = None   # um dono só para o "sim"
+                if not quiet:
+                    self._speak_when_free(message, write=False)
                 self._update_orbe(self._orbe_state)   # o âmbar da mini orbe acompanha o problema recém-avisado
         self._pc_watch_ticks += 1
         busy = self._pc_watch_thread is not None and self._pc_watch_thread.is_alive()
@@ -1203,6 +1277,8 @@ class MainWindow(QMainWindow):
                 self._conversation_reply()
             if self._quit_requested:
                 self._quit_application()
+            else:
+                self._drain_speech()   # depois da resposta falada: se ela começou a tocar, o lembrete espera
 
     def _poll_memory_previews(self):
         poll_workflow = getattr(self, '_poll_workflow_progress', None)
@@ -1329,6 +1405,8 @@ class MainWindow(QMainWindow):
                 result=OrchestrationResult(status='cancelled',message='A conta ou a sessão mudou. Solicite um novo panorama.')
         if result.ui_action=='game_mode':
             self._set_game_mode((result.ui_payload or {}).get('on') is True)
+        if result.ui_action=='reminders':   # o depósito mudou: rearma o disparo na hora
+            self._arm_reminder_timer()
         if result.ui_action=='open_mail':
             if self._dashboard is None or not self._dashboard.active:self._select_interface('constellation',persist=False)
             if self._dashboard is not None and self._dashboard.active:self._dashboard.open_mail()
@@ -1890,6 +1968,7 @@ class MainWindow(QMainWindow):
         if dashboard is not None:
             dashboard.interaction(state)
         self._sync_mini_orb()
+        self._drain_speech_later()
 
     def _sync_mini_orb(self) -> None:
         """A mini orbe mostra o mesmo estado da orbe grande (Presentation: fala e captura incluídas)."""
@@ -2047,6 +2126,8 @@ class MainWindow(QMainWindow):
             self._conversation_label.setText('Preparando voz…')
         elif state == 'idle':
             self._conversation_label.setText('')
+        if state == 'idle':
+            self._drain_speech_later()
 
     def _on_speech_failed(self, message):
         self._preparation.finish('speech', 'failed')

@@ -124,7 +124,7 @@ def test_window_speaks_the_warning_only_when_free(app, tmp_path, monkeypatch):
 def test_window_without_the_setting_never_warns(app, tmp_path, monkeypatch):
     window = make_window(app, tmp_path, monkeypatch, False)
     try:
-        assert window._reminders is None and not window._reminder_timer.isActive()
+        assert window._reminders is None   # o tique roda sempre (lembretes por voz), mas sem aviso de agenda
         window._poll_reminders()
     finally:
         close(app, window)

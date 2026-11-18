@@ -248,6 +248,7 @@ def test_window_opens_the_cleanup_offer_only_when_the_warning_is_shown(app, tmp_
     try:
         window._pc_watch = FakeWatch([])
         window._orchestrator._pc_cleanup_offer = None
+        window._orchestrator._focus_offer = 'pausa'   # oferta de foco antiga: o "sim" passa a ser da limpeza
         monkeypatch.setattr(window, '_append', lambda sender, text: None)
         monkeypatch.setattr(reminders, 'do_not_disturb', lambda: False)
         window._pc_watch_said.append((DISK + ' Quer que eu limpe os temporários seguros? Dá uns 2,0 GB.', True))
@@ -257,6 +258,7 @@ def test_window_opens_the_cleanup_offer_only_when_the_warning_is_shown(app, tmp_
         window._processing = False
         window._poll_reminders()
         assert window._orchestrator._pc_cleanup_offer > __import__('time').monotonic() + 100
+        assert window._orchestrator._focus_offer is None
     finally:
         window._processing = False
         close(app, window)
@@ -265,7 +267,7 @@ def test_window_opens_the_cleanup_offer_only_when_the_warning_is_shown(app, tmp_
 def test_window_with_the_watch_off_never_measures(app, tmp_path, monkeypatch):
     window = make_window(tmp_path, monkeypatch, False)
     try:
-        assert window._pc_watch is None and not window._reminder_timer.isActive()
+        assert window._pc_watch is None   # o tique roda sempre (lembretes por voz), mas não mede
         window._poll_reminders()
     finally:
         close(app, window)
@@ -325,7 +327,7 @@ def make_mini_window(tmp_path, monkeypatch, mini=True, watch=True):
 
 def test_window_without_the_setting_has_no_mini_orb(app, tmp_path, monkeypatch):
     window = make_mini_window(tmp_path, monkeypatch, mini=False, watch=False)
-    assert window._mini_orb is None and not window._reminder_timer.isActive()
+    assert window._mini_orb is None
     close(app, window)
 
 
