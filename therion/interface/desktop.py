@@ -6,7 +6,8 @@ import sys
 import threading
 import time
 from therion.voice.echo import strip_spoken_echo_prefix
-from datetime import datetime
+from dataclasses import replace
+from datetime import datetime, timedelta
 from therion.logging.conversation_log import ConversationLog
 from pathlib import Path
 from typing import Optional
@@ -311,6 +312,7 @@ class _ConfirmationWorker(QThread):
 class MainWindow(QMainWindow):
     """Janela principal mínima do Therion."""
     _warm_finished = Signal(int, bool)
+    _focus_mail_ready = Signal(object)   # (minutos focados, avisos guardados, e-mails) da thread do fim do foco
     # Reuso curto evita um segundo preload ao clicar depois da abertura. Não é
     # monitoramento da saúde do Ollama; falhas reais invalidam a prontidão.
     _AI_READY_TTL_SECONDS = 60
@@ -367,6 +369,14 @@ class MainWindow(QMainWindow):
         self._reminder_shot.setTimerType(Qt.PreciseTimer)
         self._reminder_shot.timeout.connect(self._fire_reminders)
         self._reminders_mtime = None
+        self._focus_shot = QTimer(self)   # fim do foco ou da pausa, na hora
+        self._focus_shot.setSingleShot(True)
+        self._focus_shot.setTimerType(Qt.PreciseTimer)
+        self._focus_shot.timeout.connect(self._focus_due)
+        self._focus_view = None   # payload do foco/pausa ligado (a orbe desenha daqui na Task 7); None = desligado
+        self._focus_mail_thread = None
+        self._focus_mail_token = None
+        self._focus_mail_ready.connect(self._focus_summary)
         self._spoken_queue = []   # falas que nasceram sozinhas, esperando o Therion ficar livre
         self._next_user_channel = 'texto'
         self._command_started_at = None
@@ -501,6 +511,7 @@ class MainWindow(QMainWindow):
         if self._config.get('ui', {}).get('interface') == 'constellation':
             self._select_interface('constellation', persist=False)
         QTimer.singleShot(0, self, self._fire_reminders)   # atrasados de quando o Therion estava fechado
+        QTimer.singleShot(0, self, self._resume_focus)
 
     def _select_interface(self, interface, *, persist=True):
         """Troca somente a apresentação; os donos da sessão e do áudio permanecem."""
@@ -1051,7 +1062,9 @@ class MainWindow(QMainWindow):
         if self._game_polls < 2 or self._game_unloaded or self._processing or not hasattr(provider, 'unload'):
             return
         self._unload_model()
-        self._append('Therion', 'Modo jogo: liberei a placa de vídeo. Meu primeiro pedido depois disso demora um pouco mais.')
+        message = 'Modo jogo: liberei a placa de vídeo. Meu primeiro pedido depois disso demora um pouco mais.'
+        if not self._focus_hold(message):
+            self._append('Therion', message)
 
     def _unload_model(self):
         provider = getattr(getattr(self._orchestrator, 'ai_core', None), '_provider', None)
@@ -1108,9 +1121,14 @@ class MainWindow(QMainWindow):
             self._reminders_mtime = mtime
             store.reload()
         self._fire_reminders()
+        view = self._focus_view
+        if view is not None and datetime.now() >= self._focus_end(view):
+            self._focus_due()   # reserva: o disparo na hora pode atrasar com o PC dormindo
         if self._reminders is not None:
             busy = self._processing or self._pending_plan is not None or full_screen or self._game_forced
             for message in self._reminders.due(datetime.now(), busy):
+                if self._focus_hold(message):
+                    continue
                 self._append('Therion', message)
                 self._speak_when_free(message, write=False)
         self._drain_speech()
@@ -1194,6 +1212,8 @@ class MainWindow(QMainWindow):
         if not (self._processing or self._pending_plan is not None):
             while self._pc_watch_said:
                 message, cleanup = self._pc_watch_said.pop(0)
+                if self._focus_hold(message):
+                    continue   # a oferta de limpeza não é rearmada no fim: o "sim" de lá é da pausa
                 self._append('Therion', message)
                 if cleanup:   # o "sim" da próxima frase limpa os temporários seguros (core/pc_cleanup)
                     from therion.core.pc_cleanup import offer
@@ -1209,6 +1229,129 @@ class MainWindow(QMainWindow):
             self._pc_watch_thread = threading.Thread(target=lambda: said.extend(watch.poll()),
                                                      name='therion-pc-watch', daemon=True)
             self._pc_watch_thread.start()
+
+    # --- modo foco -------------------------------------------------------------------------------------
+    @staticmethod
+    def _focus_end(view):
+        return datetime.fromisoformat(view['start']) + timedelta(minutes=view['minutes'])
+
+    def _apply_focus(self, payload):
+        """O foco/pausa mudou (pedido respondido ou retomado ao abrir): rearma o fim; foco encerrado → resumo."""
+        self._focus_shot.stop()
+        self._focus_view = None
+        if payload.get('phase') in ('focus', 'pause') and payload.get('start'):
+            self._focus_view = dict(payload)
+            milliseconds = (self._focus_end(payload) - datetime.now()).total_seconds() * 1000
+            self._focus_shot.start(int(min(max(milliseconds, 0), 2**31 - 1)))   # se acordar cedo, rearma
+        elif payload.get('ended'):
+            self._focus_finished(payload.get('minutes') or 0, datetime.fromisoformat(payload['start']),
+                                 payload.get('held') or [])
+
+    def _timer_look(self):
+        return None   # Task 7 desenha o tempo na orbe
+
+    def _focus_hold(self, message):
+        """Com foco ligado guarda o aviso (vigia, agenda, resumo pós-jogo, modo jogo automático) para o fim,
+        sem duplicar. Lembrete nunca passa por aqui. False → o aviso sai agora, como sempre."""
+        if self._focus_view is None or self._focus_view.get('phase') != 'focus':
+            return False
+        from therion.core import focus
+        now = datetime.now()
+        def keep(state):
+            if state.phase != 'focus' or focus.remaining(state, now) <= 0 or message in state.held:
+                return state
+            return replace(state, held=[*state.held, message])
+        try:
+            before, _ = focus.store().update(keep)
+        except OSError:
+            return False   # sem gravar, melhor avisar já do que perder
+        return before.phase == 'focus' and focus.remaining(before, now) > 0
+
+    def _focus_due(self, now=None):
+        """Disparo na hora (ou o tique de reserva): encerra o foco/pausa que acabou, mesmo com a fala esperando."""
+        if self._closing or self._quit_requested:
+            return
+        from therion.core import focus
+        now = now or datetime.now()
+        try:
+            ended = focus.settle(now)
+            state = focus.store().state() if ended is None else None
+        except OSError:
+            return
+        if ended is None:
+            if state.phase in ('focus', 'pause') and focus.remaining(state, now) > 0:
+                self._apply_focus(focus._payload(state))   # acordou cedo ou o foco foi esticado: rearma
+            else:
+                self._focus_shot.stop()
+                self._focus_view = None
+            return
+        self._focus_shot.stop()
+        self._focus_view = None
+        if ended.phase == 'focus':
+            self._focus_finished(ended.minutes, ended.start, ended.held)
+        else:
+            self._speak_when_free(focus.pause_ended_text(focus.next_focus_minutes()), may_speak_quiet=True)
+            focus.offer(self._orchestrator, 'again')
+
+    def _focus_finished(self, minutes_done, start, held):
+        """Conta os e-mails numa thread; o resumo sai na thread do Qt (_focus_summary)."""
+        if not minutes_done:   # encerrado logo no começo: nada a resumir, só o que foi guardado
+            self._write_held(held)
+            return
+        from therion.agent.contracts import CancellationToken
+        from therion.core import focus
+        token = self._focus_mail_token = CancellationToken()
+        host, ready = self._orchestrator, self._focus_mail_ready
+        def count():
+            try:
+                mail = focus.focus_mail(host, start, token)
+            except Exception:
+                mail = {'error': True}   # caixa sem conta configurada ou estado inesperado: o resto da fala sai
+            try:
+                ready.emit((minutes_done, list(held), mail))
+            except RuntimeError:
+                pass   # a janela já foi fechada
+        self._focus_mail_thread = threading.Thread(target=count, name='therion-focus-mail', daemon=True)
+        self._focus_mail_thread.start()
+
+    @Slot(object)
+    def _focus_summary(self, row):
+        if self._closing or self._quit_requested:
+            return
+        from therion.core import focus
+        minutes_done, held, mail = row
+        try:
+            today = focus.store().today(datetime.now().date())
+        except OSError:
+            today = minutes_done
+        # Fala em tela cheia e no modo jogo, igual ao lembrete; a oferta de pausa é a dona do próximo "sim".
+        self._speak_when_free(focus.ended_text(minutes_done, today, mail, held, focus.pause_minutes()), may_speak_quiet=True)
+        self._write_held(held)
+        focus.offer(self._orchestrator, 'pause')
+
+    def _write_held(self, held):
+        if held:
+            self._append('Therion', 'Avisos que segurei durante o foco:\n' + '\n'.join('• ' + item for item in held))
+
+    def _resume_focus(self):
+        """Ao abrir: retoma o foco/pausa em andamento; o que acabou com o Therion fechado só é contado e dito."""
+        if self._closing or self._quit_requested:
+            return
+        from therion.core import focus
+        now = datetime.now()
+        try:
+            state = focus.store().state()
+            if state.phase in ('focus', 'pause') and focus.remaining(state, now) > 0:
+                self._apply_focus(focus._payload(state))
+                return
+            ended = focus.settle(now)
+            if ended is None or ended.phase != 'focus':
+                return
+            end = focus.end_at(ended)
+            today = focus.store().today(now.date()) if end.date() == now.date() else None
+        except OSError:
+            return
+        self._speak_when_free(focus.closed_text(end, today), may_speak_quiet=True)   # sem e-mails nem oferta
 
     def _present_worker(self,worker,action,payload):
         if worker is not self._command_worker or not self._worker_is_current(worker) or worker.cancelled.is_set() or self._quit_requested or getattr(self,'_workflow_clear_pending',False):return
@@ -1434,6 +1577,8 @@ class MainWindow(QMainWindow):
         self._last_agent_response_status=result.status
         if dashboard is not None:dashboard._skip_response_refresh=result.ui_action=='open_briefing'
         self._append("Therion", result.message)
+        if result.ui_action=='focus':   # depois da resposta: o resumo de um foco encerrado vem em seguida
+            self._apply_focus(result.ui_payload or {})
         self._speech_text = result.speech_message or result.message
         MainWindow._log_result(self, result)
         self._conversation_awaiting_response = (result.status == 'awaiting_confirmation' or
@@ -2040,6 +2185,8 @@ class MainWindow(QMainWindow):
                 self._append("Therion", "O aplicativo será encerrado após concluir a tarefa atual.")
             return
         self._closing = True
+        if self._focus_mail_token is not None:
+            self._focus_mail_token.cancel()   # a contagem de e-mails do fim do foco não segura o encerramento
         if hasattr(self._orchestrator, 'close'):
             self._orchestrator.close()
         if self._tray_icon:

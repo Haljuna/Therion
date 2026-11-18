@@ -13,7 +13,7 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from therion.context.language import control
-from therion.core.voice_reminders import PENDING_SECONDS, TERMINAL_MESSAGE, _COUNT, _count, _duration, _hm
+from therion.core.voice_reminders import PENDING_SECONDS, TERMINAL_MESSAGE, _COUNT, _clock, _count, _duration, _hm
 
 MIN_FOCUS, MAX_FOCUS = 5, 180
 MIN_PAUSE, MAX_PAUSE = 1, 60
@@ -121,6 +121,16 @@ class FocusStore:
             _, days, last = self._read()
             self._write(state, days, state.minutes if state.phase == 'focus' else last)
 
+    def update(self, change):
+        """Lê, aplica change(estado) → novo estado e grava sob a mesma trava (um aviso guardado nunca some
+        no meio de outra gravação). change devolve o próprio estado para não mudar nada. Devolve (antes, depois)."""
+        with self._lock:
+            state, days, last = self._read()
+            new = change(state)
+            if new is not state:
+                self._write(new, days, new.minutes if new.phase == 'focus' else last)
+            return state, new
+
     def add_minutes(self, day, minutes):
         with self._lock:
             state, days, last = self._read()
@@ -177,6 +187,27 @@ def _config_minutes(key, default, low, high):
     except (OSError, AttributeError, ValueError):
         return default
     return value if type(value) is int and low <= value <= high else default
+
+
+def pause_minutes():
+    return _config_minutes('pause', DEFAULT_PAUSE, MIN_PAUSE, MAX_PAUSE)
+
+
+def next_focus_minutes():
+    """Duração do "mais um foco": a do último começado, ou o padrão."""
+    return store().last_minutes() or _config_minutes('minutes', DEFAULT_FOCUS, MIN_FOCUS, MAX_FOCUS)
+
+
+def settle(now):
+    """Encerra o foco ou a pausa cujo tempo acabou; o foco conta inteiro no dia do fim (pausa não conta).
+    Devolve o estado encerrado, ou None se não havia nada para encerrar (ou outro já encerrou)."""
+    before, after = store().update(
+        lambda state: _empty() if state.phase in ('focus', 'pause') and remaining(state, now) <= 0 else state)
+    if after is before:
+        return None
+    if before.phase == 'focus':
+        store().add_minutes(end_at(before).date(), before.minutes)
+    return before
 
 
 # --- frases -------------------------------------------------------------------------------------------------
@@ -327,6 +358,77 @@ def ended_text(minutes_done, today_total, mail, held, suggest_pause):
     return ' '.join(part for part in parts if part)
 
 
+def pause_ended_text(minutes):
+    return f'Pausa acabou. Mais {_duration(minutes)} de foco?'
+
+
+def closed_text(end, today_total):
+    """O foco acabou com o Therion fechado (§6.2); today_total None quando o fim foi em outro dia."""
+    text = f'Seu foco terminou {_clock(end.hour, end.minute)} enquanto eu estava fechado.'
+    return text + (f' Hoje são {_total(today_total)} de foco.' if today_total else '')
+
+
+# --- e-mails do fim do foco (numa thread; nunca na janela) ------------------------------------------------
+def _mail_ids(box, account, adapter, token, query):
+    """Só ids, de 500 em 500, como o miolo de briefing.mail_since."""
+    found, pages, page = [], set(), None
+    while True:
+        token.check()
+        box._check(account, token)
+        row = adapter.search(query, page, limit=500)
+        found += [ref['id'] for ref in row.get('messages', [])]
+        page = row.get('next_page')
+        if not page:
+            return found
+        if page in pages:
+            raise ValueError('Paginação repetida; contagem incompleta.')
+        pages.add(page)
+
+
+def _count_mail(box, account, after, token):
+    from therion.integrations.mail_text import mail_header, sender_name
+    with box.io_lock:
+        with box._adapter(account, token) as adapter:
+            count = len(set(_mail_ids(box, account, adapter, token, f'in:inbox after:{after}')))
+            important = []
+            row = adapter.search(f'in:inbox is:important after:{after}', None, limit=3)
+            for ref in row.get('messages', [])[:3]:
+                token.check()
+                headers = {str(item.get('name', '')).lower(): mail_header(item.get('value', ''))
+                           for item in adapter.metadata(ref['id'])['payload']['headers']}
+                important.append((sender_name(headers.get('from', '')), headers.get('subject', '')))
+    box._check(account, token)
+    return {'count': count, 'important': important}
+
+
+def focus_mail(host, start, token, timeout=10.):
+    """E-mails desde o começo do foco: None sem conta; {'count', 'important'}; {'error': True} em falha ou
+    prazo. Não abre corpo de e-mail e não mexe no marco da saudação (BriefingMarker)."""
+    from therion.agent.briefing import DeadlineToken
+    from therion.agent.contracts import Cancelled
+    box = host._mailbox
+    account = box.identity()
+    if account is None:
+        return None
+    deadline = DeadlineToken(token, timeout)
+    result = {}
+
+    def fetch():
+        try:
+            result['mail'] = _count_mail(box, account, int(start.timestamp()), deadline)
+        except (OSError, ValueError, TimeoutError, KeyError, TypeError, Cancelled):
+            result['mail'] = {'error': True}
+
+    # Uma chamada presa no Gmail não confere o prazo: a espera é por fora, e o token cancela o resto.
+    worker = threading.Thread(target=fetch, name='therion-focus-mail-io', daemon=True)
+    worker.start()
+    worker.join(timeout)
+    if worker.is_alive():
+        deadline.cancel()
+        return {'error': True}
+    return result.get('mail', {'error': True})
+
+
 # --- respostas ----------------------------------------------------------------------------------------------
 def _payload(state, ended=False):
     return {'phase': state.phase, 'minutes': state.minutes,
@@ -357,7 +459,7 @@ def _pause(minutes, state, now):
         who = 'Você está em foco' if state.phase == 'focus' else 'Você já está em pausa'
         return f'{who}; {_faltam(_left(state, now))}.', None
     if minutes is None:
-        minutes = _config_minutes('pause', DEFAULT_PAUSE, MIN_PAUSE, MAX_PAUSE)
+        minutes = pause_minutes()
     if not MIN_PAUSE <= minutes <= MAX_PAUSE:
         return f'Dá para fazer pausas de {MIN_PAUSE} a {MAX_PAUSE} minutos.', None
     return _begin('pause', minutes, now)
@@ -366,9 +468,11 @@ def _pause(minutes, state, now):
 def _extend(minutes, state, now):
     if state.minutes >= MAX_FOCUS:
         return f'O foco já está no máximo de {MAX_FOCUS} minutos.', None
-    total = min(state.minutes + minutes, MAX_FOCUS)
-    grown = replace(state, minutes=total)
-    store().save(grown)
+    # Releitura sob a trava: um aviso que a janela guardou neste meio-tempo não se perde.
+    _, grown = store().update(lambda current: replace(current, minutes=min(current.minutes + minutes, MAX_FOCUS))
+                              if current.phase == 'focus' else current)
+    if grown.phase != 'focus':
+        return 'Você não está em foco.', None
     until = _until(end_at(grown))
     if state.minutes + minutes > MAX_FOCUS:
         return f'O máximo é {MAX_FOCUS} minutos de foco; estiquei {until}.', _payload(grown)
@@ -376,16 +480,15 @@ def _extend(minutes, state, now):
 
 
 def _stop(state, now):
-    if state.phase != 'focus':
+    """O resumo (e-mails, avisos guardados, oferta de pausa) quem fala é a janela, igual ao fim natural."""
+    state, after = store().update(lambda current: _empty() if current.phase == 'focus' else current)
+    if after is state:
         return 'Você não está em foco.', None
     done = min(state.minutes, max(0, int((now - state.start).total_seconds() // 60)))
     if done:
         store().add_minutes(now.date(), done)
-    store().save(_empty())
-    payload = {'phase': 'off', 'minutes': done, 'start': state.start.isoformat(timespec='seconds'), 'ended': True}
-    if not done:
-        return 'Foco encerrado.', payload
-    return ended_text(done, store().today(now.date()), None, state.held, None), payload
+    return 'Foco encerrado.', {'phase': 'off', 'minutes': done, 'start': state.start.isoformat(timespec='seconds'),
+                               'ended': True, 'held': list(state.held)}
 
 
 def _stop_pause(state):
@@ -403,9 +506,8 @@ def _how_long(state, now, text):
 
 def _accept(kind, state, now):
     if kind == 'pause':
-        return _begin('pause', _config_minutes('pause', DEFAULT_PAUSE, MIN_PAUSE, MAX_PAUSE), now)
-    minutes = store().last_minutes() or _config_minutes('minutes', DEFAULT_FOCUS, MIN_FOCUS, MAX_FOCUS)
-    return _begin('focus', minutes, now)
+        return _begin('pause', pause_minutes(), now)
+    return _begin('focus', next_focus_minutes(), now)
 
 
 def answer(command, host, now=None):

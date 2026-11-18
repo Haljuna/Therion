@@ -1,6 +1,9 @@
 """Modo foco: frases, estado salvo, texto do fim e ofertas. Relógio sempre injetado."""
 import json
+import threading
 import time
+from contextlib import contextmanager
+from dataclasses import replace
 from datetime import date, datetime, timedelta
 from types import SimpleNamespace
 
@@ -113,8 +116,9 @@ def test_stop_counts_real_time_and_clears_held(box, host):
     answer('foco', host, NOW)
     box.save(FocusState('focus', NOW, 50, ['o disco C ficou com 3 GB']))
     text, payload = answer('sai do foco', host, NOW + timedelta(minutes=30, seconds=50))
-    assert text == 'Foco de 30 minutos concluído. Hoje são 30 minutos de foco. Enquanto você focava: o disco C ficou com 3 GB.'
-    assert payload == {'phase': 'off', 'minutes': 30, 'start': '2026-11-18T14:50:00', 'ended': True}
+    assert text == 'Foco encerrado.'          # o resumo (com e-mails e pausa) quem fala é a janela, uma vez só
+    assert payload == {'phase': 'off', 'minutes': 30, 'start': '2026-11-18T14:50:00', 'ended': True,
+                       'held': ['o disco C ficou com 3 GB']}
     assert box.state().phase == 'off' and box.state().held == []
     assert box.today(NOW.date()) == 30
 
@@ -272,3 +276,106 @@ def test_config_values_are_range_checked(monkeypatch):
     assert focus._config_minutes('pause', 10, 1, 60) == 15
     monkeypatch.setattr(local, 'load_config', lambda: {})
     assert focus._config_minutes('minutes', 50, 5, 180) == 50
+
+
+def test_update_reads_and_writes_under_one_lock(box):
+    box.save(FocusState('focus', NOW, 50, []))
+    before, after = box.update(lambda state: replace(state, held=[*state.held, 'aviso']))
+    assert before.held == [] and after.held == ['aviso'] and box.state().held == ['aviso']
+    assert box.last_minutes() == 50
+
+
+def test_settle_ends_only_what_ran_out_and_credits_the_focus(box):
+    box.save(FocusState('focus', NOW, 50, ['aviso']))
+    assert focus.settle(NOW + timedelta(minutes=49)) is None and box.state().phase == 'focus'
+    ended = focus.settle(NOW + timedelta(minutes=50))
+    assert ended == FocusState('focus', NOW, 50, ['aviso']) and box.state().phase == 'off'
+    assert box.today(NOW.date()) == 50
+    assert focus.settle(NOW + timedelta(minutes=51)) is None and box.today(NOW.date()) == 50   # uma vez só
+    box.save(FocusState('pause', NOW, 10, []))
+    assert focus.settle(NOW + timedelta(minutes=10)).phase == 'pause' and box.today(NOW.date()) == 50
+
+
+def test_pause_and_closed_texts():
+    assert focus.pause_ended_text(50) == 'Pausa acabou. Mais 50 minutos de foco?'
+    assert focus.closed_text(datetime(2026, 11, 18, 15, 40), 100) == (
+        'Seu foco terminou às 15h40 enquanto eu estava fechado. Hoje são 1 hora e 40 de foco.')
+    assert focus.closed_text(datetime(2026, 11, 18, 1, 5), None) == 'Seu foco terminou à 1h05 enquanto eu estava fechado.'
+
+
+# --- e-mails do foco (caixa falsa) --------------------------------------------------------------------------
+class FakeAdapter:
+    def __init__(self, box):
+        self.box = box
+
+    def search(self, query, page=None, limit=None):
+        self.box.queries.append((query, page, limit))
+        if self.box.hang is not None:
+            self.box.hang.wait(11)
+        ids = self.box.important if 'is:important' in query else self.box.ids
+        if page is None and len(ids) > 4 and limit == 500:      # duas páginas para a contagem
+            return {'messages': [{'id': i} for i in ids[:4]], 'next_page': 'p2'}
+        return {'messages': [{'id': i} for i in (ids[4:] if page else ids)], 'next_page': None}
+
+    def metadata(self, identifier):
+        who, subject = self.box.headers[identifier]
+        return {'id': identifier, 'payload': {'headers': [{'name': 'From', 'value': who}, {'name': 'Subject', 'value': subject}]}}
+
+
+class FakeBox:
+    def __init__(self, account='conta-teste', ids=(), important=(), headers=None, hang=None):
+        self.account, self.ids, self.important = account, list(ids), list(important)
+        self.headers, self.hang, self.queries, self.io_lock = headers or {}, hang, [], threading.Lock()
+
+    def identity(self):
+        return self.account
+
+    def _check(self, account, token):
+        token.check()
+
+    @contextmanager
+    def _adapter(self, account, token):
+        yield FakeAdapter(self)
+
+
+START = datetime(2026, 11, 18, 14, 50)
+
+
+def test_focus_mail_counts_and_lists_three_important():
+    from therion.agent.contracts import CancellationToken
+    headers = {'a': ('Fulano <fulano@example.com>', 'Prova de cálculo'), 'b': ('sicrano@example.com', 'Entrega'),
+               'c': ('Beltrano <b@example.com>', ''), 'd': ('Outro <o@example.com>', 'Quarto')}
+    box = FakeBox(ids=['a', 'b', 'c', 'd', 'e', 'f'], important=['a', 'b', 'c', 'd'], headers=headers)
+    mail = focus.focus_mail(SimpleNamespace(_mailbox=box), START, CancellationToken())
+    assert mail == {'count': 6, 'important': [('Fulano', 'Prova de cálculo'), ('sicrano@example.com', 'Entrega'), ('Beltrano', '')]}
+    after = int(START.timestamp())
+    assert ('in:inbox after:%d' % after, None, 500) in box.queries and ('in:inbox after:%d' % after, 'p2', 500) in box.queries
+    assert any(query == f'in:inbox is:important after:{after}' for query, _, _ in box.queries)
+    assert not box.io_lock.locked()
+
+
+def test_focus_mail_without_account_is_none():
+    from therion.agent.contracts import CancellationToken
+    box = FakeBox(account=None)
+    assert focus.focus_mail(SimpleNamespace(_mailbox=box), START, CancellationToken()) is None and box.queries == []
+
+
+def test_focus_mail_timeout_is_error():
+    from therion.agent.contracts import CancellationToken
+    hang = threading.Event()
+    box = FakeBox(ids=['a'], hang=hang)
+    try:
+        began = time.monotonic()
+        assert focus.focus_mail(SimpleNamespace(_mailbox=box), START, CancellationToken(), timeout=0.2) == {'error': True}
+        assert time.monotonic() - began < 2
+    finally:
+        hang.set()
+
+
+def test_focus_mail_failure_is_error():
+    from therion.agent.contracts import CancellationToken
+    box = FakeBox(ids=['a'], important=['a'], headers={})       # metadata sem o id → KeyError
+    assert focus.focus_mail(SimpleNamespace(_mailbox=box), START, CancellationToken()) == {'error': True}
+    token = CancellationToken()
+    token.cancel()
+    assert focus.focus_mail(SimpleNamespace(_mailbox=FakeBox(ids=['a'])), START, token) == {'error': True}
