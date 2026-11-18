@@ -56,6 +56,7 @@ def app():
 class FakeRenderer:
     def __init__(self):
         self.visuals, self.reduced, self.active, self.cleaned = [], False, None, 0
+        self.disabled = False
 
     def set_visual(self, state, intensity):
         self.visuals.append(state)
@@ -165,7 +166,7 @@ def test_escape_closes_the_panel_without_focus(app, tmp_path):
     window, _ = make(tmp_path, key_state=lambda vk: vk in pressed)
     window.show()
     QTest.mouseClick(window, Qt.LeftButton, Qt.NoModifier, QPoint(48, 48))
-    assert window.panel.isVisible() and window.watch_timer.isActive() and window.watch_timer.interval() == 100
+    assert window.panel.isVisible() and window.watch_timer.isActive() and window.watch_timer.interval() == 30
     window._watch()
     assert window.panel.isVisible()
     pressed.add(0x1B)
@@ -214,4 +215,101 @@ def test_hiding_for_a_game_also_closes_the_panel_and_stops_its_watch(app, tmp_pa
     assert window.panel.isVisible() and window.watch_timer.isActive()
     window.hide_for_game(True)
     assert not window.panel.isVisible() and not window.watch_timer.isActive()
+    window.shut()
+
+
+def test_amber_also_shows_after_a_successful_command_or_a_cancel(app, tmp_path):
+    fake = FakeRenderer()
+    window, _ = make(tmp_path, renderer_factory=lambda: fake)
+    for state in ('success', 'responding', 'cancelled'):
+        window.set_state(state, True)
+        assert fake.visuals[-1] == 'error'
+    window.set_state('success', False)
+    assert fake.visuals[-1] == 'idle'
+    window.shut()
+
+
+def test_open_main_menu_action_calls_the_callback(app, tmp_path, monkeypatch):
+    from PySide6.QtGui import QContextMenuEvent
+    from therion.interface import mini_orb
+
+    class FakeMenu:   # QMenu.exec bloquearia o teste; "clica" na primeira ação
+        def __init__(self, _parent):
+            self.actions = []
+
+        def addAction(self, _text, callback):
+            self.actions.append(callback)
+
+        def exec(self, _pos):
+            self.actions[0]()
+    opened = []
+    window, _ = make(tmp_path, on_open_main=lambda: opened.append(1))
+    monkeypatch.setattr(mini_orb, 'QMenu', FakeMenu)
+    window.contextMenuEvent(QContextMenuEvent(QContextMenuEvent.Mouse, QPoint(1, 1)))
+    assert opened == [1]
+    window.shut()
+
+
+def test_the_position_is_saved_as_soon_as_a_drag_ends(app, tmp_path):
+    window, _ = make(tmp_path)
+    window.move(300, 300)
+    window.show()
+    QTest.mousePress(window, Qt.LeftButton, Qt.NoModifier, QPoint(48, 48))
+    QTest.mouseMove(window, QPoint(78, 48))
+    QTest.mouseRelease(window, Qt.LeftButton, Qt.NoModifier, QPoint(78, 48))
+    saved = json.loads((tmp_path / 'pos.json').read_text(encoding='utf-8'))
+    assert saved == {'x': window.x(), 'y': window.y()} and saved['x'] == 330
+    window.shut()
+
+
+def test_the_panel_opens_with_the_last_reading_or_says_reading_not_unavailable(app, tmp_path):
+    window, _ = make(tmp_path)
+    window.show()
+    QTest.mouseClick(window, Qt.LeftButton, Qt.NoModifier, QPoint(48, 48))
+    texts = [row.text() for row, _ in window.panel.rows.values()] + [label.text() for label in window.panel.tops.values()]
+    assert 'indisponível' not in ' '.join(texts) and 'lendo…' in ' '.join(texts)
+    QTest.mouseClick(window, Qt.LeftButton, Qt.NoModifier, QPoint(48, 48))
+    assert wait_for(app, lambda: window._last_full is not None)
+    QTest.mouseClick(window, Qt.LeftButton, Qt.NoModifier, QPoint(48, 48))
+    assert 'lendo…' not in window.panel.rows['ram'][0].text() and 'chrome' in window.panel.tops['top_ram'].text()
+    assert window.panel.tops['top_vram'].text() == 'indisponível'   # leitura real sem VRAM por processo
+    window.shut()
+
+
+def test_the_watch_polls_fast_enough_not_to_miss_a_click(app, tmp_path):
+    window, _ = make(tmp_path)
+    assert window.watch_timer.interval() == 30
+    window.shut()
+
+
+def test_calls_after_shut_do_nothing_and_the_renderer_is_disabled(app, tmp_path):
+    fake = FakeRenderer()
+    window, _ = make(tmp_path, renderer_factory=lambda: fake)
+    window.shut()
+    assert fake.disabled is True
+    visuals, active = list(fake.visuals), fake.active
+    window.set_state('thinking', False)
+    window.set_quiet(False)
+    window.hide_for_game(False)
+    assert fake.visuals == visuals and fake.active == active and not window.isVisible()
+
+
+def test_the_mini_orb_renders_at_most_30_fps_and_centres_the_sphere(app, tmp_path):
+    from therion.interface.hud_style import hud_layout
+    fake = FakeRenderer()
+    window, _ = make(tmp_path, renderer_factory=lambda: fake)
+    assert fake.min_interval_ms == 33
+    focus = fake.focus_rect
+    assert focus.bottom() <= 96 and focus.top() >= 0
+    assert abs(hud_layout(focus.x(), focus.y(), focus.width(), focus.height()).cy - 48) < .5
+    window.shut()
+
+
+def test_a_screen_going_away_pulls_the_orb_back_inside(app, tmp_path, monkeypatch):
+    from therion.interface import mini_orb
+    window, _ = make(tmp_path)
+    window.move(2500, 300)
+    monkeypatch.setattr(mini_orb, '_screens', lambda: [QRect(0, 0, 1920, 1040)])
+    window._reclamp()
+    assert window.pos() == QPoint(1920 - 96, 300)
     window.shut()

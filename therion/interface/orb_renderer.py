@@ -78,6 +78,7 @@ class OrbGL(QOpenGLWidget):
         self.reduced = False
         self.ready = False
         self.disabled = False
+        self.min_interval_ms = 0   # a mini orbe pede 33: o piso do intervalo; 0 deixa a orbe grande como está
         self.program = self.aura = self.quad = self.blur = self.composite = self.trail = None
         self._trail_fresh = True
         self.scene_ms = self.scene_fbo = None
@@ -135,7 +136,7 @@ class OrbGL(QOpenGLWidget):
         self.animation.set_visual(state, intensity)
         # Enquanto o modelo usa a placa (pensando/executando), a orbe desenha a 30 quadros/s.
         # Só quando muda: setInterval reinicia o timer, e o painel chama isto a cada 50 ms.
-        interval = frame_interval_ms(state)
+        interval = max(frame_interval_ms(state), self.min_interval_ms)
         if self.timer.interval() != interval:
             self.timer.setInterval(interval)
         if self.reduced and changed:

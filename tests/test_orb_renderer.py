@@ -146,6 +146,17 @@ def test_cadence_follows_state(app):
     w.close()
 
 
+def test_min_interval_caps_the_cadence_and_zero_leaves_the_big_orb_alone(app):
+    from therion.interface.orb_renderer import OrbGL
+    big, mini = OrbGL(), OrbGL()
+    mini.min_interval_ms = 33
+    for orb in (big, mini):
+        orb.set_visual('idle', 0)
+    assert big.timer.interval() == FRAME_INTERVAL_MS and mini.timer.interval() == 33
+    mini.set_visual('thinking', 0)
+    assert mini.timer.interval() == 33
+
+
 @gl
 def test_repeated_state_polls_do_not_restart_the_frame_timer(app):
     # O painel chama set_visual a cada 50 ms; reiniciar o timer derrubava os quadros/s.

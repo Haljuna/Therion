@@ -7,12 +7,13 @@ import json
 import os
 import threading
 
-from PySide6.QtCore import QPoint, QRect, QSize, Qt, QTimer, Signal
+from PySide6.QtCore import QPoint, QRect, QRectF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QCursor, QGuiApplication, QPainter, QRadialGradient, QRegion
 from PySide6.QtWidgets import QFrame, QLabel, QMenu, QProgressBar, QVBoxLayout, QWidget
 
 from therion.core.local_reports import _gb
 
+from .hud_style import hud_layout
 from .orb_renderer import OrbGL
 from .pc_health import full_reading, label_text, quick_reading
 
@@ -115,8 +116,8 @@ def _screens():
     return [screen.availableGeometry() for screen in QGuiApplication.screens()]
 
 
-def _size_text(used, total):
-    return 'indisponível' if used is None or not total else f'{_gb(used)} de {_gb(total)}'
+def _size_text(used, total, missing='indisponível'):
+    return missing if used is None or not total else f'{_gb(used)} de {_gb(total)}'
 
 
 class _Panel(QFrame):
@@ -149,7 +150,9 @@ class _Panel(QFrame):
             self.tops[key] = QLabel('lendo…')
             layout.addWidget(self.tops[key])
 
-    def show_reading(self, reading):
+    def show_reading(self, reading, partial=False):
+        """`partial`: a leitura completa ainda não chegou, então o que falta é 'lendo…', não 'indisponível'."""
+        missing = 'lendo…' if partial else 'indisponível'
         def line(key, text, fraction, amber=False):
             label, name = self.rows[key]
             label.setText(f'{name}  ·  {text}')
@@ -158,21 +161,22 @@ class _Panel(QFrame):
                 self.bars[key].setStyleSheet('QProgressBar::chunk { background: #F2B544; border-radius: 3px; }' if amber else '')
             if key in self.bars:
                 self.bars[key].setValue(round(1000 * min(max(fraction or 0, 0), 1)))
-        line('ram', _size_text(reading.get('ram_used'), reading.get('ram_total')), reading.get('ram'))
+        line('ram', _size_text(reading.get('ram_used'), reading.get('ram_total'), missing), reading.get('ram'))
         temp = reading.get('gpu_temp')
-        vram = _size_text(reading.get('vram_used'), reading.get('vram_total'))
+        vram = _size_text(reading.get('vram_used'), reading.get('vram_total'), missing)
         if temp is not None and reading.get('vram_used') is not None:
             vram += f' · {temp} °C'
         line('vram', vram, reading.get('vram'))
         used, total = reading.get('commit_used'), reading.get('commit_total')
-        line('commit', _size_text(used, total), used / total if total and used is not None else 0)
+        line('commit', _size_text(used, total, missing), used / total if total and used is not None else 0)
         free = reading.get('c_free')
         c_total = reading.get('c_total')
-        line('c', 'indisponível' if free is None else f'{_gb(free)} livres',
+        line('c', missing if free is None else f'{_gb(free)} livres',
              1 - free / c_total if free is not None and c_total else 0, amber=free is not None and free < 5 * 1024 ** 3)
         for key, label in self.tops.items():
-            rows = reading.get(key) or []
-            label.setText('\n'.join(f'{name}  ·  {_gb(size)}' for name, size in rows) or 'indisponível')
+            rows = reading.get(key)
+            label.setText('\n'.join(f'{name}  ·  {_gb(size)}' for name, size in rows or ())
+                          or ('lendo…' if partial and rows is None else 'indisponível'))
         self.adjustSize()
 
 
@@ -185,7 +189,7 @@ class MiniOrb(QWidget):
         _floating(self)
         self.setFixedSize(ORB_PX, ORB_PX)
         self._path, self._readers, self._on_open_main = path, readers, on_open_main
-        self._key_state, self._cursor_pos, self._last_quick = key_state, cursor_pos, None
+        self._key_state, self._cursor_pos, self._last_quick, self._last_full = key_state, cursor_pos, None, None
         self._visual, self._busy, self._pending = 'idle', False, None
         self._thread, self._press, self._dragged = None, None, False
         self._hover = self._quiet = self._game_hidden = self._dismissed = self._shut = False
@@ -198,7 +202,7 @@ class MiniOrb(QWidget):
         self.refresh_timer.setInterval(3000)
         self.refresh_timer.timeout.connect(lambda: self._request('full'))
         self.watch_timer = QTimer(self)   # sem foco não há Esc nem clique fora: olha o teclado e o mouse
-        self.watch_timer.setInterval(100)
+        self.watch_timer.setInterval(30)
         self.watch_timer.timeout.connect(self._watch)
         self.reading_ready.connect(self._deliver)
         self._renderer = renderer_factory() if renderer_factory else None
@@ -211,6 +215,10 @@ class MiniOrb(QWidget):
             if hasattr(self._renderer, 'failed'):
                 self._renderer.failed.connect(self._renderer_failed)
         if self._renderer is not None:
+            self._renderer.min_interval_ms = 33   # 30 quadros/s bastam para 96 px; a orbe fica sempre ligada
+            # Esfera no centro do círculo de 96 px: o HUD põe o centro a 44% da altura do retângulo.
+            # 85 é o maior que cabe, pois o renderizador recorta o retângulo ao widget e o centro depende dele.
+            self._renderer.focus_rect = QRectF(0, ORB_PX / 2 - hud_layout(0, 0, ORB_PX, 85).cy, ORB_PX, 85)
             self._renderer.set_quality('low')
             self._renderer.set_active(True)
             self._renderer.set_visual(self._visual, .5)
@@ -220,21 +228,41 @@ class MiniOrb(QWidget):
             point = default_position(screens, QGuiApplication.primaryScreen().availableGeometry(), self.size())
         if point is not None:
             self.move(clamp(point, self.size(), screens))
+        QGuiApplication.instance().screenRemoved.connect(self._reclamp)
+        QGuiApplication.instance().screenAdded.connect(self._watch_screen)
+        for screen in QGuiApplication.screens():
+            self._watch_screen(screen)
+
+    def _watch_screen(self, screen):
+        screen.availableGeometryChanged.connect(self._reclamp)
+
+    def _reclamp(self, *_):
+        """Monitor tirado ou resolução trocada em plena execução: traz a orbe de volta para a tela."""
+        screens = _screens()
+        if screens and not self._shut:
+            self.move(clamp(self.pos(), self.size(), screens))
 
     # ---- estado visual ----
     def set_state(self, state, tight):
+        if self._shut:
+            return
+        state = {'responding': 'idle', 'success': 'idle', 'cancelled': 'idle'}.get(state, state)   # como dashboard.interaction
         self._visual = 'error' if state == 'idle' and tight else state
         if self._renderer is not None:
             self._renderer.set_visual(self._visual, .5)
         self.update()
 
     def set_quiet(self, quiet):
+        if self._shut:
+            return
         self._quiet = quiet
         if self._renderer is not None:
             self._renderer.reduced = quiet
         self._sync_renderer()
 
     def hide_for_game(self, hidden):
+        if self._shut:
+            return
         self._game_hidden = hidden
         if hidden:
             self._close_panel()
@@ -289,7 +317,9 @@ class MiniOrb(QWidget):
     def mouseReleaseEvent(self, event):
         if event.button() == Qt.LeftButton and self._press is not None:
             self._press = None
-            if not self._dragged:
+            if self._dragged:
+                save(self._path, self.pos())   # o desligamento do Windows não passa por shut()
+            else:
                 if self.panel.isVisible():
                     self._close_panel()
                 else:
@@ -328,7 +358,7 @@ class MiniOrb(QWidget):
 
     def _open_panel(self):
         self.label.hide()
-        self.panel.show_reading({})
+        self.panel.show_reading(self._last_full or self._last_quick or {}, partial=self._last_full is None)
         self._place(self.panel)
         self.panel.show()
         self.refresh_timer.start()
@@ -381,6 +411,7 @@ class MiniOrb(QWidget):
         if self._shut:
             return
         if 'ram_used' in reading:
+            self._last_full = reading
             if self.panel.isVisible():
                 self.panel.show_reading(reading)
                 self._place(self.panel)
@@ -402,6 +433,7 @@ class MiniOrb(QWidget):
         if self._thread is not None:
             self._thread.join(2)
         if self._renderer is not None:
+            self._renderer.disabled = True   # um quadro atrasado não pode religar o timer do GL
             self._renderer.cleanup()
         save(self._path, self.pos())
         self.panel.close()
