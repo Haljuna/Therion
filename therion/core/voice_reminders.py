@@ -264,13 +264,18 @@ class ReminderStore:
         self._lock = threading.Lock()
         self.broken_notice = None
         self._items = []
+        self._loaded = False  # enquanto a leitura não deu certo, nada grava (senão sobrescreve o arquivo)
         self.reload()
 
     def reload(self):
         with self._lock:
-            items = self._read()
-            if items is not None:
-                self._items = items
+            self._load()
+
+    def _load(self):
+        items = self._read()
+        if items is not None:
+            self._items, self._loaded = items, True
+        return self._loaded
 
     def _read(self):
         """Lista lida; [] se não há arquivo; None se a leitura falhou agora (tenta de novo no próximo reload)."""
@@ -316,6 +321,8 @@ class ReminderStore:
 
     def add(self, text, due, repeat, now):
         with self._lock:
+            if not (self._loaded or self._load()):
+                raise OSError('Não consegui ler os lembretes agora.')
             if len(self._items) >= MAX_ITEMS:
                 raise ValueError(f'Você já tem {MAX_ITEMS} lembretes; cancele algum antes.')
             taken = {item.id for item in self._items}
@@ -330,6 +337,8 @@ class ReminderStore:
     def remove(self, ids):
         ids = set(ids)
         with self._lock:
+            if not (self._loaded or self._load()):
+                raise OSError('Não consegui ler os lembretes agora.')
             gone = [item for item in self._items if item.id in ids]
             if gone:
                 items = [item for item in self._items if item.id not in ids]
@@ -341,6 +350,8 @@ class ReminderStore:
         """(na hora, atrasados, quantos passaram de 7 dias). Os que repetem contam uma vez, na ocorrência mais recente."""
         on_time, late, old = [], [], 0
         with self._lock:
+            if not (self._loaded or self._load()):
+                return [], [], 0
             keep = []
             for item in self._items:
                 if item.due > now:

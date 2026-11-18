@@ -297,3 +297,25 @@ def test_take_due_late_sorted(tmp_path):
     store.add('cedo', datetime(2026, 11, 18, 8, 0), EVERY_DAY, NOW)
     late = store.take_due(datetime(2026, 11, 18, 12, 0))[1]
     assert [r.text for r in late] == ['cedo', 'tarde']
+
+
+def test_failed_first_read_never_overwrites_file(tmp_path, monkeypatch):
+    old = _store(tmp_path).add('antigo', NOW + timedelta(hours=1), None, NOW)
+    path = tmp_path / 'lembretes.json'
+    before = path.read_text(encoding='utf-8')
+    real = Path.read_bytes
+
+    def locked(self):
+        raise PermissionError('em uso')
+    monkeypatch.setattr(Path, 'read_bytes', locked)
+    store = ReminderStore(path)
+    with pytest.raises(OSError):
+        store.add('novo', NOW + timedelta(hours=2), None, NOW)
+    with pytest.raises(OSError):
+        store.remove([old.id])
+    assert store.take_due(NOW + timedelta(days=1)) == ([], [], 0)
+    assert path.read_text(encoding='utf-8') == before
+    monkeypatch.setattr(Path, 'read_bytes', real)
+    new = store.add('novo', NOW + timedelta(hours=2), None, NOW)
+    assert [r.id for r in store.items()] == [old.id, new.id]
+    assert [r.id for r in _store(tmp_path).items()] == [old.id, new.id]
