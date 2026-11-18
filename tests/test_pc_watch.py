@@ -56,18 +56,17 @@ def test_a_hot_video_card_needs_two_readings_and_no_nvidia_is_fine():
     assert PcWatch().check(pc(), None) == []
 
 
-def test_gpu_temperature_reads_nvidia_smi_and_gives_up_quietly(monkeypatch):
-    answer = lambda code, out: (lambda *a, **k: subprocess.CompletedProcess(a, code, out, ''))
-    monkeypatch.setattr(pc_watch.subprocess, 'run', answer(0, '41\n'))
+def test_the_watch_reads_the_driver_and_the_windows_counters_without_opening_programs(monkeypatch):
+    from therion.interface import pc_health
+    monkeypatch.setattr(pc_health, 'gpu_memory', lambda: (GB, 8 * GB, 41))
     assert pc_watch.gpu_temperature() == 41
-    monkeypatch.setattr(pc_watch.subprocess, 'run', answer(1, ''))
+    monkeypatch.setattr(pc_health, 'gpu_memory', lambda: None)
     assert pc_watch.gpu_temperature() is None
-    monkeypatch.setattr(pc_watch.subprocess, 'run', answer(0, '[N/A]\n'))
-    assert pc_watch.gpu_temperature() is None
-    def missing(*a, **k):
-        raise FileNotFoundError('nvidia-smi')
-    monkeypatch.setattr(pc_watch.subprocess, 'run', missing)
-    assert pc_watch.gpu_temperature() is None
+    def no_programs(*a, **k):
+        raise AssertionError('o vigia não abre tasklist nem nvidia-smi')
+    monkeypatch.setattr(subprocess, 'run', no_programs)
+    monkeypatch.setattr(pc_health, '_read_counters', lambda: {'pid': [('svchost', 7)], 'ram': [('svchost', GB)]})
+    assert pc_watch._measure()['processes'] == {7: ('svchost', GB)}
 
 
 def quiet_disk(monkeypatch, sizes=None, spare=0):

@@ -13,7 +13,8 @@ from collections import deque
 from datetime import datetime, timedelta
 
 from therion.core import pc_cleanup
-from therion.core.local_reports import _GB, _gb, _measure
+from therion.core.local_reports import _GB, _gb
+from therion.interface import pc_health
 
 HOT, COOL = 85, 80        # °C da placa de vídeo
 HOUR = 3600
@@ -21,16 +22,15 @@ LEAK_GROWTH = _GB          # cresceu isso em ~1 h subindo quase sempre: vazament
 _DISK_KEYS = {'disk', 'disk_critical', 'forecast'}
 
 
+def _measure():
+    """Memória, discos e processos pelos contadores do Windows (~5 ms; o tasklist levava ~400 ms)."""
+    return pc_health.measure_live()
+
+
 def gpu_temperature():
-    """Temperatura da placa NVIDIA em °C, ou None sem nvidia-smi ou com leitura estranha."""
-    try:
-        done = subprocess.run(['nvidia-smi', '--query-gpu=temperature.gpu', '--format=csv,noheader'], capture_output=True,
-                              text=True, errors='replace', timeout=5, stdin=subprocess.DEVNULL,
-                              creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
-    except (OSError, subprocess.TimeoutExpired):
-        return None
-    first = (done.stdout or '').strip().split('\n')[0].strip() if done.returncode == 0 else ''
-    return int(first) if first.isdigit() else None
+    """Temperatura da placa NVIDIA em °C pelo driver, ou None sem placa."""
+    gpu = pc_health.gpu_memory()
+    return gpu[2] if gpu else None
 
 
 def service_of(pid):

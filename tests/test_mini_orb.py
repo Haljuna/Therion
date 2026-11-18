@@ -72,11 +72,7 @@ class FakeRenderer:
 
 
 def make(tmp_path, **kwargs):
-    calls = {'quick': 0, 'full': 0}
-
-    def quick():
-        calls['quick'] += 1
-        return QUICK
+    calls = {'full': 0}
 
     def full():
         calls['full'] += 1
@@ -84,7 +80,7 @@ def make(tmp_path, **kwargs):
 
     kwargs.setdefault('renderer_factory', None)
     kwargs.setdefault('key_state', lambda vk: False)
-    return MiniOrb(path=str(tmp_path / 'pos.json'), readers=(quick, full), **kwargs), calls
+    return MiniOrb(path=str(tmp_path / 'pos.json'), reader=full, **kwargs), calls
 
 
 def wait_for(app, condition, seconds=3):
@@ -113,21 +109,19 @@ def test_click_opens_and_closes_the_panel_but_a_drag_only_moves(app, tmp_path):
     window.shut()
 
 
-def test_hover_shows_the_label_with_the_quick_numbers(app, tmp_path):
-    window, _ = make(tmp_path)
+def test_hovering_shows_and_reads_nothing(app, tmp_path):
+    window, calls = make(tmp_path)
     window.show()
     QApplication.sendEvent(window, QEvent(QEvent.Enter))
-    assert wait_for(app, window.label.isVisible)
-    assert window.label.text() == 'RAM 62% · VRAM 18% · C 2,5 GB'
-    QApplication.sendEvent(window, QEvent(QEvent.Leave))
-    assert not window.label.isVisible()
+    QTest.qWait(50)
+    assert calls['full'] == 0 and not window.panel.isVisible() and not hasattr(window, 'label')
     window.shut()
 
 
-def test_panel_refreshes_every_three_seconds_only_while_open(app, tmp_path):
+def test_panel_refreshes_every_second_only_while_open(app, tmp_path):
     window, calls = make(tmp_path)
     window.show()
-    assert window.refresh_timer.interval() == 3000
+    assert window.refresh_timer.interval() == 1000
     assert not window.refresh_timer.isActive()
     QTest.mouseClick(window, Qt.LeftButton, Qt.NoModifier, QPoint(48, 48))
     assert window.refresh_timer.isActive()
@@ -193,7 +187,7 @@ def test_a_click_outside_closes_the_panel_but_inside_does_not(app, tmp_path):
     window.shut()
 
 
-def test_a_four_pixel_move_is_still_a_click_and_hover_shows_the_last_value_at_once(app, tmp_path):
+def test_a_four_pixel_move_is_still_a_click(app, tmp_path):
     window, _ = make(tmp_path)
     window.show()
     before = window.pos()
@@ -201,10 +195,21 @@ def test_a_four_pixel_move_is_still_a_click_and_hover_shows_the_last_value_at_on
     QTest.mouseMove(window, QPoint(52, 48))
     QTest.mouseRelease(window, Qt.LeftButton, Qt.NoModifier, QPoint(52, 48))
     assert window.pos() == before and window.panel.isVisible()
+    window.shut()
+
+
+def test_a_slow_reading_never_stacks_and_stops_once_the_panel_closes(app, tmp_path):
+    window, calls = make(tmp_path)
+    window.show()
     QTest.mouseClick(window, Qt.LeftButton, Qt.NoModifier, QPoint(48, 48))
-    window._last_quick = QUICK
-    QApplication.sendEvent(window, QEvent(QEvent.Enter))
-    assert window.label.isVisible() and window.label.text() == 'RAM 62% · VRAM 18% · C 2,5 GB'
+    window._busy = True                      # leitura ainda em andamento quando o próximo segundo chega
+    window._request(); window._request()
+    assert window._pending is True and calls['full'] <= 1
+    QTest.mouseClick(window, Qt.LeftButton, Qt.NoModifier, QPoint(48, 48))
+    before = calls['full']
+    window._deliver(FULL)                    # chega depois de fechar: não pede outra
+    QTest.qWait(50)
+    assert calls['full'] == before and window._pending is False
     window.shut()
 
 

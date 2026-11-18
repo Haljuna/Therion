@@ -21,9 +21,8 @@ win = QMainWindow()
 win.setCentralWidget(Constellation())
 win.resize(500, 400)
 win.show()
-quick = lambda: {"ram": 40.0}
 full = lambda: {"ram": 40.0, "ram_used": 1, "ram_total": 2}
-mini = MiniOrb(path=sys.argv[1], readers=(quick, full))
+mini = MiniOrb(path=sys.argv[1], reader=full)
 mini.show()
 
 def finish():

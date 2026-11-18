@@ -15,7 +15,7 @@ from therion.core.local_reports import _gb
 
 from .hud_style import hud_layout
 from .orb_renderer import OrbGL
-from .pc_health import full_reading, label_text, quick_reading
+from .pc_health import full_reading
 
 
 def default_position(screens: list[QRect], primary: QRect, size: QSize, margin=24) -> QPoint:
@@ -183,24 +183,20 @@ class _Panel(QFrame):
 class MiniOrb(QWidget):
     reading_ready = Signal(dict)
 
-    def __init__(self, *, path, renderer_factory=OrbGL, readers=(quick_reading, full_reading), on_open_main=None,
+    def __init__(self, *, path, renderer_factory=OrbGL, reader=full_reading, on_open_main=None,
                  key_state=_key_down, cursor_pos=QCursor.pos):
         super().__init__()
         _floating(self)
         self.setFixedSize(ORB_PX, ORB_PX)
-        self._path, self._readers, self._on_open_main = path, readers, on_open_main
-        self._key_state, self._cursor_pos, self._last_quick, self._last_full = key_state, cursor_pos, None, None
-        self._visual, self._busy, self._pending = 'idle', False, None
+        self._path, self._reader, self._on_open_main = path, reader, on_open_main
+        self._key_state, self._cursor_pos, self._last_full = key_state, cursor_pos, None
+        self._visual, self._busy, self._pending = 'idle', False, False
         self._thread, self._press, self._dragged = None, None, False
-        self._hover = self._quiet = self._game_hidden = self._dismissed = self._shut = False
-        self.label = QLabel()
-        _floating(self.label)
-        self.label.setAttribute(Qt.WA_TransparentForMouseEvents)
-        self.label.setStyleSheet(GLASS + ' font-size: 11px; padding: 6px 10px;')
+        self._quiet = self._game_hidden = self._dismissed = self._shut = False
         self.panel = _Panel()
-        self.refresh_timer = QTimer(self)
-        self.refresh_timer.setInterval(3000)
-        self.refresh_timer.timeout.connect(lambda: self._request('full'))
+        self.refresh_timer = QTimer(self)   # tempo real: a leitura dos contadores do Windows custa ~5 ms
+        self.refresh_timer.setInterval(1000)
+        self.refresh_timer.timeout.connect(self._request)
         self.watch_timer = QTimer(self)   # sem foco não há Esc nem clique fora: olha o teclado e o mouse
         self.watch_timer.setInterval(30)
         self.watch_timer.timeout.connect(self._watch)
@@ -270,7 +266,6 @@ class MiniOrb(QWidget):
         self._game_hidden = hidden
         if hidden:
             self._close_panel()
-            self.label.hide()
             self.hide()
         elif not self._dismissed and not self._shut:
             self.show()
@@ -315,7 +310,6 @@ class MiniOrb(QWidget):
         if not self._dragged:
             self._dragged = True
             self._close_panel()
-            self.label.hide()
         self.move(clamp(target, self.size(), _screens()))
 
     def mouseReleaseEvent(self, event):
@@ -338,21 +332,10 @@ class MiniOrb(QWidget):
     def _dismiss(self):
         self._dismissed = True
         self._close_panel()
-        self.label.hide()
         self.hide()
         self._sync_renderer()
 
-    def enterEvent(self, event):
-        self._hover = True
-        if not self.panel.isVisible():
-            self._show_label(self._last_quick)
-            self._request('quick')
-
-    def leaveEvent(self, event):
-        self._hover = False
-        self.label.hide()
-
-    # ---- etiqueta e painel ----
+    # ---- painel ----
     def _place(self, widget):
         widget.adjustSize()
         center = self.frameGeometry().center()
@@ -361,13 +344,12 @@ class MiniOrb(QWidget):
         widget.move(beside(self.frameGeometry(), widget.size(), screen))
 
     def _open_panel(self):
-        self.label.hide()
-        self.panel.show_reading(self._last_full or self._last_quick or {}, partial=self._last_full is None)
+        self.panel.show_reading(self._last_full or {}, partial=self._last_full is None)
         self._place(self.panel)
         self.panel.show()
         self.refresh_timer.start()
         self.watch_timer.start()
-        self._request('full')
+        self._request()
 
     def _close_panel(self):
         self.refresh_timer.stop()
@@ -382,27 +364,20 @@ class MiniOrb(QWidget):
             if not (self.frameGeometry().contains(point) or self.panel.frameGeometry().contains(point)):
                 self._close_panel()
 
-    def _show_label(self, reading):
-        if reading is not None and not self.panel.isVisible():
-            self.label.setText(label_text(reading))
-            self._place(self.label)
-            self.label.show()
-
     # ---- leituras fora da thread da janela ----
-    def _request(self, kind):
+    def _request(self):
         if self._shut:
             return
         if self._busy:
-            self._pending = kind
+            self._pending = True
             return
-        self._busy, self._pending = True, None
-        reader = self._readers[1 if kind == 'full' else 0]
-        self._thread = threading.Thread(target=self._work, args=(reader,), daemon=True)
+        self._busy, self._pending = True, False
+        self._thread = threading.Thread(target=self._work, daemon=True)
         self._thread.start()
 
-    def _work(self, reader):
+    def _work(self):
         try:
-            reading = reader()
+            reading = self._reader()
         except Exception:
             reading = {}
         try:
@@ -419,13 +394,9 @@ class MiniOrb(QWidget):
             if self.panel.isVisible():
                 self.panel.show_reading(reading)
                 self._place(self.panel)
-        elif reading.get('ram') is not None:
-            self._last_quick = reading
-            if self._hover:
-                self._show_label(reading)
-        pending, self._pending = self._pending, None
-        if pending:
-            self._request(pending)
+        pending, self._pending = self._pending, False
+        if pending and self.panel.isVisible():
+            self._request()
 
     # ---- encerramento ----
     def shut(self):
@@ -441,5 +412,4 @@ class MiniOrb(QWidget):
             self._renderer.cleanup()
         save(self._path, self.pos())
         self.panel.close()
-        self.label.close()
         self.close()
