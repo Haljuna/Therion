@@ -34,7 +34,7 @@ _PHRASE = (rf'{_N}(?:h\d{{2}}|:\d{{2}}|h|\s+horas?)?(?:\s+(?:e\s+)?(?:{_N}|meia)
            r'(?:\s+(?:da|de)\s+(?:manha|tarde|noite|madrugada))?')
 _DAY = r'depois\s+de\s+amanha|amanha|hoje|(?:proxim[ao]\s+)?' + rf'(?:{"|".join(_WEEKDAYS)})(?:-feira)?(?:\s+que\s+vem)?|dia\s+\d{{1,2}}'
 _CLOCK = re.compile(
-    rf'(?<!\w)(?:(?P<day>{_DAY})\s+)?(?:as|ao|a)\s+(?:(?P<noon>meio[\s-]?dia)|(?P<mid>meia[\s-]?noite)|(?P<t>{_PHRASE}))(?!\w|:)')
+    rf'(?<!\w)(?:(?P<day>{_DAY})\s+)?(?:(?:as|ao)\s+|a\s+(?=meia[\s-]?noite|\d{{1,2}}(?:h|:\d|\s+da\s)|(?:uma|duas)\s+(?:horas?|da\s)))(?:(?P<noon>meio[\s-]?dia)|(?P<mid>meia[\s-]?noite)|(?P<t>{_PHRASE}))(?!\w|:)')
 _DAY_ONLY = re.compile(rf'(?<!\w)(?P<day>{_DAY})(?!\w|/)')
 _PERIOD = re.compile(r'\s(?:da|de)\s+(?:manha|tarde|noite|madrugada)$')
 
@@ -53,6 +53,7 @@ class Parsed:
     repeat: Repeat | None = None
     hour: int | None = None
     question: str | None = None
+    day: date | None = None  # dia dito sem hora (need_when)
 
 
 def _fold(text):
@@ -106,13 +107,14 @@ def _day_date(token, hour_minute, now):
 
 def _resolve_due(day, hour, minute, ambiguous, now):
     if day:
-        found, weekday = _day_date(day, (hour, minute), now)
-        due = datetime(found.year, found.month, found.day, hour, minute, tzinfo=now.tzinfo)
-        if due <= now and weekday:
-            due += timedelta(days=7)
-        if due <= now:
-            raise CalendarError('Esse horário já passou. Informe outra data ou horário.')
-        return due
+        hours = [hour, hour + 12] if ambiguous else [hour]
+        found, weekday = _day_date(day, (hours[-1], minute), now)
+        for extra in ((0, 7) if weekday else (0,)):
+            for h in hours:
+                due = datetime(found.year, found.month, found.day, h, minute, tzinfo=now.tzinfo) + timedelta(days=extra)
+                if due > now:
+                    return due
+        raise CalendarError('Esse horário já passou. Informe outra data ou horário.')
     hours = [hour, hour + 12] if ambiguous else [hour]
     for offset in (0, 1):
         for h in hours:
@@ -184,7 +186,13 @@ def parse_reminder(command, now):
         return Parsed('invalid', question='O lembrete pode ter até 200 caracteres.')
     repeat = Repeat(days, '') if days else None
     if not when or (days and not clock):
-        return Parsed('need_when', text, repeat=repeat)
+        found = None
+        if day and not clock:
+            try:
+                found = _day_date(day, (23, 59), now)[0]
+            except CalendarError as err:
+                return Parsed('invalid', question=str(err))
+        return Parsed('need_when', text, repeat=repeat, day=found)
     hour = minute = None
     ambiguous = False
     if clock:

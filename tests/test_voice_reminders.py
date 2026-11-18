@@ -1,5 +1,5 @@
 """Frases de lembrete: entende quando e o quê, sem Qt e com relógio injetado."""
-from datetime import datetime
+from datetime import date, datetime
 
 import pytest
 
@@ -22,6 +22,9 @@ WEEK = (0, 1, 2, 3, 4)
     ('me lembra às 6 de ligar', NOW, 'ligar', datetime(2026, 11, 18, 18, 0)),
     ('me lembra às 6 de ligar', datetime(2026, 11, 18, 23, 50), 'ligar', datetime(2026, 11, 19, 6, 0)),
     ('me lembra às 6 da manhã de ligar', NOW, 'ligar', datetime(2026, 11, 19, 6, 0)),
+    ('me lembra hoje às 6 de ligar', NOW, 'ligar', datetime(2026, 11, 18, 18, 0)),
+    ('me lembra amanhã às 6 de ligar', NOW, 'ligar', datetime(2026, 11, 19, 6, 0)),
+    ('me lembra à 1 da tarde de ligar', NOW, 'ligar', datetime(2026, 11, 19, 13, 0)),
     ('me lembra às 13 de ligar', NOW, 'ligar', datetime(2026, 11, 19, 13, 0)),
     ('me lembra ao meio-dia de almoçar', NOW, 'almoçar', datetime(2026, 11, 19, 12, 0)),
     ('me lembra à meia-noite de dormir', NOW, 'dormir', datetime(2026, 11, 19, 0, 0)),
@@ -42,6 +45,10 @@ def test_parses(phrase, now, text, due):
 def test_missing_when_or_what():
     assert parse_reminder('me lembra de pagar o boleto', NOW).kind == 'need_when'
     assert parse_reminder('me lembra amanhã de pagar o boleto', NOW).kind == 'need_when'
+    for phrase in ('me lembra de ligar a uma amiga', 'me lembra de dar comida a 2 gatos'):
+        assert parse_reminder(phrase, NOW).kind == 'need_when'
+    day = parse_reminder('me lembra amanhã de levar o carregador', NOW)
+    assert (day.kind, day.text, day.day) == ('need_when', 'levar o carregador', date(2026, 11, 19))
     what = parse_reminder('me lembra em 10 minutos', NOW)
     assert (what.kind, what.text, what.due) == ('need_what', None, datetime(2026, 11, 18, 14, 10))
 
