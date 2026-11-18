@@ -1084,6 +1084,8 @@ class MainWindow(QMainWindow):
             self._mini_orb.set_quiet(full_screen or self._game_forced)
             rect = reminders.fullscreen_screen()
             self._mini_orb.hide_for_game(rect is not None and rect.intersects(self._mini_orb.frameGeometry()))
+            # a cada tick: o problema pode passar sem aviso nenhum, e o âmbar tem de sumir
+            self._mini_orb.set_state(self._orbe_state, self._pc_watch is not None and self._pc_watch.tight())
         if self._game_mode:
             self._poll_game_mode(full_screen)
         if self._pc_watch is not None:

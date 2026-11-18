@@ -106,7 +106,7 @@ class PcWatch:
 
     def tight(self):
         """True se há problema do PC em aberto; vazamento já avisado não deixa a mini orbe âmbar."""
-        return any(not key.startswith('leak:') for key in self._active)
+        return any(not key.startswith('leak:') for key in tuple(self._active))   # o vigia muda o conjunto numa thread
 
     # --- jogo -------------------------------------------------------------------------------------------------
     def game(self, on):

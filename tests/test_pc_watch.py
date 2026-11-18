@@ -355,11 +355,11 @@ def test_a_fullscreen_game_on_the_same_monitor_hides_the_mini_orb(app, tmp_path,
     assert ('hide', True) in mini.calls and ('quiet', True) in mini.calls
     monkeypatch.setattr(reminders, 'fullscreen_screen', lambda: QRect(0, 0, 10, 10))
     window._poll_reminders()
-    assert mini.calls[-1] == ('hide', False)
+    assert ('hide', False) in mini.calls[-2:]
     monkeypatch.setattr(reminders, 'do_not_disturb', lambda: False)
     monkeypatch.setattr(reminders, 'fullscreen_screen', lambda: None)
     window._poll_reminders()
-    assert mini.calls[-2:] == [('quiet', False), ('hide', False)]
+    assert [call for call in mini.calls[-3:] if call[0] != 'state'] == [('quiet', False), ('hide', False)]
     window._mini_orb = None
     close(app, window)
 
@@ -372,5 +372,20 @@ def test_quitting_closes_the_mini_orb_first(app, tmp_path, monkeypatch):
     mini.shut = lambda: order.append('shut')
     window._quit_application()
     assert order == ['shut', 'quit']
+    window._mini_orb = None
+    close(app, window)
+
+
+def test_amber_clears_on_the_next_tick_when_the_problem_passes_quietly(app, tmp_path, monkeypatch):
+    window = make_mini_window(tmp_path, monkeypatch)
+    mini = window._mini_orb
+    monkeypatch.setattr(reminders, 'do_not_disturb', lambda: False)
+    monkeypatch.setattr(reminders, 'fullscreen_screen', lambda: None)
+    window._pc_watch._active = {'disk'}
+    window._update_orbe('idle')
+    assert mini.calls[-1] == ('state', 'idle', True)
+    window._pc_watch._active = set()
+    window._poll_reminders()
+    assert ('state', 'idle', False) in mini.calls[-4:]
     window._mini_orb = None
     close(app, window)
