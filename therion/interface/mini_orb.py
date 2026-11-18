@@ -215,13 +215,12 @@ class MiniOrb(QWidget):
             if hasattr(self._renderer, 'failed'):
                 self._renderer.failed.connect(self._renderer_failed)
         if self._renderer is not None:
-            self._renderer.min_interval_ms = 33   # 30 quadros/s bastam para 96 px; a orbe fica sempre ligada
             # Esfera no centro do círculo de 96 px: o HUD põe o centro a 44% da altura do retângulo.
             # 85 é o maior que cabe, pois o renderizador recorta o retângulo ao widget e o centro depende dele.
             self._renderer.focus_rect = QRectF(0, ORB_PX / 2 - hud_layout(0, 0, ORB_PX, 85).cy, ORB_PX, 85)
             self._renderer.set_quality('low')
             self._renderer.set_active(True)
-            self._renderer.set_visual(self._visual, .5)
+            self._show_visual()
         screens = _screens()
         point = restore(path, screens, self.size())
         if point is None and screens:
@@ -249,8 +248,13 @@ class MiniOrb(QWidget):
         state = {'responding': 'idle', 'success': 'idle', 'cancelled': 'idle'}.get(state, state)   # como dashboard.interaction
         self._visual = 'error' if state == 'idle' and tight else state
         if self._renderer is not None:
-            self._renderer.set_visual(self._visual, .5)
+            self._show_visual()
         self.update()
+
+    def _show_visual(self):
+        # Parada (repouso ou âmbar) ela só respira devagar: 10 quadros/s; ativa, 30. A orbe fica sempre ligada.
+        self._renderer.min_interval_ms = 100 if self._visual in ('idle', 'error') else 33
+        self._renderer.set_visual(self._visual, .5)
 
     def set_quiet(self, quiet):
         if self._shut:

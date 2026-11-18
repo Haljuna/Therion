@@ -298,7 +298,11 @@ def test_the_mini_orb_renders_at_most_30_fps_and_centres_the_sphere(app, tmp_pat
     from therion.interface.hud_style import hud_layout
     fake = FakeRenderer()
     window, _ = make(tmp_path, renderer_factory=lambda: fake)
-    assert fake.min_interval_ms == 33
+    assert fake.min_interval_ms == 100              # em repouso, 10 quadros/s
+    window.set_state('speaking', False)
+    assert fake.min_interval_ms == 33               # ouvindo, pensando, falando: 30 quadros/s
+    window.set_state('idle', True)
+    assert fake.min_interval_ms == 100              # âmbar também é parado
     focus = fake.focus_rect
     assert focus.bottom() <= 96 and focus.top() >= 0
     assert abs(hud_layout(focus.x(), focus.y(), focus.width(), focus.height()).cy - 48) < .5
