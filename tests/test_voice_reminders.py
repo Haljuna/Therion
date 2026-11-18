@@ -110,6 +110,8 @@ def test_next_due():
 
 # --- depósito -------------------------------------------------------------------------------------------------
 import json  # noqa: E402
+import os  # noqa: E402
+from pathlib import Path  # noqa: E402
 from datetime import timedelta  # noqa: E402
 
 from therion.core.voice_reminders import Reminder, ReminderStore, due_message, late_message  # noqa: E402
@@ -229,3 +231,69 @@ def test_messages():
     four = [_r(f'item {n}', datetime(2026, 11, 18, 18, n)) for n in range(4)]
     assert late_message(four, 0) == 'Passaram 4 lembretes enquanto eu estava fechado: item 0, item 1, item 2 e mais 1.'
     assert late_message([one], 2) == ('Enquanto eu estava fechado, passou da hora de: tirar a roupa da máquina (18:00) e mais 2 antigos.')
+
+
+def test_invalid_utf8_is_quarantined(tmp_path):
+    path = tmp_path / 'lembretes.json'
+    path.write_bytes(bytes([0xff, 0xfe, 0x7b]))
+    store = ReminderStore(path)
+    assert store.items() == [] and store.broken_notice
+    assert len(list(tmp_path.glob('lembretes.json.bad-*'))) == 1
+
+
+def test_transient_read_error_does_not_quarantine(tmp_path, monkeypatch):
+    first = _store(tmp_path)
+    kept = first.add('a', NOW + timedelta(hours=1), None, NOW)
+    real = Path.read_bytes
+
+    def locked(self):
+        raise PermissionError('em uso')
+    monkeypatch.setattr(Path, 'read_bytes', locked)
+    store = ReminderStore(tmp_path / 'lembretes.json')
+    assert store.items() == [] and store.broken_notice is None
+    assert not list(tmp_path.glob('lembretes.json.bad-*'))
+    monkeypatch.setattr(Path, 'read_bytes', real)
+    store.reload()
+    assert store.items() == [kept]
+
+
+def _failing_replace(monkeypatch):
+    def boom(*args):
+        raise OSError('disco cheio')
+    monkeypatch.setattr(os, 'replace', boom)
+
+
+def test_add_and_remove_keep_memory_when_write_fails(tmp_path, monkeypatch):
+    store = _store(tmp_path)
+    kept = store.add('a', NOW + timedelta(hours=1), None, NOW)
+    _failing_replace(monkeypatch)
+    with pytest.raises(OSError):
+        store.add('b', NOW + timedelta(hours=2), None, NOW)
+    with pytest.raises(OSError):
+        store.remove([kept.id])
+    assert store.items() == [kept]
+    assert not list(tmp_path.glob('*.tmp'))
+
+
+def test_take_due_speaks_even_when_write_fails(tmp_path, monkeypatch):
+    store = _store(tmp_path)
+    once = store.add('a', datetime(2026, 11, 18, 18, 0), None, NOW)
+    _failing_replace(monkeypatch)
+    assert store.take_due(datetime(2026, 11, 18, 18, 0, 5)) == ([once], [], 0)
+    assert store.take_due(datetime(2026, 11, 18, 18, 0, 10)) == ([], [], 0)
+
+
+def test_late_sorted_and_plural_forms():
+    a = _r('a', datetime(2026, 11, 18, 9, 0))
+    b = _r('b', datetime(2026, 11, 18, 8, 0))
+    assert late_message([a], 1) == 'Enquanto eu estava fechado, passou da hora de: a (09:00) e mais 1 antigo.'
+    assert late_message([], 1) == 'Passou 1 lembrete antigo enquanto eu estava fechado.'
+    assert late_message([], 3) == 'Passaram 3 lembretes antigos enquanto eu estava fechado.'
+
+
+def test_take_due_late_sorted(tmp_path):
+    store = _store(tmp_path)
+    store.add('tarde', datetime(2026, 11, 18, 9, 0), None, NOW)
+    store.add('cedo', datetime(2026, 11, 18, 8, 0), EVERY_DAY, NOW)
+    late = store.take_due(datetime(2026, 11, 18, 12, 0))[1]
+    assert [r.text for r in late] == ['cedo', 'tarde']

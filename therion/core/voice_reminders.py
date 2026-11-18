@@ -268,17 +268,20 @@ class ReminderStore:
 
     def reload(self):
         with self._lock:
-            self._items = self._read()
+            items = self._read()
+            if items is not None:
+                self._items = items
 
     def _read(self):
+        """Lista lida; [] se não há arquivo; None se a leitura falhou agora (tenta de novo no próximo reload)."""
         try:
-            raw = self._path.read_text(encoding='utf-8')
+            raw = self._path.read_bytes()
         except FileNotFoundError:
             return []
         except OSError:
-            return self._quarantine()
+            return None
         try:
-            data = json.loads(raw)
+            data = json.loads(raw.decode('utf-8'))
             if data['version'] != 1:
                 raise ValueError('versão')
             return sorted((_from_json(row) for row in data['items']), key=lambda item: item.due)
@@ -294,12 +297,12 @@ class ReminderStore:
         self.broken_notice = f'Não consegui ler seus lembretes antigos; guardei o arquivo como {kept.name}.'
         return []
 
-    def _write(self):
+    def _write(self, items):
         self._path.parent.mkdir(parents=True, exist_ok=True)
         temporary = self._path.with_name(self._path.name + '.tmp')
         try:
             with open(temporary, 'w', encoding='utf-8') as file:
-                json.dump({'version': 1, 'items': [_to_json(item) for item in self._items]}, file, ensure_ascii=False)
+                json.dump({'version': 1, 'items': [_to_json(item) for item in items]}, file, ensure_ascii=False)
                 file.flush()
                 os.fsync(file.fileno())
             os.replace(temporary, self._path)
@@ -319,8 +322,9 @@ class ReminderStore:
             while (new_id := 'r-' + secrets.token_hex(2)) in taken:
                 pass
             item = Reminder(new_id, text, due, repeat, now)
-            self._items = sorted([*self._items, item], key=lambda x: x.due)
-            self._write()
+            items = sorted([*self._items, item], key=lambda x: x.due)
+            self._write(items)
+            self._items = items
             return item
 
     def remove(self, ids):
@@ -328,8 +332,9 @@ class ReminderStore:
         with self._lock:
             gone = [item for item in self._items if item.id in ids]
             if gone:
-                self._items = [item for item in self._items if item.id not in ids]
-                self._write()
+                items = [item for item in self._items if item.id not in ids]
+                self._write(items)
+                self._items = items
             return gone
 
     def take_due(self, now):
@@ -356,7 +361,11 @@ class ReminderStore:
                     old += 1
             if len(keep) != len(self._items) or on_time or late or old:
                 self._items = sorted(keep, key=lambda x: x.due)
-                self._write()
+                try:
+                    self._write(self._items)
+                except OSError:
+                    pass  # fala mesmo assim; no pior caso repete depois de reiniciar
+        late.sort(key=lambda item: item.due)
         return on_time, late, old
 
     def next_time(self):
@@ -394,9 +403,11 @@ def due_message(reminders):
 
 
 def late_message(late, old):
-    more = f' e mais {old} antigos' if old else ''
+    more = f' e mais {old} antigo{"s" if old != 1 else ""}' if old else ''
     if not late:
-        return f'Passaram {old} lembretes antigos enquanto eu estava fechado.' if old else None
+        if not old:
+            return None
+        return ('Passou 1 lembrete antigo' if old == 1 else f'Passaram {old} lembretes antigos') + ' enquanto eu estava fechado.'
     if len(late) > 3:
         names = ', '.join(r.text for r in late[:3])
         return f'Passaram {len(late)} lembretes enquanto eu estava fechado: {names} e mais {len(late) - 3}{more}.'
