@@ -318,7 +318,10 @@ def make_mini_window(tmp_path, monkeypatch, mini=True, watch=True):
         monkeypatch.setenv(variable, str(folder))
     config = {'ai': {'enabled': False}, 'tts': {'enabled': False}, 'ui': {'mini_orb': mini, 'pc_watch': watch}}
     with patch.object(desktop.MainWindow, '_setup_tray'):
-        return desktop.MainWindow(MagicMock(), config=config, config_writer=MagicMock(), log_dir=tmp_path / 'logs')
+        window = desktop.MainWindow(MagicMock(), config=config, config_writer=MagicMock(), log_dir=tmp_path / 'logs')
+    if window._pc_watch is not None:   # sem isto o 1º ciclo mede o PC de verdade (tasklist, nvidia-smi, pastas)
+        monkeypatch.setattr(window._pc_watch, 'poll', lambda: [])
+    return window
 
 
 def test_window_without_the_setting_has_no_mini_orb(app, tmp_path, monkeypatch):
@@ -387,5 +390,42 @@ def test_amber_clears_on_the_next_tick_when_the_problem_passes_quietly(app, tmp_
     window._pc_watch._active = set()
     window._poll_reminders()
     assert ('state', 'idle', False) in mini.calls[-4:]
+    window._mini_orb = None
+    close(app, window)
+
+
+def test_the_open_main_menu_action_uses_the_same_path_as_the_tray(app, tmp_path, monkeypatch):
+    window = make_mini_window(tmp_path, monkeypatch, watch=False)
+    assert window._mini_orb.kwargs['on_open_main'] == window._show_window
+    window._mini_orb = None
+    close(app, window)
+
+
+def test_speaking_and_push_to_talk_reach_the_mini_orb_through_the_presentation(app, tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from therion.interface.presentation import Presentation
+    window = make_mini_window(tmp_path, monkeypatch, watch=False)
+    mini = window._mini_orb
+    window._dashboard = SimpleNamespace(presentation=Presentation(), interaction=lambda state: None)
+    window._on_speech_state('playing')
+    assert mini.calls[-1][:2] == ('state', 'speaking')
+    window._on_speech_state('idle')
+    assert mini.calls[-1][:2] == ('state', 'idle')
+    window._on_voice_pipeline_state_changed('recording')
+    assert mini.calls[-1][:2] == ('state', 'listening')
+    window._on_voice_pipeline_state_changed('idle')
+    assert mini.calls[-1][:2] == ('state', 'idle')
+    window._dashboard = window._mini_orb = None
+    close(app, window)
+
+
+def test_game_mode_quiets_the_mini_orb_at_once(app, tmp_path, monkeypatch):
+    window = make_mini_window(tmp_path, monkeypatch, watch=False)
+    mini = window._mini_orb
+    monkeypatch.setattr(reminders, 'do_not_disturb', lambda: False)
+    window._set_game_mode(True)
+    assert ('quiet', True) in mini.calls
+    window._set_game_mode(False)
+    assert mini.calls[-1] == ('quiet', False)
     window._mini_orb = None
     close(app, window)

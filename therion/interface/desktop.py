@@ -358,7 +358,7 @@ class MainWindow(QMainWindow):
         self._mini_orb = None
         if (self._config.get('ui') or {}).get('mini_orb') is True:
             self._mini_orb = MiniOrb(path=os.path.join(os.environ.get('LOCALAPPDATA', ''), 'Therion', 'mini_orb.json'),
-                                     on_open_main=self._show_main_window)
+                                     on_open_main=self._show_window)
             self._mini_orb.show()
         if self._reminders is not None or self._game_mode or self._pc_watch is not None or self._mini_orb is not None:
             self._reminder_timer.start()
@@ -1062,6 +1062,9 @@ class MainWindow(QMainWindow):
         """Pedido falado ou digitado ("modo de jogo" / "sair do modo de jogo"); vale até o usuário desligar."""
         self._game_forced = on
         self._game_unloaded = False
+        if self._mini_orb is not None:
+            from therion.interface import reminders
+            self._mini_orb.set_quiet(on or reminders.do_not_disturb())   # sem esperar o tick de 30 s
         if on:
             self._unload_model()
             if not self._reminder_timer.isActive():
@@ -1085,7 +1088,7 @@ class MainWindow(QMainWindow):
             rect = reminders.fullscreen_screen()
             self._mini_orb.hide_for_game(rect is not None and rect.intersects(self._mini_orb.frameGeometry()))
             # a cada tick: o problema pode passar sem aviso nenhum, e o âmbar tem de sumir
-            self._mini_orb.set_state(self._orbe_state, self._pc_watch is not None and self._pc_watch.tight())
+            self._sync_mini_orb()
         if self._game_mode:
             self._poll_game_mode(full_screen)
         if self._pc_watch is not None:
@@ -1797,6 +1800,7 @@ class MainWindow(QMainWindow):
         dashboard = getattr(self, '_dashboard', None)
         if dashboard is not None:
             dashboard.presentation.capture = state
+            self._sync_mini_orb()
         if state == VoicePipeline.STATE_RECORDING:
             self._voice_button.setText("Gravando…")
             if getattr(self, '_conversation_mode', False):
@@ -1876,10 +1880,6 @@ class MainWindow(QMainWindow):
         """
         color, text = _ORBE_STATES.get(state, (_ORBE_IDLE, "Pronto"))
         self._orbe_state = state
-        mini = getattr(self, '_mini_orb', None)
-        if mini is not None:
-            watch = getattr(self, '_pc_watch', None)
-            mini.set_state(state, watch is not None and watch.tight())
         if hasattr(self, "_orbe"):
             self._orbe.setStyleSheet(
                 f"background-color: {color}; border-radius: 28px;"
@@ -1889,6 +1889,17 @@ class MainWindow(QMainWindow):
         dashboard = getattr(self, '_dashboard', None)
         if dashboard is not None:
             dashboard.interaction(state)
+        self._sync_mini_orb()
+
+    def _sync_mini_orb(self) -> None:
+        """A mini orbe mostra o mesmo estado da orbe grande (Presentation: fala e captura incluídas)."""
+        mini = getattr(self, '_mini_orb', None)
+        if mini is None:
+            return
+        dashboard = getattr(self, '_dashboard', None)
+        state = dashboard.presentation.state if dashboard is not None else self._orbe_state
+        watch = getattr(self, '_pc_watch', None)
+        mini.set_state(state, watch is not None and watch.tight())
 
     def _shutdown_voice(self):
         for service in (getattr(self,'_voice_pipeline',None),getattr(self,'_voice_service',None),getattr(self,'_speech_output',None)):
@@ -1945,11 +1956,6 @@ class MainWindow(QMainWindow):
             self._tray_icon.hide()
         self._shut_mini_orb()
         self._app.quit()
-
-    def _show_main_window(self):
-        self.showNormal()
-        self.raise_()
-        self.activateWindow()
 
     def _shut_mini_orb(self):
         if self._mini_orb is not None:
@@ -2023,6 +2029,7 @@ class MainWindow(QMainWindow):
         dashboard = getattr(self, '_dashboard', None)
         if dashboard is not None:
             dashboard.presentation.speech = state
+            self._sync_mini_orb()
         cycle = getattr(getattr(self, '_voice_pipeline', None), 'cycle', None)
         if isinstance(cycle, VoiceCycle):
             cycle.playback(state in {'warming','synthesizing','playing'})

@@ -12,8 +12,10 @@ import sys
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication, QMainWindow
 from therion.interface.constellation import Constellation
+from therion.interface.graphics import prepare_graphics
 from therion.interface.mini_orb import MiniOrb
 
+prepare_graphics()   # como o app: antes da QApplication
 app = QApplication([])
 win = QMainWindow()
 win.setCentralWidget(Constellation())
@@ -25,12 +27,16 @@ mini = MiniOrb(path=sys.argv[1], readers=(quick, full))
 mini.show()
 
 def finish():
+    renderer = mini._renderer
+    print('renderer', type(renderer).__name__, getattr(renderer, 'ready', None), flush=True)
     mini.shut()
     win.close()
     app.quit()
 
 QTimer.singleShot(1000, finish)
-sys.exit(app.exec())
+code = app.exec()
+print('finished', flush=True)
+sys.exit(code)
 '''
 
 
@@ -42,3 +48,5 @@ def test_closing_with_mini_orb_open_exits_cleanly(rodada):
         run = subprocess.run([sys.executable, '-c', SCRIPT, str(Path(tmp) / 'pos.json')],
                              cwd=root, capture_output=True, text=True, timeout=60)
     assert run.returncode == 0, f'codigo {run.returncode}: {run.stderr[-500:]}'
+    assert 'renderer OrbGL True' in run.stdout, run.stdout + run.stderr[-500:]   # GL de verdade, inicializado
+    assert 'finished' in run.stdout

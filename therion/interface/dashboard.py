@@ -254,6 +254,7 @@ class Dashboard(QWidget):
         self.window, self.classic = window, classic
         self.source = DashboardSource(window._orchestrator)
         self.presentation = Presentation()
+        self._mini_state = None
         self.day = window._orchestrator._calendar_now().date()
         self.workers = {}
         self.epochs = {'calendar':0,'tasks':0}
@@ -1282,6 +1283,10 @@ class Dashboard(QWidget):
         self.state_light.setStyleSheet('color:'+pigment+';font-size:14px;')
         self.meter.set_level(p.state,p.intensity)
         self.constellation.set_visual(p.state,p.intensity)
+        if p.state!=self._mini_state:   # confirmação e fala são lidas aqui; a mini orbe acompanha cada mudança
+            self._mini_state=p.state
+            sync=getattr(w,'_sync_mini_orb',None)
+            if callable(sync):sync()
         pointer=self.mapFromGlobal(QCursor.pos())
         if self.rect().contains(pointer) and w.isActiveWindow():
             self.constellation.set_scene_pointer(pointer.x()/max(1,self.width())*2-1,1-pointer.y()/max(1,self.height())*2)
