@@ -8,6 +8,7 @@ import os
 import re
 import secrets
 import threading
+import time
 import unicodedata
 from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta
@@ -15,6 +16,8 @@ from pathlib import Path
 
 from therion.calendar.adapter import CalendarError
 from therion.calendar.dialogue import _SPOKEN, _SPOKEN_PATTERN, parse_day, parse_time
+from therion.calendar.spoken import spoken_date
+from therion.context.language import control
 
 MAX_TEXT = 200
 SOON_MINUTES = 10
@@ -424,3 +427,339 @@ def late_message(late, old):
         return f'Passaram {len(late)} lembretes enquanto eu estava fechado: {names} e mais {len(late) - 3}{more}.'
     shown = '; '.join(f'{r.text} ({r.due:%H:%M})' for r in late)
     return f'Enquanto eu estava fechado, passou da hora de: {shown}{more}.'
+
+
+# --- frases: criar, perguntar, listar, cancelar, adiar -------------------------------------------------------
+PENDING_SECONDS = 120
+SNOOZE_SECONDS = 300
+TERMINAL_MESSAGE = 'Lembretes e foco funcionam com a janela do Therion aberta.'
+NOT_SAVED = 'Não consegui salvar o lembrete agora.'
+_DAY_NAMES = ('segunda', 'terça', 'quarta', 'quinta', 'sexta', 'sábado', 'domingo')
+_HOURS = ('', 'Uma', 'Duas', 'Três', 'Quatro', 'Cinco', 'Seis', 'Sete', 'Oito', 'Nove', 'Dez', 'Onze')
+_ORDINALS = {'primeiro': 1, 'primeira': 1, 'segundo': 2, 'segunda': 2, 'terceiro': 3, 'terceira': 3, 'quarto': 4, 'quinta': 5, 'quinto': 5}
+_STOP = {'nao', 'nao precisa', 'agora nao', 'deixa', 'deixa assim', 'deixa pra la', 'deixa quieto', 'esquece', 'nada', 'nao obrigado'}
+_YES = {'sim', 'pode', 'pode sim', 'sim pode', 'claro', 'pode cancelar', 'sim cancela', 'cancela', 'cancela tudo', 'isso', 'manda'}
+_LISTED = r'(?:os\s+)?(?:meus\s+)?lembretes'
+_LIST = re.compile(
+    rf'^(?:(?:quais|que)\s+(?:sao\s+)?{_LISTED}(?:\s+(?:eu\s+)?(?:tenho|tem|marcados|ativos))?'
+    rf'|(?:os\s+)?meus\s+lembretes|os\s+lembretes'
+    r'|(?:eu\s+)?(?:tem|tenho|ha)\s+(?:algum|algo)\s+lembrete(?:\s+(?:marcado|ativo))?'
+    rf'|(?:lista|liste|listar|mostra|mostre|mostrar|le|leia|ler|diz|diga)(?:\s+(?:pra|para)\s+mim)?\s+{_LISTED})$')
+_CANCEL = re.compile(
+    r'^(?:cancela|cancele|cancelar|apaga|apague|apagar|remove|remova|exclui|exclua)\s+(?P<all>(?:todos|todas)\s+)?'
+    r'(?:(?:o|os)\s+)?(?:meus?\s+)?(?P<noun>lembretes?)(?!\w)\s*(?P<rest>.*)$')
+_AMOUNT = rf'(?:(?:em|daqui\s+a|por)\s+)?(?:pouco|meia\s+hora|{_COUNT}\s*(?:horas?|h|minutos?|min))'
+_SNOOZE_VERB = re.compile(
+    r'^(?:(?:me\s+)?(?:adia|adie|adiar)(?:\s+(?:isso|o\s+lembrete|ai))?|me\s+(?:lembra|lembre|avisa|avise)\s+(?:de\s+novo|outra\s+vez))'
+    rf'(?:\s+(?P<amount>{_AMOUNT}))?$')
+_SNOOZE_BARE = re.compile(rf'^(?P<amount>(?:em|daqui\s+a)\s+(?:pouco|meia\s+hora|{_COUNT}\s*(?:horas?|h|minutos?|min)))$')
+_PERIOD_WORD = re.compile(r'^(?:(?:da|de)\s+)?(manha|madrugada|tarde|noite)$')
+_ORDER = re.compile(r'^(?:(?:o|a|numero)\s+)?(\w+)$')
+
+
+def _hm(hour, minute):
+    return f'{hour}h' + (f'{minute:02d}' if minute else '')
+
+
+def _clock(hour, minute):
+    return f'{"à" if hour in (0, 1) else "às"} {_hm(hour, minute)}'
+
+
+def _weekday_date(day):
+    return f'{_DAY_NAMES[day.weekday()]}, {spoken_date(day)}'
+
+
+def _when(due, now):
+    clock = _clock(due.hour, due.minute)
+    delta = (due.date() - now.date()).days
+    if delta == 0:
+        return f'hoje {clock}'
+    if delta == 1:
+        return f'amanhã, {_DAY_NAMES[due.weekday()]}, {clock}'
+    return f'{_weekday_date(due.date())}, {clock}'
+
+
+def _next_day(due, now):
+    delta = (due.date() - now.date()).days
+    return 'hoje' if delta == 0 else 'amanhã' if delta == 1 else _weekday_date(due.date())
+
+
+def _repeat_label(repeat):
+    days = tuple(repeat.days)
+    if days == (0, 1, 2, 3, 4, 5, 6):
+        label = 'todo dia'
+    elif days == (0, 1, 2, 3, 4):
+        label = 'dias úteis'
+    elif days == (5, 6):
+        label = 'fim de semana'
+    else:
+        names = [_DAY_NAMES[d] for d in days]
+        label = ('todo ' if days[0] >= 5 else 'toda ') + (names[0] if len(names) == 1 else ', '.join(names[:-1]) + ' e ' + names[-1])
+    hour, minute = map(int, repeat.time.split(':'))
+    return f'{label} {_clock(hour, minute)}'
+
+
+def _label(item, now):
+    return _repeat_label(item.repeat) if item.repeat else _when(item.due, now)
+
+
+def _duration(minutes):
+    if minutes < 60:
+        return f'{minutes} minuto{"" if minutes == 1 else "s"}'
+    hours, rest = divmod(minutes, 60)
+    return f'{hours} hora{"" if hours == 1 else "s"}' + (f' e {rest} minuto{"" if rest == 1 else "s"}' if rest else '')
+
+
+def _created_message(item, minutes, now):
+    if item.repeat:
+        return f'Combinado: {_repeat_label(item.repeat)}, {item.text}. O próximo é {_next_day(item.due, now)}.'
+    if minutes is not None:
+        when = _clock(item.due.hour, item.due.minute) if item.due.date() == now.date() else _when(item.due, now)
+        return f'Combinado: em {_duration(minutes)}, {when}, {item.text}.'
+    return f'Combinado: {_when(item.due, now)}, {item.text}.'
+
+
+def _repeat_phrase(days):
+    if tuple(days) == (0, 1, 2, 3, 4, 5, 6):
+        return 'todo dia'
+    if tuple(days) == (0, 1, 2, 3, 4):
+        return 'dias uteis'
+    if tuple(days) == (5, 6):
+        return 'fim de semana'
+    return 'toda ' + ' e '.join(_WEEKDAYS[d] for d in days)
+
+
+def _day_phrase(day, now):
+    delta = (day - now.date()).days
+    return 'hoje' if delta == 0 else 'amanha' if delta == 1 else f'dia {day.day}'
+
+
+def _relative_minutes(command, due, repeat, now):
+    if repeat or not _RELATIVE.search(_fold(command)):
+        return None
+    return round((due - now).total_seconds() / 60)
+
+
+def _from_parsed(parsed, command, now):
+    if parsed.kind == 'invalid':
+        return ('say', parsed.question)
+    if parsed.kind == 'need_when':
+        return ('ask', 'Que horas?' if parsed.repeat else 'Quando eu te lembro?', 'when', (parsed.text, parsed.repeat, parsed.day))
+    if parsed.kind == 'need_period':
+        return ('ask', f'{_HOURS[parsed.hour]} da manhã ou da tarde?', 'period', (parsed.text, parsed.repeat, parsed.hour))
+    minutes = _relative_minutes(command, parsed.due, parsed.repeat, now)
+    if parsed.kind == 'need_what':
+        return ('ask', 'Te lembro do quê?', 'what', (parsed.due, parsed.repeat, minutes))
+    return ('create', parsed.text, parsed.due, parsed.repeat, minutes)
+
+
+def _fresh(command, text, now):
+    """A frase abre uma conversa de lembrete (criar, listar ou cancelar)? Ação ou None."""
+    if _LIST.match(text):
+        return ('list',)
+    if found := _CANCEL.match(text):
+        return ('cancel', found['rest'], bool(found['all']) or (found['noun'] == 'lembretes' and not found['rest']))
+    parsed = parse_reminder(command, now)
+    if parsed is None:
+        return None
+    bare = parsed.kind == 'need_when' and not parsed.day and not parsed.repeat
+    if bare and (text.startswith('me chama') or (parsed.text is None and re.match(r'(?:cria|crie|criar)\b', text))):
+        return None  # "me chama de Fulano" não é lembrete; "crie um lembrete" puro segue o fluxo da agenda (compromisso ou aviso)
+    return _from_parsed(parsed, command, now)
+
+
+def _words(text, size=4):
+    return {word for word in re.findall(r'[a-z0-9]+', _fold(text)) if len(word) >= size}
+
+
+def _item_time(item):
+    return item.repeat.time if item.repeat else f'{item.due:%H:%M}'
+
+
+def _match(items, qualifier, size=4):
+    """Lembretes que a frase aponta: mais palavras em comum, ou a mesma hora. Sem nada dito, todos."""
+    if not qualifier.strip():
+        return list(items)
+    folded = _fold(qualifier)
+    words = _words(folded, size)
+    pool = list(items)
+    if clock := re.search(r'(?<!\w)(?:das|as|a|ao|do)\s+(\d{1,2})(?:h|:)?(\d{2})?(?!\w)', folded):
+        pool = [item for item in pool if _item_time(item) == f'{int(clock[1]):02d}:{clock[2] or "00"}']
+        if not words:
+            return pool
+    scores = {item.id: len(words & _words(item.text, size)) for item in pool}
+    best = max(scores.values(), default=0)
+    if best == 0:
+        return pool if clock and pool else []
+    return [item for item in pool if scores[item.id] == best]
+
+
+def _amount_phrase(amount):
+    amount = re.sub(r'^(?:em|daqui\s+a|por)\s+', '', amount or 'pouco')
+    return 'daqui a pouco' if amount == 'pouco' else 'em ' + amount
+
+
+def _followup(command, text, kind, data, now):
+    """Resposta à pergunta pendente, ou None quando a frase não é a resposta."""
+    if kind == 'when':
+        old_text, repeat, day = data
+        prefix = 'me lembra de x ' + (_repeat_phrase(repeat.days) + ' ' if repeat else _day_phrase(day, now) + ' ' if day else '')
+        parsed = parse_reminder(prefix + command, now)
+        if parsed is None or parsed.kind == 'need_when' or (parsed.kind != 'invalid' and parsed.text != 'x'):
+            return None
+        if parsed.kind == 'invalid':
+            return ('say', parsed.question)
+        if parsed.kind == 'need_period':
+            return ('ask', f'{_HOURS[parsed.hour]} da manhã ou da tarde?', 'period', (old_text, parsed.repeat, parsed.hour))
+        minutes = _relative_minutes(command, parsed.due, parsed.repeat, now)
+        if old_text is None:
+            return ('ask', 'Te lembro do quê?', 'what', (parsed.due, parsed.repeat, minutes))
+        return ('create', old_text, parsed.due, parsed.repeat, minutes)
+    if kind == 'what':
+        due, repeat, minutes = data
+        if _fresh(command, text, now) is not None:
+            return None
+        if text in _STOP:
+            return ('say', 'Tudo bem.')
+        cleaned = re.sub(r'^(?:(?:de|para|pra|que)\b\s*)+', '', command.strip().rstrip('.!?').rstrip(), flags=re.I).strip()
+        if not cleaned:
+            return None
+        if len(cleaned) > MAX_TEXT:
+            return ('say', 'O lembrete pode ter até 200 caracteres.')
+        return ('create', cleaned, due, repeat, minutes)
+    if kind == 'period':
+        old_text, repeat, hour = data
+        minute = 0
+        if word := _PERIOD_WORD.match(text):
+            hour = hour + 12 if word[1] in ('tarde', 'noite') else hour
+        else:
+            try:
+                hour, minute = parse_time(text)
+            except CalendarError:
+                return None
+            if 1 <= hour <= 11 and not re.search(r'\d(?:h|:)', text):
+                return None  # continua ambígua
+        repeat = Repeat(repeat.days, f'{hour:02d}:{minute:02d}')
+        due = next_due(repeat, now)
+        if old_text is None:
+            return ('ask', 'Te lembro do quê?', 'what', (due, repeat, None))
+        return ('create', old_text, due, repeat, None)
+    if kind == 'pick':
+        order = _ORDER.match(text)
+        number = None
+        if order:
+            word = order[1]
+            number = int(word) if word.isdigit() else _ORDINALS.get(word, _SPOKEN.get(word))
+        if number is not None and 1 <= number <= len(data):
+            return ('remove', [data[number - 1].id])
+        found = _match(data, text, 3)
+        return ('remove', [found[0].id]) if len(found) == 1 else None
+    if kind == 'cancel_all':
+        if text in _YES:
+            return ('remove', list(data))
+        return ('say', 'Tudo bem.') if text in _STOP else None
+    return None
+
+
+def _classify(command, host, now):
+    """Para onde vai a frase, sem efeito colateral: (ação, …) ou None."""
+    text = control(command)
+    pending = getattr(host, '_reminder_pending', None)
+    if pending and time.monotonic() < pending[0]:
+        if found := _followup(command, text, pending[1], pending[2], now):
+            return found
+    snooze = getattr(host, '_reminder_snooze', None)
+    if snooze and time.monotonic() < snooze[0] and (found := _SNOOZE_VERB.match(text) or _SNOOZE_BARE.match(text)):
+        return ('snooze', snooze[1], found['amount'])
+    return _fresh(command, text, now)
+
+
+def reminder_request(command, host, now=None):
+    """Sem efeito: a frase é desta rota? (o agente deixa a rota local responder)."""
+    return _classify(command, host, now or datetime.now()) is not None
+
+
+def snooze_window(host, reminder_text):
+    """A janela chama quando um lembrete toca: por 5 min, "adia 10 minutos" reagenda o mesmo texto."""
+    host._reminder_snooze = (time.monotonic() + SNOOZE_SECONDS, reminder_text)
+
+
+def _create(host, text, due, repeat, minutes, now):
+    try:
+        item = store().add(text, due, repeat, now)
+    except ValueError as err:
+        return str(err)
+    except OSError:
+        return NOT_SAVED
+    host._reminders_changed = True
+    return _created_message(item, minutes, now)
+
+
+def _remove(host, ids, now):
+    try:
+        gone = store().remove(ids)
+    except OSError:
+        return NOT_SAVED
+    if not gone:
+        return 'Não achei esse lembrete.'
+    host._reminders_changed = True
+    if len(gone) == 1:
+        return f'Cancelei: {gone[0].text} ({_label(gone[0], now)}).'
+    return f'Cancelei os {len(gone)} lembretes.'
+
+
+def _cancel(host, qualifier, everything, now):
+    items = store().items()
+    if not items:
+        return 'Nenhum lembrete marcado.'
+    found = items if everything else _match(items, qualifier)
+    if not found:
+        return 'Não achei esse lembrete.'
+    if len(found) == 1:
+        return _remove(host, [found[0].id], now)
+    if everything:
+        host._reminder_pending = (time.monotonic() + PENDING_SECONDS, 'cancel_all', tuple(item.id for item in found))
+        return f'Cancelo os {len(found)} lembretes?'
+    host._reminder_pending = (time.monotonic() + PENDING_SECONDS, 'pick', tuple(found))
+    return 'Qual deles? ' + ' '.join(f'{number}) {_label(item, now)}, {item.text}' for number, item in enumerate(found, 1))
+
+
+def _snooze(host, text, amount, now):
+    parsed = parse_reminder('me lembra ' + _amount_phrase(amount), now)
+    if parsed is None or parsed.due is None:
+        return None
+    minutes = round((parsed.due - now).total_seconds() / 60)
+    message = _create(host, text, parsed.due, None, minutes, now)
+    if message.startswith('Combinado'):
+        host._reminder_snooze = None
+    return message
+
+
+def answer(command, host, now=None):
+    """Resposta pronta ou None. Perguntas pendentes valem 2 min e só para a próxima frase."""
+    now = now or datetime.now()
+    action = _classify(command, host, now)
+    if getattr(host, '_reminder_pending', None) is not None:
+        host._reminder_pending = None
+    if action is None:
+        return None
+    if not getattr(host, 'desktop_timers', False):
+        return TERMINAL_MESSAGE
+    kind = action[0]
+    if kind == 'say':
+        return action[1]
+    if kind == 'ask':
+        host._reminder_pending = (time.monotonic() + PENDING_SECONDS, action[2], action[3])
+        return action[1]
+    if kind == 'create':
+        return _create(host, *action[1:], now)
+    if kind == 'remove':
+        return _remove(host, action[1], now)
+    if kind == 'cancel':
+        return _cancel(host, action[1], action[2], now)
+    if kind == 'snooze':
+        return _snooze(host, action[1], action[2], now)
+    items = store().items()
+    if not items:
+        return 'Nenhum lembrete marcado.'
+    return f'Você tem {len(items)} lembrete{"" if len(items) == 1 else "s"}: ' + '; '.join(f'{_label(item, now)}, {item.text}' for item in items) + '.'

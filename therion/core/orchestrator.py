@@ -2416,6 +2416,14 @@ class Orchestrator(WorkflowSupport, MemorySupport, PersonalContextSupport, Catal
         if self._personal_flow_is_free():
             from therion.core.local_reports import answer as local_report, game_mode_request
             from therion.core.pc_cleanup import answer as pc_cleanup
+            from therion.core.voice_reminders import answer as reminder_answer
+            reminder = reminder_answer(command, self)
+            if reminder is not None:
+                result = OrchestrationResult(status='success', message=reminder,
+                    ui_action='reminders' if self.__dict__.pop('_reminders_changed', False) else None)
+                self._complete_task()
+                self._finalize_session_result(result)
+                return result
             game = game_mode_request(command)
             # "sim" à oferta de limpeza do vigia do PC, ou "libera espaço"; outra frase cancela a oferta.
             report = pc_cleanup(command, self)

@@ -1,5 +1,6 @@
 """Roteamento das frases reais em tests/frases_reais.txt; nenhuma frase que já falhou pode voltar a falhar."""
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -36,6 +37,9 @@ def route(phrase):
     state = task_state_request(phrase)
     if state:
         return 'concluir tarefa' if state['state'] == 'completed' else 'reabrir tarefa'
+    from therion.core.voice_reminders import reminder_request
+    if reminder_request(phrase, SimpleNamespace(desktop_timers=True)):
+        return 'lembrete'
     intent = IntentRecognizer().parse(phrase)
     return intent.action if intent else 'conversa'
 
