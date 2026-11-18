@@ -79,6 +79,8 @@ class OrbGL(QOpenGLWidget):
         self.ready = False
         self.disabled = False
         self.min_interval_ms = 0   # a mini orbe pede 33: o piso do intervalo; 0 deixa a orbe grande como está
+        self.transparent = False   # mini orbe: sem fundo, só o brilho (ver make_transparent)
+        self.show_label = True     # mini orbe: só o anel, sem o nome do estado
         self.program = self.aura = self.quad = self.blur = self.composite = self.trail = None
         self._trail_fresh = True
         self.scene_ms = self.scene_fbo = None
@@ -147,6 +149,13 @@ class OrbGL(QOpenGLWidget):
         self.quality = QualityController(quality)
         self.last_frame = None
         self.update()
+
+    def make_transparent(self):
+        """Sem fundo: limpa com alfa 0 e o alfa segue o brilho. Chamar antes de mostrar (o formato não muda depois)."""
+        fmt = self.format()
+        fmt.setAlphaBufferSize(8)
+        self.setFormat(fmt)
+        self.transparent = True
 
     def _focus(self):
         return (self.focus_rect or QRectF(self.rect())).intersected(QRectF(self.rect()))
@@ -230,7 +239,11 @@ class OrbGL(QOpenGLWidget):
         # 4. Fundo e núcleo; depois cena e brilho somados; por fim a moldura, nítida, por cima.
         gl.glBindFramebuffer(0x8D40, self.defaultFramebufferObject())
         gl.glViewport(0, 0, width, height)
-        gl.glClearColor(9/255, 9/255, 15/255, 1.); gl.glClear(0x4000)
+        if self.transparent:
+            gl.glClearColor(0., 0., 0., 0.)
+        else:
+            gl.glClearColor(9/255, 9/255, 15/255, 1.)
+        gl.glClear(0x4000)
         gl.glEnable(0x0BE2); gl.glBlendFunc(1, 1)
         self._aura(width, height)
         self._composite(self._trail[0])
@@ -253,7 +266,7 @@ class OrbGL(QOpenGLWidget):
         image.fill(0)
         painter = QPainter(image)
         painter.translate(-left, -top)
-        paint_hud_frame(painter, lay, self.animation.frame_state())
+        paint_hud_frame(painter, lay, self.animation.frame_state(), label=self.show_label)
         painter.end()
         painter = QPainter(self)
         painter.drawImage(left, top, image)
@@ -326,6 +339,7 @@ class OrbGL(QOpenGLWidget):
             gl.glUniform1i(c.uniformLocation(name), unit)
         weights = [w if i < len(self._chain) else 0. for i, w in enumerate(GLOW_WEIGHTS)]
         gl.glUniform3f(c.uniformLocation('weights'), *weights)
+        gl.glUniform1f(c.uniformLocation('lightAlpha'), 1. if self.transparent else 0.)
         self._quad(c); c.release()
         for unit in range(4):
             gl.glActiveTexture(0x84C0+unit); gl.glBindTexture(_TEXTURE_2D, 0)
@@ -339,6 +353,7 @@ class OrbGL(QOpenGLWidget):
                        lay.R/max(1, self.height()), float(width/height))
         gl.glUniform1f(b.uniformLocation('strength'), a.look.core+.35*a.voice+.1*a.energy+.08*a.pulse)
         gl.glUniform3f(b.uniformLocation('colCore'), *(c/255. for c in CORE))
+        gl.glUniform1f(b.uniformLocation('lightAlpha'), 1. if self.transparent else 0.)
         self._quad(b); b.release()
 
     def _scene(self, width, height):

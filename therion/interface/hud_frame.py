@@ -23,7 +23,8 @@ class FrameState:
     voice: float
 
 
-def paint_hud_frame(painter: QPainter, layout: HudLayout, frame: FrameState) -> None:
+def paint_hud_frame(painter: QPainter, layout: HudLayout, frame: FrameState, label=True) -> None:
+    """`label=False` (mini orbe) desenha só o anel, sem os pontinhos de nível e o nome do estado."""
     cx, cy, R, Rf = layout.cx, layout.cy, layout.R, layout.Rf
     unit = max(.75, R/170.)   # espessuras do protótipo valem para R ≈ 170 px
     rgb = [a+(b-a)*min(1., max(0., frame.amber)) for a, b in zip(FRAME, AMBER)]
@@ -65,6 +66,9 @@ def paint_hud_frame(painter: QPainter, layout: HudLayout, frame: FrameState) -> 
     ring = .6*frame.voice_ring*frame.voice+.18*min(1., frame.voice_ring*3)
     if ring > .01:
         painter.setPen(pen(ring, 2)); painter.drawEllipse(circle(R*(1.12+.12*frame.voice)))
+    if not label:
+        painter.restore()
+        return
     # Nível em pontinhos e o nome do estado.
     painter.setPen(Qt.NoPen)
     gap, size, middle = max(3., 5*R/170.), max(1.5, 2*unit), (LEVEL_DOTS-1)/2

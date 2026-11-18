@@ -10,14 +10,22 @@ def frame(**kw):
     return FrameState(**base)
 
 
-def render(w, h, f, dpr=1.):
+def render(w, h, f, dpr=1., label=True):
     img = QImage(int(w*dpr), int(h*dpr), QImage.Format_ARGB32_Premultiplied)
     img.setDevicePixelRatio(dpr)
     img.fill(QColor(0, 0, 0, 0))
     p = QPainter(img)
-    paint_hud_frame(p, hud_layout(0, 0, w, h), f)
+    paint_hud_frame(p, hud_layout(0, 0, w, h), f, label=label)
     p.end()
     return img
+
+
+def test_without_label_only_the_ring_is_drawn(app):
+    lay = hud_layout(0, 0, 400, 400)
+    with_label, ring_only = lit_box(render(400, 400, frame())), lit_box(render(400, 400, frame(), label=False))
+    assert with_label[3] > lay.label_y                       # nome do estado embaixo do anel
+    assert ring_only[3] <= lay.cy + 1.25 * lay.Rf + 1        # sem o nome nem os pontinhos de nível
+    assert ring_only[3] < lay.label_y - 10 * max(.75, lay.R / 170.)
 
 
 def lit_box(img):

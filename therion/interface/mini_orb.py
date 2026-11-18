@@ -7,13 +7,12 @@ import json
 import os
 import threading
 
-from PySide6.QtCore import QPoint, QRect, QRectF, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QCursor, QGuiApplication, QPainter, QRadialGradient, QRegion
+from PySide6.QtCore import QPoint, QRect, QSize, Qt, QTimer, Signal
+from PySide6.QtGui import QColor, QCursor, QGuiApplication, QPainter, QRadialGradient
 from PySide6.QtWidgets import QFrame, QLabel, QMenu, QProgressBar, QVBoxLayout, QWidget
 
 from therion.core.local_reports import _gb
 
-from .hud_style import hud_layout
 from .orb_renderer import OrbGL
 from .pc_health import full_reading
 
@@ -94,7 +93,7 @@ def _nearest(point: QPoint, screens: list[QRect]) -> QRect:
     return min(screens, key=lambda screen: _distance(screen, point))
 
 
-ORB_PX = 96
+ORB_PX = 110   # cabe a esfera e o anel inteiros (o anel vai até 87% da largura)
 DRAG_PX = 4
 VK_LBUTTON, VK_ESCAPE = 0x01, 0x1B
 GLASS = ('background: rgba(20,19,30,184); border: 1px solid rgba(255,255,255,23); border-radius: 14px;'
@@ -207,13 +206,12 @@ class MiniOrb(QWidget):
             self._renderer.setMinimumSize(0, 0)
             self._renderer.setGeometry(0, 0, ORB_PX, ORB_PX)
             self._renderer.setAttribute(Qt.WA_TransparentForMouseEvents)
-            self.setMask(QRegion(self.rect(), QRegion.Ellipse))   # o GL desenha fundo escuro opaco: recorta em círculo
             if hasattr(self._renderer, 'failed'):
                 self._renderer.failed.connect(self._renderer_failed)
         if self._renderer is not None:
-            # Esfera no centro do círculo de 96 px: o HUD põe o centro a 44% da altura do retângulo.
-            # 85 é o maior que cabe, pois o renderizador recorta o retângulo ao widget e o centro depende dele.
-            self._renderer.focus_rect = QRectF(0, ORB_PX / 2 - hud_layout(0, 0, ORB_PX, 85).cy, ORB_PX, 85)
+            # Só a orbe e o anel, sobre nada: o escuro vira transparente e o que está atrás aparece.
+            self._renderer.make_transparent()
+            self._renderer.show_label = False
             self._renderer.set_quality('low')
             self._renderer.set_active(True)
             self._show_visual()
@@ -280,7 +278,6 @@ class MiniOrb(QWidget):
             self._renderer.set_active(False)
             self._renderer.hide()
         self._renderer = None
-        self.clearMask()
         self.update()
 
     def paintEvent(self, _event):

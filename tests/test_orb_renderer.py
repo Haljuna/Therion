@@ -55,6 +55,22 @@ def test_orb_draws_something_and_survives_resize(app):
 
 
 @gl
+def test_a_transparent_orb_clears_to_nothing_and_keeps_the_sphere_lit(app):
+    from therion.interface.orb_renderer import OrbGL
+    plain = OrbGL()
+    assert plain.transparent is False and plain.show_label is True
+    w = OrbGL(); w.make_transparent(); w.show_label = False
+    assert w.format().alphaBufferSize() == 8
+    w.resize(200, 200); w.show(); w.set_active(True)
+    settle(lambda: w.ready or w.disabled); pump(.2)
+    img = w.grabFramebuffer()
+    assert img.pixelColor(2, 2).alpha() == 0                          # canto: o que está atrás aparece
+    cx, cy = img.width()//2, round(img.height()*.44)
+    assert max(img.pixelColor(x, cy).alpha() for x in range(cx-6, cx+7)) > 100   # núcleo continua aceso
+    w.close(); plain.close()
+
+
+@gl
 def test_cleanup_is_idempotent(app):
     from therion.interface.orb_renderer import OrbGL
     w = OrbGL(); w.resize(300, 300); w.show(); settle(lambda: w.ready)

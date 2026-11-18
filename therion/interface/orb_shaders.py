@@ -115,13 +115,15 @@ AURA_FRAGMENT = '''
 uniform vec4 anchor;   // centro em uv, raio da esfera em altura de uv, proporção da tela
 uniform float strength;
 uniform vec3 colCore;
+uniform float lightAlpha;   // 1 = fundo transparente: o alfa segue o brilho (escuro some)
 varying vec2 uv;
 void main() {
     float r = length((uv-anchor.xy)*vec2(anchor.w, 1.)/anchor.z);
     float t = r/1.25;
     float core = t < .55 ? mix(1., .45, t/.55) : mix(.45, 0., clamp((t-.55)/.45, 0., 1.));
     float halo = .16*max(0., 1.-r/2.4);
-    gl_FragColor = vec4(colCore*(core*strength+halo), 0.);
+    vec3 c = colCore*(core*strength+halo);
+    gl_FragColor = vec4(c, lightAlpha*max(c.r, max(c.g, c.b)));
 }
 '''
 
@@ -158,11 +160,12 @@ COMPOSITE_FRAGMENT = '''
 #version 120
 uniform sampler2D scene, glow0, glow1, glow2;
 uniform vec3 weights;
+uniform float lightAlpha;   // 1 = fundo transparente; somados (blend aditivo), os alfas ficam >= a cor: pré-multiplicado
 varying vec2 uv;
 void main() {
     vec3 c = texture2D(scene, uv).rgb;
     c += texture2D(glow0, uv).rgb*weights.x+texture2D(glow1, uv).rgb*weights.y
          +texture2D(glow2, uv).rgb*weights.z;
-    gl_FragColor = vec4(c, 1.);
+    gl_FragColor = vec4(c, mix(1., max(c.r, max(c.g, c.b)), lightAlpha));
 }
 '''

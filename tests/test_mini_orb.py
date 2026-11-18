@@ -5,7 +5,7 @@ import time
 import pytest
 from PySide6.QtCore import QEvent, QPoint, QRect, QSize, Qt
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QWidget
 
 from therion.interface.mini_orb import MiniOrb, beside, clamp, default_position, restore, save
 
@@ -69,6 +69,15 @@ class FakeRenderer:
 
     def cleanup(self):
         self.cleaned += 1
+
+    def make_transparent(self):
+        self.transparent = True
+
+
+class FakeWidgetRenderer(QWidget, FakeRenderer):   # como a OrbGL: um widget filho
+    def __init__(self):
+        QWidget.__init__(self)
+        FakeRenderer.__init__(self)
 
 
 def make(tmp_path, **kwargs):
@@ -299,8 +308,7 @@ def test_calls_after_shut_do_nothing_and_the_renderer_is_disabled(app, tmp_path)
     assert fake.visuals == visuals and fake.active == active and not window.isVisible()
 
 
-def test_the_mini_orb_renders_at_most_30_fps_and_centres_the_sphere(app, tmp_path):
-    from therion.interface.hud_style import hud_layout
+def test_the_mini_orb_renders_at_most_30_fps(app, tmp_path):
     fake = FakeRenderer()
     window, _ = make(tmp_path, renderer_factory=lambda: fake)
     assert fake.min_interval_ms == 100              # em repouso, 10 quadros/s
@@ -308,9 +316,18 @@ def test_the_mini_orb_renders_at_most_30_fps_and_centres_the_sphere(app, tmp_pat
     assert fake.min_interval_ms == 33               # ouvindo, pensando, falando: 30 quadros/s
     window.set_state('idle', True)
     assert fake.min_interval_ms == 100              # âmbar também é parado
-    focus = fake.focus_rect
-    assert focus.bottom() <= 96 and focus.top() >= 0
-    assert abs(hud_layout(focus.x(), focus.y(), focus.width(), focus.height()).cy - 48) < .5
+    window.shut()
+
+
+def test_only_the_orb_and_its_ring_show_with_no_cut_out_around(app, tmp_path):
+    from therion.interface.hud_style import hud_layout
+    fake = FakeWidgetRenderer()
+    window, _ = make(tmp_path, renderer_factory=lambda: fake)
+    assert window.size() == QSize(110, 110) and fake.geometry() == window.rect()
+    assert fake.transparent is True and fake.show_label is False   # fundo some; sem o nome do estado
+    assert window.mask().isEmpty()                                  # nada de recorte em círculo
+    lay = hud_layout(0, 0, 110, 110)
+    assert lay.cy - 1.25 * lay.Rf >= 0 and lay.cy + 1.25 * lay.Rf <= 110   # o anel inteiro cabe
     window.shut()
 
 
@@ -320,5 +337,5 @@ def test_a_screen_going_away_pulls_the_orb_back_inside(app, tmp_path, monkeypatc
     window.move(2500, 300)
     monkeypatch.setattr(mini_orb, '_screens', lambda: [QRect(0, 0, 1920, 1040)])
     window._reclamp()
-    assert window.pos() == QPoint(1920 - 96, 300)
+    assert window.pos() == QPoint(1920 - mini_orb.ORB_PX, 300)
     window.shut()
