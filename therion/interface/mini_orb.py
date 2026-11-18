@@ -26,9 +26,13 @@ def restore(path: str, screens: list[QRect], size: QSize) -> QPoint | None:
     try:
         with open(path, encoding='utf-8') as file:
             data = json.load(file)
-        point = QPoint(int(data['x']), int(data['y']))
-    except (OSError, ValueError, KeyError, TypeError):
+        x, y = int(data['x']), int(data['y'])
+    except (OSError, ValueError, KeyError, TypeError, OverflowError):
         return None
+    # QPoint wraps out-of-range ints silently, so reject them before building it
+    if not all(-2 ** 31 <= value < 2 ** 31 for value in (x, y)):
+        return None
+    point = QPoint(x, y)
     center = _center(point, size)
     return point if any(_contains(screen, center) for screen in screens) else None
 

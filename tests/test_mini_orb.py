@@ -27,3 +27,10 @@ def test_panel_opens_to_the_side_that_has_room():
     orb = QRect(3080, 860, 96, 96)
     spot = beside(orb, QSize(360, 420), SECOND)
     assert spot.x() + 360 <= orb.left() and SECOND.contains(QRect(spot, QSize(360, 420)))
+
+
+def test_absurd_numbers_in_the_saved_file_are_ignored(tmp_path):
+    path = tmp_path / 'm.json'
+    for text in ('{"x": Infinity, "y": 0}', '{"x": 1000000000000000000000000000000, "y": 0}'):
+        path.write_text(text, encoding='utf-8')
+        assert restore(str(path), [PRIMARY, SECOND], QSize(96, 96)) is None
