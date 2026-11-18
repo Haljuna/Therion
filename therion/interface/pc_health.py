@@ -71,8 +71,10 @@ def vram_by_pid():
             pdh.PdhCloseQuery(query)
 
 
-def quick_reading():
-    """Leitura barata (sem tasklist) para a etiqueta ao passar o mouse."""
+def quick_reading(gpu=...):
+    """Leitura barata (sem tasklist) para a etiqueta ao passar o mouse; `gpu` evita ler a placa de novo."""
+    if gpu is ...:
+        gpu = gpu_memory()
     stat = _Memory()
     stat.dwLength = ctypes.sizeof(stat)
     ram = None
@@ -83,7 +85,6 @@ def quick_reading():
         c_free, c_total = disk.free, disk.total
     except OSError:
         c_free = c_total = None
-    gpu = gpu_memory()
     return {'ram': ram, 'vram': gpu[0] / gpu[1] if gpu else None, 'c_free': c_free, 'c_total': c_total}
 
 
@@ -93,17 +94,22 @@ def _name(exe):
 
 def full_reading():
     """Leitura completa para o painel: totais, temperatura e os maiores consumidores de RAM e VRAM."""
-    reading = quick_reading()
-    measure = _measure()
     gpu = gpu_memory()
+    reading = quick_reading(gpu)
+    measure = _measure()
     processes = measure['processes']
-    vram = sorted(((pid, used) for pid, used in vram_by_pid().items() if pid in processes), key=lambda row: -row[1])
+    by_name = {}   # como a RAM: o mesmo programa em vários processos soma numa linha só
+    for pid, used in vram_by_pid().items():
+        if pid in processes:
+            name = _name(processes[pid][0])
+            by_name[name] = by_name.get(name, 0) + used
+    vram = sorted(by_name.items(), key=lambda row: -row[1])
     reading.update(
         ram_used=measure['ram_total'] - measure['ram_free'], ram_total=measure['ram_total'],
         commit_used=measure['commit_total'] - measure['commit_free'], commit_total=measure['commit_total'],
         vram_used=gpu[0] if gpu else None, vram_total=gpu[1] if gpu else None, gpu_temp=gpu[2] if gpu else None,
         top_ram=[(_name(name), used) for name, used in measure['top']],
-        top_vram=[(_name(processes[pid][0]), used) for pid, used in vram[:3]])
+        top_vram=vram[:3])
     return reading
 
 
