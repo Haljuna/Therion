@@ -62,6 +62,7 @@ class Parsed:
     hour: int | None = None
     question: str | None = None
     day: date | None = None  # dia dito sem hora (need_when)
+    minute: int = 0          # minutos da hora ambígua (need_period)
 
 
 def _fold(text):
@@ -217,7 +218,7 @@ def parse_reminder(command, now):
             return Parsed('invalid', question=str(err))
     if days:
         if ambiguous:
-            return Parsed('need_period', text, repeat=Repeat(days, ''), hour=hour)
+            return Parsed('need_period', text, repeat=Repeat(days, ''), hour=hour, minute=minute)
         repeat = Repeat(days, f'{hour:02d}:{minute:02d}')
         due = next_due(repeat, now)
     elif minutes is not None:
@@ -462,7 +463,11 @@ def _hm(hour, minute):
 
 
 def _clock(hour, minute):
-    return f'{"à" if hour in (0, 1) else "às"} {_hm(hour, minute)}'
+    if (hour, minute) == (0, 0):
+        return 'à meia-noite'
+    if (hour, minute) == (12, 0):
+        return 'ao meio-dia'
+    return f'{"à" if hour == 1 else "às"} {_hm(hour, minute)}'
 
 
 def _weekday_date(day):
@@ -546,7 +551,7 @@ def _from_parsed(parsed, command, now):
     if parsed.kind == 'need_when':
         return ('ask', 'Que horas?' if parsed.repeat else 'Quando eu te lembro?', 'when', (parsed.text, parsed.repeat, parsed.day))
     if parsed.kind == 'need_period':
-        return ('ask', f'{_HOURS[parsed.hour]} da manhã ou da tarde?', 'period', (parsed.text, parsed.repeat, parsed.hour))
+        return ('ask', f'{_HOURS[parsed.hour]} da manhã ou da tarde?', 'period', (parsed.text, parsed.repeat, parsed.hour, parsed.minute))
     minutes = _relative_minutes(command, parsed.due, parsed.repeat, now)
     if parsed.kind == 'need_what':
         return ('ask', 'Te lembro do quê?', 'what', (parsed.due, parsed.repeat, minutes))
@@ -605,12 +610,14 @@ def _followup(command, text, kind, data, now):
         old_text, repeat, day = data
         prefix = 'me lembra de x ' + (_repeat_phrase(repeat.days) + ' ' if repeat else _day_phrase(day, now) + ' ' if day else '')
         parsed = parse_reminder(prefix + command, now)
+        if parsed is not None and parsed.kind == 'need_when' and parsed.text == 'x' and parsed.day and not parsed.repeat:
+            return ('ask', 'Que horas?', 'when', (old_text, None, parsed.day))   # só o dia: guarda o dia e pergunta a hora
         if parsed is None or parsed.kind == 'need_when' or (parsed.kind != 'invalid' and parsed.text != 'x'):
             return None
         if parsed.kind == 'invalid':
             return ('say', parsed.question)
         if parsed.kind == 'need_period':
-            return ('ask', f'{_HOURS[parsed.hour]} da manhã ou da tarde?', 'period', (old_text, parsed.repeat, parsed.hour))
+            return ('ask', f'{_HOURS[parsed.hour]} da manhã ou da tarde?', 'period', (old_text, parsed.repeat, parsed.hour, parsed.minute))
         minutes = _relative_minutes(command, parsed.due, parsed.repeat, now)
         if old_text is None:
             return ('ask', 'Te lembro do quê?', 'what', (parsed.due, parsed.repeat, minutes))
@@ -628,8 +635,7 @@ def _followup(command, text, kind, data, now):
             return ('say', 'O lembrete pode ter até 200 caracteres.')
         return ('create', cleaned, due, repeat, minutes)
     if kind == 'period':
-        old_text, repeat, hour = data
-        minute = 0
+        old_text, repeat, hour, minute = data
         if word := _PERIOD_WORD.match(text):
             hour = hour + 12 if word[1] in ('tarde', 'noite') else hour
         else:
@@ -663,8 +669,8 @@ def _followup(command, text, kind, data, now):
 
 def _classify(command, host, now):
     """Para onde vai a frase, sem efeito colateral: (ação, …) ou None."""
-    text = control(command)
-    pending = getattr(host, '_reminder_pending', None)
+    text = control(command).replace(',', '')   # a transcrição põe vírgulas: "Sim, pode."
+    pending =getattr(host, '_reminder_pending', None)
     if pending and time.monotonic() < pending[0]:
         if found := _followup(command, text, pending[1], pending[2], now):
             return found

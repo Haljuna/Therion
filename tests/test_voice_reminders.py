@@ -531,3 +531,43 @@ def test_fifty_limit_message_is_returned(env):
     for i in range(50):
         env.store.add(f'item {i}', NOW + timedelta(hours=i + 1), None, NOW)
     assert say(env, 'me lembra às 18h de ligar') == 'Você já tem 50 lembretes; cancele algum antes.'
+
+
+# --- rodada de correção 1 -----------------------------------------------------------------------------------
+def test_need_period_keeps_the_minutes():
+    parsed = parse_reminder('me lembra todo dia às 6 e meia de tomar remédio', NOW)
+    assert (parsed.kind, parsed.hour, parsed.minute) == ('need_period', 6, 30)
+    assert parse_reminder('me lembra todo dia às 6 de tomar remédio', NOW).minute == 0
+
+
+@pytest.mark.parametrize('reply, time_', [('da manhã', '06:30'), ('tarde', '18:30'), ('18', '18:00')])
+def test_period_answer_keeps_the_minutes(env, reply, time_):
+    assert say(env, 'me lembra todo dia às 6 e meia de tomar remédio') == 'Seis da manhã ou da tarde?'
+    say(env, reply)
+    assert env.store.items()[0].repeat == Repeat(ALL, time_)
+
+
+@pytest.mark.parametrize('reply', ['Sim, pode.', 'sim', 'Pode, sim.'])
+def test_cancel_all_accepts_commas_from_transcription(env, reply):
+    _three(env)
+    say(env, 'cancela todos os lembretes')
+    assert say(env, reply) == 'Cancelei os 3 lembretes.'
+
+
+def test_stop_word_with_comma(env):
+    say(env, 'me lembra em 10 minutos')
+    assert say(env, 'Não, obrigado.') == 'Tudo bem.'
+
+
+@pytest.mark.parametrize('reply', ['amanhã', 'amanhã.'])
+def test_day_only_answer_keeps_text_and_asks_the_hour(env, reply):
+    assert say(env, 'me lembra de pagar o boleto') == 'Quando eu te lembro?'
+    assert say(env, reply) == 'Que horas?'
+    assert say(env, 'às 9h') == 'Combinado: amanhã, quinta, às 9h, pagar o boleto.'
+
+
+def test_midnight_and_noon_are_spoken_names(env):
+    assert say(env, 'me lembra à meia-noite de dormir') == 'Combinado: amanhã, quinta, à meia-noite, dormir.'
+    assert say(env, 'me lembra ao meio-dia de almoçar') == 'Combinado: amanhã, quinta, ao meio-dia, almoçar.'
+    assert say(env, 'me lembra todo dia à meia-noite de dormir') == 'Combinado: todo dia à meia-noite, dormir. O próximo é amanhã.'
+    assert 'à 0h' not in say(env, 'meus lembretes')

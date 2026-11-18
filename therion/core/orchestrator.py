@@ -2419,6 +2419,7 @@ class Orchestrator(WorkflowSupport, MemorySupport, PersonalContextSupport, Catal
             from therion.core.voice_reminders import answer as reminder_answer
             reminder = reminder_answer(command, self)
             if reminder is not None:
+                self._pc_cleanup_offer = None   # a oferta de limpeza vale só para a próxima frase
                 result = OrchestrationResult(status='success', message=reminder,
                     ui_action='reminders' if self.__dict__.pop('_reminders_changed', False) else None)
                 self._complete_task()
