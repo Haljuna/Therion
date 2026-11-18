@@ -70,14 +70,97 @@ def test_gpu_temperature_reads_nvidia_smi_and_gives_up_quietly(monkeypatch):
     assert pc_watch.gpu_temperature() is None
 
 
-def test_poll_survives_a_failed_measurement(monkeypatch):
+def quiet_disk(monkeypatch, sizes=None, spare=0):
+    """Nada de andar nas pastas reais do C nos testes."""
+    monkeypatch.setattr(pc_watch, 'folder_sizes', lambda: dict(sizes or {}))
+    monkeypatch.setattr(pc_watch.pc_cleanup, 'estimate', lambda rows=None: spare)
+    monkeypatch.setattr(pc_watch, 'gpu_temperature', lambda: None)
+
+
+def test_poll_survives_a_failed_measurement(monkeypatch, tmp_path):
     def broken():
         raise OSError('GlobalMemoryStatusEx falhou.')
     monkeypatch.setattr(pc_watch, '_measure', broken)
-    assert PcWatch().poll() == []
+    assert PcWatch(tmp_path / 'foto.json').poll() == []
+    quiet_disk(monkeypatch)
     monkeypatch.setattr(pc_watch, '_measure', lambda: pc(c=4))
-    monkeypatch.setattr(pc_watch, 'gpu_temperature', lambda: None)
-    assert PcWatch().poll() == [DISK]
+    assert PcWatch(str(tmp_path / 'foto.json')).poll() == [(DISK, False)]   # sem nada para limpar: sem oferta
+
+
+def test_disk_warning_says_what_grew_since_the_daily_photo_and_offers_the_cleanup(monkeypatch, tmp_path):
+    from datetime import datetime
+    import json
+    photo = tmp_path / 'foto.json'
+    photo.write_text(json.dumps(dict(day='2026-11-16', time='2026-11-16T09:12', free=8 * GB,
+                                     sizes={'Temp do usuário': 1 * GB, 'Downloads': 2 * GB})), encoding='utf-8')
+    quiet_disk(monkeypatch, sizes={'Temp do usuário': 4.1 * GB, 'Downloads': 2 * GB}, spare=3 * GB)
+    monkeypatch.setattr(pc_watch, '_measure', lambda: pc(c=4))
+    said = PcWatch(str(photo)).poll(datetime(2026, 11, 17, 15, 0))
+    assert said == [(DISK + ' O C perdeu 4,0 GB desde ontem às 09:12; quem cresceu: Temp do usuário (+3,1 GB).'
+                     ' Quer que eu limpe os temporários seguros? Dá uns 3,0 GB.', True)]
+    assert json.loads(photo.read_text(encoding='utf-8'))['day'] == '2026-11-17'   # foto nova do dia
+
+
+def test_explain_tells_pagefile_from_files_and_stays_quiet_without_a_real_drop():
+    from datetime import datetime
+    now = datetime(2026, 11, 17, 15, 0)
+    photo = dict(time='2026-11-17T08:00', free=10 * GB, sizes={'Memória virtual': 2 * GB, 'Temp do usuário': GB})
+    assert 'foi a memória virtual, não arquivo; o pagefile cresceu 4,0 GB' in pc_watch.explain(
+        photo, 5 * GB, {'Memória virtual': 6 * GB, 'Temp do usuário': GB}, now)
+    assert pc_watch.explain(photo, 5 * GB, dict(photo['sizes']), now) == (
+        ' O C perdeu 5,0 GB desde hoje às 08:00; não foi nas pastas de sempre, pode ser atualização ou programa novo.')
+    assert pc_watch.explain(photo, 9.8 * GB, {}, now) == '' and pc_watch.explain(None, GB, {}, now) == ''
+    assert pc_watch.explain({'time': 'lixo', 'free': 1}, GB, {}, now) == ''
+
+
+class Clock:
+    def __init__(self):
+        self.now = 0.
+
+    def __call__(self):
+        return self.now
+
+
+def test_forecast_warns_once_when_the_disk_falls_fast():
+    clock = Clock()
+    watch = PcWatch(clock=clock)
+    said = []
+    for step in range(16):                        # 0,5 GB a cada 2 min, de 15 GB para baixo
+        clock.now = step * 120
+        said += watch.check(pc(c=15 - .5 * step))
+    assert said == ['Senhor, o disco C está caindo rápido: no ritmo da última meia hora, chega a 1 GB em uns 35 minutos (10,0 GB livres agora).']
+    slow, said = PcWatch(clock=Clock()), []
+    for step in range(30):                        # 0,05 GB a cada 2 min: ainda longe
+        slow._clock.now = step * 120
+        said += slow.check(pc(c=15 - .05 * step))
+    assert said == []
+
+
+def test_game_summary_tells_the_worst_moment_only_when_something_was_tight():
+    watch = PcWatch()
+    watch.game(True)
+    watch.check(pc(ram=.1), 88); watch.check(pc(), 80)
+    assert watch.game(False) == 'Senhor, na partida a placa chegou a 88 °C e a RAM ficou quase cheia.'
+    watch.game(True)
+    watch.check(pc(), 60)
+    assert watch.game(False) is None
+    watch.check(pc(ram=.1), 95)                   # fora do jogo não guarda
+    watch.game(True)
+    assert watch.game(False) is None
+
+
+def test_leak_is_a_process_that_grows_for_an_hour_and_never_lets_go():
+    clock = Clock()
+    watch = PcWatch(service=lambda pid: 'StorSvc' if pid == 100 else None, clock=clock)
+    said = []
+    for step in range(31):
+        clock.now = step * 120
+        said += watch.check(dict(pc(), processes={
+            100: ('svchost.exe', .3 * GB + step * .08 * GB),                          # vaza
+            200: ('ollama.exe', (4 if step > 3 else .1) * GB),                        # modelo carregando: salto e para
+            300: ('chrome.exe', (1 + step * .06 if step < 20 else .5) * GB)}))        # cresce mas solta
+    assert said == ['Senhor, o svchost (StorSvc) foi de 0,3 GB para 2,3 GB em 1 hora e não para de crescer; '
+                    'parece vazamento. Reiniciar o programa, ou o PC, resolve.']
 
 
 def test_the_watch_is_on_unless_the_user_turns_it_off():
@@ -110,41 +193,73 @@ def close(app, window):
     app.processEvents()
 
 
+class FakeWatch:
+    def __init__(self, said):
+        self.said, self.polls, self.in_game, self.summary = said, 0, False, None
+
+    def poll(self):
+        self.polls += 1
+        return list(self.said)
+
+    def game(self, on):
+        self.in_game = on
+        return None if on else self.summary
+
+
 def test_window_measures_in_the_background_and_speaks_only_when_free(app, tmp_path, monkeypatch):
     window = make_window(tmp_path, monkeypatch, True)
     try:
         assert window._reminder_timer.isActive()
-        window._pc_watch = MagicMock()
-        window._pc_watch.poll.return_value = [DISK]
+        window._pc_watch = watch = FakeWatch([(DISK, False)])
         window._speech_output = MagicMock()
         said = []
         monkeypatch.setattr(window, '_append', lambda sender, text: said.append(text))
         monkeypatch.setattr(reminders, 'do_not_disturb', lambda: True)
         window._poll_reminders()                       # 1º ciclo: mede numa thread
         window._pc_watch_thread.join(5)
-        assert window._pc_watch.poll.call_count == 1 and said == []
+        assert watch.polls == 1 and said == [] and watch.in_game
         window._poll_reminders()                       # tela cheia: só escreve
         assert said == [DISK] and not window._speech_output.speak.called
         window._poll_reminders(); window._poll_reminders()
-        assert window._pc_watch.poll.call_count == 1   # mede a cada 4 ciclos (2 min)
+        assert watch.polls == 1                        # mede a cada 4 ciclos (2 min)
         window._processing = True
         window._poll_reminders()                       # 5º ciclo mede de novo; pedido em andamento segura o aviso
         window._pc_watch_thread.join(5)
         window._poll_reminders()
-        assert window._pc_watch.poll.call_count == 2 and said == [DISK]
+        assert watch.polls == 2 and said == [DISK]
         window._processing = False
+        watch.summary = 'Senhor, na partida a placa chegou a 88 °C.'
         monkeypatch.setattr(reminders, 'do_not_disturb', lambda: False)
-        window._poll_reminders()                       # livre: escreve e fala
-        assert said == [DISK, DISK]
-        window._speech_output.speak.assert_called_once_with(DISK)
+        window._poll_reminders()                       # saiu da tela cheia: fala o que guardou e o resumo
+        assert said == [DISK, DISK, watch.summary] and not watch.in_game
+        assert [call.args[0] for call in window._speech_output.speak.call_args_list] == [DISK, watch.summary]
         window._game_forced = True
-        window._pc_watch_said.append(DISK)
+        window._pc_watch_said.append((DISK, False))
         window._poll_reminders()                       # modo jogo pedido por voz: só escreve
-        assert len(said) == 3 and window._speech_output.speak.call_count == 1
+        assert len(said) == 4 and window._speech_output.speak.call_count == 2
     finally:
         window._processing = False
         window._game_forced = False
         window._speech_output = None
+        close(app, window)
+
+
+def test_window_opens_the_cleanup_offer_only_when_the_warning_is_shown(app, tmp_path, monkeypatch):
+    window = make_window(tmp_path, monkeypatch, True)
+    try:
+        window._pc_watch = FakeWatch([])
+        window._orchestrator._pc_cleanup_offer = None
+        monkeypatch.setattr(window, '_append', lambda sender, text: None)
+        monkeypatch.setattr(reminders, 'do_not_disturb', lambda: False)
+        window._pc_watch_said.append((DISK + ' Quer que eu limpe os temporários seguros? Dá uns 2,0 GB.', True))
+        window._processing = True
+        window._poll_reminders()
+        assert window._orchestrator._pc_cleanup_offer is None   # aviso ainda guardado: sem oferta
+        window._processing = False
+        window._poll_reminders()
+        assert window._orchestrator._pc_cleanup_offer > __import__('time').monotonic() + 100
+    finally:
+        window._processing = False
         close(app, window)
 
 

@@ -168,7 +168,7 @@ def _measure():
             disks[letter] = shutil.disk_usage(letter + ':\\').free
         except OSError:
             pass
-    usage = {}
+    usage, processes = {}, {}
     try:
         listing = subprocess.run(['tasklist', '/fo', 'csv', '/nh'], capture_output=True, text=True, errors='replace', timeout=10,
                                  stdin=subprocess.DEVNULL, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0)).stdout
@@ -176,10 +176,13 @@ def _measure():
             digits = re.sub(r'\D', '', row[4]) if len(row) >= 5 else ''
             if digits:
                 usage[row[0]] = usage.get(row[0], 0) + int(digits) * 1024
+                if row[1].isdigit():
+                    processes[int(row[1])] = (row[0], int(digits) * 1024)   # por PID: o vigia acompanha vazamento
     except (OSError, subprocess.TimeoutExpired):
         pass
     return dict(ram_total=stat.ullTotalPhys, ram_free=stat.ullAvailPhys, commit_total=stat.ullTotalPageFile,
-                commit_free=stat.ullAvailPageFile, disks=disks, top=sorted(usage.items(), key=lambda row: -row[1])[:3])
+                commit_free=stat.ullAvailPageFile, disks=disks, top=sorted(usage.items(), key=lambda row: -row[1])[:3],
+                processes=processes)
 
 
 def _gb(value):

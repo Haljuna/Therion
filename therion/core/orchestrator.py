@@ -2415,8 +2415,11 @@ class Orchestrator(WorkflowSupport, MemorySupport, PersonalContextSupport, Catal
 
         if self._personal_flow_is_free():
             from therion.core.local_reports import answer as local_report, game_mode_request
+            from therion.core.pc_cleanup import answer as pc_cleanup
             game = game_mode_request(command)
-            report = local_report(command, self) if game is None else (
+            # "sim" à oferta de limpeza do vigia do PC, ou "libera espaço"; outra frase cancela a oferta.
+            report = pc_cleanup(command, self)
+            report = report if report is not None else local_report(command, self) if game is None else (
                 'Modo jogo ligado. Libero a placa de vídeo e seguro os avisos até o senhor mandar sair.' if game
                 else 'Modo jogo desligado.')
             if report is not None:

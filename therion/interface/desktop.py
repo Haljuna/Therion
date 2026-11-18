@@ -1085,11 +1085,18 @@ class MainWindow(QMainWindow):
                 self._speech_output.speak(message)
 
     def _poll_pc_watch(self, full_screen):
+        quiet = full_screen or self._game_forced   # no jogo ou em tela cheia só escreve, sem voz
+        if quiet != self._pc_watch.in_game:
+            summary = self._pc_watch.game(quiet)   # ao sair, uma frase com o pior momento da partida
+            if summary:
+                self._pc_watch_said.append((summary, False))
         if not (self._processing or self._pending_plan is not None):
-            quiet = full_screen or self._game_forced   # no jogo ou em tela cheia só escreve, sem voz
             while self._pc_watch_said:
-                message = self._pc_watch_said.pop(0)
+                message, cleanup = self._pc_watch_said.pop(0)
                 self._append('Therion', message)
+                if cleanup:   # o "sim" da próxima frase limpa os temporários seguros (core/pc_cleanup)
+                    from therion.core.pc_cleanup import offer
+                    offer(self._orchestrator)
                 if not quiet and self._speech_output is not None:
                     self._speech_output.speak(message)
         self._pc_watch_ticks += 1
