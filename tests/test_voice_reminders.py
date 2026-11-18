@@ -106,3 +106,126 @@ def test_next_due():
     assert next_due(Repeat((0,), '09:00'), NOW) == datetime(2026, 11, 23, 9, 0)
     assert next_due(Repeat((2,), '09:00'), NOW) == datetime(2026, 11, 25, 9, 0)
     assert next_due(daily, datetime(2026, 11, 30, 9, 0)) == datetime(2026, 12, 1, 8, 0)
+
+
+# --- depósito -------------------------------------------------------------------------------------------------
+import json  # noqa: E402
+from datetime import timedelta  # noqa: E402
+
+from therion.core.voice_reminders import Reminder, ReminderStore, due_message, late_message  # noqa: E402
+
+EVERY_DAY = Repeat(ALL, '08:00')
+
+
+def _store(tmp_path):
+    return ReminderStore(tmp_path / 'lembretes.json')
+
+
+def test_roundtrip_and_atomic_write(tmp_path):
+    store = _store(tmp_path)
+    first = store.add('tirar a roupa da máquina', datetime(2026, 11, 18, 18, 0), None, NOW)
+    second = store.add('tomar remédio', datetime(2026, 11, 19, 8, 0), EVERY_DAY, NOW)
+    again = _store(tmp_path).items()
+    assert again == [first, second]
+    assert first.id.startswith('r-') and first.id != second.id
+    assert not list(tmp_path.glob('*.tmp'))
+    data = json.loads((tmp_path / 'lembretes.json').read_text(encoding='utf-8'))
+    assert data['version'] == 1 and data['items'][1]['repeat'] == {'days': list(ALL), 'time': '08:00'}
+    assert data['items'][0]['due'] == '2026-11-18T18:00:00' and data['items'][0]['repeat'] is None
+
+
+def test_limit_50(tmp_path):
+    store = _store(tmp_path)
+    for n in range(50):
+        store.add(f'item {n}', NOW + timedelta(hours=n + 1), None, NOW)
+    with pytest.raises(ValueError, match='^Você já tem 50 lembretes; cancele algum antes.$'):
+        store.add('mais um', NOW + timedelta(days=9), None, NOW)
+
+
+def test_remove_and_next_time(tmp_path):
+    store = _store(tmp_path)
+    assert store.next_time() is None
+    a = store.add('a', datetime(2026, 11, 18, 19, 0), None, NOW)
+    b = store.add('b', datetime(2026, 11, 18, 18, 0), None, NOW)
+    assert store.next_time() == b.due
+    assert store.remove([b.id, 'r-nope']) == [b]
+    assert store.items() == [a]
+
+
+def test_take_due_on_time_removes_once_and_reschedules_repeat(tmp_path):
+    store = _store(tmp_path)
+    once = store.add('tirar a roupa da máquina', datetime(2026, 11, 18, 18, 0), None, NOW)
+    store.add('tomar remédio', datetime(2026, 11, 19, 8, 0), EVERY_DAY, NOW)
+    on_time, late, old = store.take_due(datetime(2026, 11, 18, 18, 0, 30))
+    assert (on_time, late, old) == ([once], [], 0)
+    assert [r.text for r in store.items()] == ['tomar remédio']
+    assert store.items()[0].due == datetime(2026, 11, 19, 8, 0)
+    assert store.take_due(datetime(2026, 11, 18, 18, 1)) == ([], [], 0)
+
+
+def test_take_due_repeat_on_time_gets_next_date(tmp_path):
+    store = _store(tmp_path)
+    store.add('tomar remédio', datetime(2026, 11, 19, 8, 0), EVERY_DAY, NOW)
+    on_time, late, old = store.take_due(datetime(2026, 11, 19, 8, 0, 10))
+    assert [r.text for r in on_time] == ['tomar remédio'] and late == [] and old == 0
+    assert store.items()[0].due == datetime(2026, 11, 20, 8, 0)
+
+
+def test_sleep_three_hours(tmp_path):
+    store = _store(tmp_path)
+    store.add('tirar a roupa da máquina', datetime(2026, 11, 18, 18, 0), None, NOW)
+    store.add('tomar remédio', datetime(2026, 11, 18, 8, 0), EVERY_DAY, datetime(2026, 11, 17, 9, 0))
+    on_time, late, old = store.take_due(datetime(2026, 11, 18, 21, 0))
+    assert on_time == [] and old == 0
+    assert sorted(r.text for r in late) == ['tirar a roupa da máquina', 'tomar remédio']
+    assert store.items()[0].due == datetime(2026, 11, 19, 8, 0) and len(store.items()) == 1
+
+
+def test_week_closed_daily_said_once_old_counted(tmp_path):
+    store = _store(tmp_path)
+    now = datetime(2026, 11, 25, 9, 0)
+    store.add('tomar remédio', datetime(2026, 11, 18, 8, 0), EVERY_DAY, datetime(2026, 11, 17, 9, 0))
+    store.add('ligar para Fulano', datetime(2026, 11, 17, 10, 0), None, datetime(2026, 11, 16, 9, 0))
+    on_time, late, old = store.take_due(now)
+    assert on_time == [] and old == 1
+    assert [r.text for r in late] == ['tomar remédio'] and late[0].due == datetime(2026, 11, 25, 8, 0)
+    assert store.items()[0].due == datetime(2026, 11, 26, 8, 0)
+
+
+def test_corrupt_file_is_kept_and_reported(tmp_path):
+    path = tmp_path / 'lembretes.json'
+    path.write_text('{x', encoding='utf-8')
+    store = ReminderStore(path)
+    assert store.items() == []
+    bad = list(tmp_path.glob('lembretes.json.bad-*'))
+    assert len(bad) == 1 and bad[0].read_text(encoding='utf-8') == '{x'
+    assert store.broken_notice.startswith('Não consegui ler seus lembretes antigos')
+    assert bad[0].name in store.broken_notice
+
+
+def test_mtime_and_reload(tmp_path):
+    store = _store(tmp_path)
+    assert store.mtime() is None
+    store.add('a', NOW + timedelta(hours=1), None, NOW)
+    assert store.mtime() is not None
+    other = _store(tmp_path)
+    other.add('b', NOW + timedelta(hours=2), None, NOW)
+    assert len(store.items()) == 1
+    store.reload()
+    assert len(store.items()) == 2
+
+
+def _r(text, due):
+    return Reminder('r-0000', text, due, None, NOW)
+
+
+def test_messages():
+    one = _r('tirar a roupa da máquina', datetime(2026, 11, 18, 18, 0))
+    two = _r('ligar para Fulano', datetime(2026, 11, 18, 18, 0))
+    assert due_message([one]) == 'Lembrete: tirar a roupa da máquina.'
+    assert due_message([one, two]) == 'Dois lembretes: tirar a roupa da máquina; ligar para Fulano.'
+    assert late_message([], 0) is None
+    assert late_message([one], 0) == 'Enquanto eu estava fechado, passou da hora de: tirar a roupa da máquina (18:00).'
+    four = [_r(f'item {n}', datetime(2026, 11, 18, 18, n)) for n in range(4)]
+    assert late_message(four, 0) == 'Passaram 4 lembretes enquanto eu estava fechado: item 0, item 1, item 2 e mais 1.'
+    assert late_message([one], 2) == ('Enquanto eu estava fechado, passou da hora de: tirar a roupa da máquina (18:00) e mais 2 antigos.')

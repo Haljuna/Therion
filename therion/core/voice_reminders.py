@@ -3,10 +3,15 @@
 A frase é lida numa cópia sem acento e em minúsculas (mesmo tamanho da original, letra a letra),
 então o texto do lembrete sai com a capitalização que o usuário falou.
 """
+import json
+import os
 import re
+import secrets
+import threading
 import unicodedata
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta
+from pathlib import Path
 
 from therion.calendar.adapter import CalendarError
 from therion.calendar.dialogue import _SPOKEN, _SPOKEN_PATTERN, parse_day, parse_time
@@ -222,3 +227,178 @@ def parse_reminder(command, now):
     if not text:
         return Parsed('need_what', None, due, repeat)
     return Parsed('create', text, due, repeat)
+
+
+# --- depósito -------------------------------------------------------------------------------------------------
+MAX_ITEMS = 50
+ON_TIME = timedelta(minutes=2)
+TOO_OLD = timedelta(days=7)
+_NUMBERS = ('zero', 'um', 'dois', 'três', 'quatro', 'cinco', 'seis', 'sete', 'oito', 'nove', 'dez')
+
+
+@dataclass(frozen=True)
+class Reminder:
+    id: str
+    text: str
+    due: datetime
+    repeat: Repeat | None
+    created: datetime
+
+
+def _to_json(item):
+    repeat = {'days': list(item.repeat.days), 'time': item.repeat.time} if item.repeat else None
+    return dict(id=item.id, text=item.text, due=item.due.isoformat(timespec='seconds'), repeat=repeat,
+                created=item.created.isoformat(timespec='seconds'))
+
+
+def _from_json(row):
+    repeat = row['repeat']
+    return Reminder(str(row['id']), str(row['text']), datetime.fromisoformat(row['due']),
+                    Repeat(tuple(repeat['days']), repeat['time']) if repeat else None,
+                    datetime.fromisoformat(row['created']))
+
+
+class ReminderStore:
+    def __init__(self, path=None):
+        self._path = Path(path) if path else Path(os.environ['LOCALAPPDATA']) / 'Therion' / 'lembretes.json'
+        self._lock = threading.Lock()
+        self.broken_notice = None
+        self._items = []
+        self.reload()
+
+    def reload(self):
+        with self._lock:
+            self._items = self._read()
+
+    def _read(self):
+        try:
+            raw = self._path.read_text(encoding='utf-8')
+        except FileNotFoundError:
+            return []
+        except OSError:
+            return self._quarantine()
+        try:
+            data = json.loads(raw)
+            if data['version'] != 1:
+                raise ValueError('versão')
+            return sorted((_from_json(row) for row in data['items']), key=lambda item: item.due)
+        except (ValueError, KeyError, TypeError):
+            return self._quarantine()
+
+    def _quarantine(self):
+        kept = self._path.with_name(f'{self._path.name}.bad-{datetime.now():%Y%m%d-%H%M%S}')
+        try:
+            os.replace(self._path, kept)
+        except OSError:
+            return []
+        self.broken_notice = f'Não consegui ler seus lembretes antigos; guardei o arquivo como {kept.name}.'
+        return []
+
+    def _write(self):
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = self._path.with_name(self._path.name + '.tmp')
+        try:
+            with open(temporary, 'w', encoding='utf-8') as file:
+                json.dump({'version': 1, 'items': [_to_json(item) for item in self._items]}, file, ensure_ascii=False)
+                file.flush()
+                os.fsync(file.fileno())
+            os.replace(temporary, self._path)
+        finally:
+            if temporary.exists():
+                temporary.unlink()
+
+    def items(self):
+        with self._lock:
+            return list(self._items)
+
+    def add(self, text, due, repeat, now):
+        with self._lock:
+            if len(self._items) >= MAX_ITEMS:
+                raise ValueError(f'Você já tem {MAX_ITEMS} lembretes; cancele algum antes.')
+            taken = {item.id for item in self._items}
+            while (new_id := 'r-' + secrets.token_hex(2)) in taken:
+                pass
+            item = Reminder(new_id, text, due, repeat, now)
+            self._items = sorted([*self._items, item], key=lambda x: x.due)
+            self._write()
+            return item
+
+    def remove(self, ids):
+        ids = set(ids)
+        with self._lock:
+            gone = [item for item in self._items if item.id in ids]
+            if gone:
+                self._items = [item for item in self._items if item.id not in ids]
+                self._write()
+            return gone
+
+    def take_due(self, now):
+        """(na hora, atrasados, quantos passaram de 7 dias). Os que repetem contam uma vez, na ocorrência mais recente."""
+        on_time, late, old = [], [], 0
+        with self._lock:
+            keep = []
+            for item in self._items:
+                if item.due > now:
+                    keep.append(item)
+                    continue
+                if item.repeat:
+                    latest = item.due
+                    while (following := next_due(item.repeat, latest)) <= now:
+                        latest = following
+                    item = replace(item, due=latest)
+                    keep.append(replace(item, due=next_due(item.repeat, now)))
+                lateness = now - item.due
+                if lateness <= ON_TIME:
+                    on_time.append(item)
+                elif lateness <= TOO_OLD:
+                    late.append(item)
+                else:
+                    old += 1
+            if len(keep) != len(self._items) or on_time or late or old:
+                self._items = sorted(keep, key=lambda x: x.due)
+                self._write()
+        return on_time, late, old
+
+    def next_time(self):
+        with self._lock:
+            return self._items[0].due if self._items else None
+
+    def mtime(self):
+        try:
+            return self._path.stat().st_mtime
+        except OSError:
+            return None
+
+
+_shared = None
+_shared_lock = threading.Lock()
+
+
+def store():
+    """Instância única, para o orchestrator e a janela enxergarem o mesmo depósito."""
+    global _shared
+    with _shared_lock:
+        if _shared is None:
+            _shared = ReminderStore()
+        return _shared
+
+
+def _number(count):
+    return _NUMBERS[count] if count < len(_NUMBERS) else str(count)
+
+
+def due_message(reminders):
+    if len(reminders) == 1:
+        return f'Lembrete: {reminders[0].text}.'
+    return f'{_number(len(reminders)).capitalize()} lembretes: ' + '; '.join(r.text for r in reminders) + '.'
+
+
+def late_message(late, old):
+    more = f' e mais {old} antigos' if old else ''
+    if not late:
+        return f'Passaram {old} lembretes antigos enquanto eu estava fechado.' if old else None
+    if len(late) > 3:
+        names = ', '.join(r.text for r in late[:3])
+        return f'Passaram {len(late)} lembretes enquanto eu estava fechado: {names} e mais {len(late) - 3}{more}.'
+    shown = '; '.join(f'{r.text} ({r.due:%H:%M})' for r in late)
+    return f'Enquanto eu estava fechado, passou da hora de: {shown}{more}.'
