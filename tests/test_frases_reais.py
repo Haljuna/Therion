@@ -40,6 +40,9 @@ def route(phrase):
     from therion.core.voice_reminders import reminder_request
     if reminder_request(phrase, SimpleNamespace(desktop_timers=True)):
         return 'lembrete'
+    from therion.core.focus import focus_request
+    if focus_request(phrase):
+        return 'foco'
     intent = IntentRecognizer().parse(phrase)
     return intent.action if intent else 'conversa'
 

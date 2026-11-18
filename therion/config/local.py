@@ -119,6 +119,16 @@ def _validate_config(data: dict[str, Any]) -> dict[str, Any]:
     if type(ui.get('mini_orb')) is not bool:
         ui['mini_orb'] = True
 
+    # focus.minutes (5-180) e focus.pause (1-60); ausente é aceito, valor inválido volta ao padrão
+    focus = validated.get("focus")
+    if focus is not None:
+        focus = dict(focus) if isinstance(focus, dict) else {}
+        for key, low, high, default in (("minutes", 5, 180, 50), ("pause", 1, 60, 10)):
+            value = focus.get(key)
+            if key in focus and (type(value) is not int or not low <= value <= high):
+                focus[key] = default
+        validated["focus"] = focus
+
     # aliases -> dict
     aliases = validated.get("aliases")
     if not isinstance(aliases, dict):

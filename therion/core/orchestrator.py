@@ -2417,11 +2417,22 @@ class Orchestrator(WorkflowSupport, MemorySupport, PersonalContextSupport, Catal
             from therion.core.local_reports import answer as local_report, game_mode_request
             from therion.core.pc_cleanup import answer as pc_cleanup
             from therion.core.voice_reminders import answer as reminder_answer
+            from therion.core.focus import answer as focus_answer
             reminder = reminder_answer(command, self)
             if reminder is not None:
                 self._pc_cleanup_offer = None   # a oferta de limpeza vale só para a próxima frase
+                self._focus_offer = None
                 result = OrchestrationResult(status='success', message=reminder,
                     ui_action='reminders' if self.__dict__.pop('_reminders_changed', False) else None)
+                self._complete_task()
+                self._finalize_session_result(result)
+                return result
+            focused = focus_answer(command, self)
+            if focused is not None:
+                self._pc_cleanup_offer = None   # só uma oferta pendente é dona do "sim"
+                self._reminder_pending = None
+                result = OrchestrationResult(status='success', message=focused[0],
+                    ui_action='focus' if focused[1] else None, ui_payload=focused[1])
                 self._complete_task()
                 self._finalize_session_result(result)
                 return result

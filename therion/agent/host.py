@@ -401,11 +401,13 @@ class AgentSupport:
         from therion.core.local_reports import report_request
         from therion.core.pc_cleanup import wanted as cleanup_wanted
         from therion.core.voice_reminders import reminder_request
+        from therion.core.focus import wanted as focus_wanted
         status_followup=self._catalog_status_followup(syntax.command)
         if (personal_request(syntax.command,voice=self.voice_conversation) is not None or capabilities_request(syntax.command)
                 or current_date_request(syntax.command) or current_time_request(syntax.command) or app_status_request(syntax.command) or report_request(syntax.command)
                 or cleanup_wanted(syntax.command,self)
                 or reminder_request(syntax.command,self)
+                or focus_wanted(syntax.command,self)
                 or app_close_request(syntax.command) or app_result_request(syntax.command)
                 or status_followup):
             # Relógio, capacidades e perfil mantêm seus resolvedores locais.

@@ -242,6 +242,15 @@ class TestConfig(unittest.TestCase):
         self.assertEqual(result["voice"]["extra_param"], "foo")
         self.assertEqual(result["voice"]["nested"], {"a": 1})
 
+    def test_focus_ausente_e_aceito_e_valores_fora_do_intervalo_voltam_ao_padrao(self) -> None:
+        """focus ausente fica ausente; minutes 5-180 e pause 1-60, o resto volta ao padrão."""
+        self.assertNotIn("focus", _validate_config({}))
+        self.assertEqual(_validate_config({"focus": {"minutes": 25, "pause": 15}})["focus"], {"minutes": 25, "pause": 15})
+        self.assertEqual(_validate_config({"focus": {"minutes": 200}})["focus"], {"minutes": 50})
+        self.assertEqual(_validate_config({"focus": {"minutes": 4, "pause": 61}})["focus"], {"minutes": 50, "pause": 10})
+        self.assertEqual(_validate_config({"focus": {"minutes": True, "pause": "x"}})["focus"], {"minutes": 50, "pause": 10})
+        self.assertEqual(_validate_config({"focus": "x"})["focus"], {})
+
 
 if __name__ == "__main__":
     unittest.main()
