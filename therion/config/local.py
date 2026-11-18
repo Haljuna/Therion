@@ -115,6 +115,9 @@ def _validate_config(data: dict[str, Any]) -> dict[str, Any]:
     # Vigia do PC: avisa sozinho quando disco C, memória ou placa de vídeo apertam; ligado salvo pedido contrário.
     if type(ui.get('pc_watch')) is not bool:
         ui['pc_watch'] = True
+    # Mini orbe flutuante sobre as outras janelas; ligada salvo pedido contrário.
+    if type(ui.get('mini_orb')) is not bool:
+        ui['mini_orb'] = True
 
     # aliases -> dict
     aliases = validated.get("aliases")

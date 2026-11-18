@@ -3,7 +3,7 @@ import subprocess
 from unittest.mock import MagicMock, patch
 
 import pytest
-from PySide6.QtCore import QEvent
+from PySide6.QtCore import QEvent, QRect
 from PySide6.QtWidgets import QApplication
 
 from therion.config.local import _validate_config
@@ -270,3 +270,107 @@ def test_window_with_the_watch_off_never_measures(app, tmp_path, monkeypatch):
         window._poll_reminders()
     finally:
         close(app, window)
+
+
+def test_tight_ignores_leaks_already_told():
+    watch = PcWatch()
+    watch._active = {'leak:9'}
+    assert watch.tight() is False
+    watch._active = {'leak:9', 'disk'}
+    assert watch.tight() is True
+
+
+def test_the_mini_orb_is_on_unless_the_user_turns_it_off():
+    assert _validate_config({})['ui']['mini_orb'] is True
+    assert _validate_config({'ui': {'mini_orb': 'sim'}})['ui']['mini_orb'] is True
+    assert _validate_config({'ui': {'mini_orb': False}})['ui']['mini_orb'] is False
+
+
+class FakeMini:
+    def __init__(self, *args, **kwargs):
+        self.kwargs, self.calls, self.rect = kwargs, [], QRect(100, 100, 96, 96)
+
+    def show(self):
+        self.calls.append(('show',))
+
+    def set_state(self, state, tight):
+        self.calls.append(('state', state, tight))
+
+    def set_quiet(self, quiet):
+        self.calls.append(('quiet', quiet))
+
+    def hide_for_game(self, hidden):
+        self.calls.append(('hide', hidden))
+
+    def frameGeometry(self):
+        return self.rect
+
+    def shut(self):
+        self.calls.append(('shut',))
+
+
+def make_mini_window(tmp_path, monkeypatch, mini=True, watch=True):
+    from therion.interface import desktop
+    monkeypatch.setattr(desktop, 'MiniOrb', FakeMini)
+    for variable in ('APPDATA', 'LOCALAPPDATA'):
+        folder = tmp_path / variable
+        folder.mkdir(exist_ok=True)
+        monkeypatch.setenv(variable, str(folder))
+    config = {'ai': {'enabled': False}, 'tts': {'enabled': False}, 'ui': {'mini_orb': mini, 'pc_watch': watch}}
+    with patch.object(desktop.MainWindow, '_setup_tray'):
+        return desktop.MainWindow(MagicMock(), config=config, config_writer=MagicMock(), log_dir=tmp_path / 'logs')
+
+
+def test_window_without_the_setting_has_no_mini_orb(app, tmp_path, monkeypatch):
+    window = make_mini_window(tmp_path, monkeypatch, mini=False, watch=False)
+    assert window._mini_orb is None and not window._reminder_timer.isActive()
+    close(app, window)
+
+
+def test_window_mirrors_the_orb_state_and_turns_amber_when_the_pc_is_tight(app, tmp_path, monkeypatch):
+    window = make_mini_window(tmp_path, monkeypatch)
+    mini = window._mini_orb
+    assert mini.kwargs['path'].endswith('mini_orb.json') and ('show',) in mini.calls and window._reminder_timer.isActive()
+    window._pc_watch._active = {'disk'}
+    window._update_orbe('idle')
+    assert mini.calls[-1] == ('state', 'idle', True)
+    window._pc_watch._active = set()
+    window._update_orbe('idle')
+    assert mini.calls[-1] == ('state', 'idle', False)
+    window._pc_watch._active = {'disk'}
+    window._pc_watch_said.append(('Senhor, o disco C está cheio.', False))
+    monkeypatch.setattr(window, '_append', lambda *a, **k: None)
+    window._poll_pc_watch(False)
+    assert mini.calls[-1] == ('state', 'idle', True)
+    window._mini_orb = None
+    close(app, window)
+
+
+def test_a_fullscreen_game_on_the_same_monitor_hides_the_mini_orb(app, tmp_path, monkeypatch):
+    window = make_mini_window(tmp_path, monkeypatch, watch=False)
+    mini = window._mini_orb
+    monkeypatch.setattr(reminders, 'do_not_disturb', lambda: True)
+    monkeypatch.setattr(reminders, 'fullscreen_screen', lambda: mini.frameGeometry())
+    window._poll_reminders()
+    assert ('hide', True) in mini.calls and ('quiet', True) in mini.calls
+    monkeypatch.setattr(reminders, 'fullscreen_screen', lambda: QRect(0, 0, 10, 10))
+    window._poll_reminders()
+    assert mini.calls[-1] == ('hide', False)
+    monkeypatch.setattr(reminders, 'do_not_disturb', lambda: False)
+    monkeypatch.setattr(reminders, 'fullscreen_screen', lambda: None)
+    window._poll_reminders()
+    assert mini.calls[-2:] == [('quiet', False), ('hide', False)]
+    window._mini_orb = None
+    close(app, window)
+
+
+def test_quitting_closes_the_mini_orb_first(app, tmp_path, monkeypatch):
+    window = make_mini_window(tmp_path, monkeypatch, watch=False)
+    mini = window._mini_orb
+    order = []
+    monkeypatch.setattr(window._app, 'quit', lambda: order.append('quit'))
+    mini.shut = lambda: order.append('shut')
+    window._quit_application()
+    assert order == ['shut', 'quit']
+    window._mini_orb = None
+    close(app, window)

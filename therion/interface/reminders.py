@@ -23,6 +23,38 @@ def do_not_disturb():
     return state.value in (2, 3, 4)   # QUNS_BUSY, QUNS_RUNNING_D3D_FULL_SCREEN, QUNS_PRESENTATION_MODE
 
 
+def fullscreen_screen():
+    """Retângulo (coordenadas lógicas do Qt) do monitor do app em primeiro plano, só quando do_not_disturb()."""
+    if not do_not_disturb():
+        return None
+    try:
+        from ctypes import wintypes
+        from PySide6.QtCore import QPoint, QRect
+        from PySide6.QtGui import QGuiApplication
+
+        class MonitorInfo(ctypes.Structure):
+            _fields_ = [('cbSize', wintypes.DWORD), ('rcMonitor', wintypes.RECT), ('rcWork', wintypes.RECT),
+                        ('dwFlags', wintypes.DWORD)]
+
+        user32 = ctypes.windll.user32
+        user32.GetForegroundWindow.restype = wintypes.HWND
+        user32.MonitorFromWindow.restype = wintypes.HANDLE
+        user32.MonitorFromWindow.argtypes = [wintypes.HWND, wintypes.DWORD]
+        user32.GetMonitorInfoW.argtypes = [wintypes.HANDLE, ctypes.POINTER(MonitorInfo)]
+        window = user32.GetForegroundWindow()
+        info = MonitorInfo(cbSize=ctypes.sizeof(MonitorInfo))
+        if not window or not user32.GetMonitorInfoW(user32.MonitorFromWindow(window, 2), ctypes.byref(info)):   # 2 = MONITOR_DEFAULTTONEAREST
+            return None
+        box = info.rcMonitor   # pixels físicos; o Qt guarda a origem da tela nativa e só divide o tamanho pelo devicePixelRatio
+        for screen in QGuiApplication.screens():
+            if screen.geometry().topLeft() == QPoint(box.left, box.top):
+                return QRect(screen.geometry())
+        screen = QGuiApplication.screenAt(QPoint((box.left + box.right) // 2, (box.top + box.bottom) // 2))
+        return QRect(screen.geometry()) if screen is not None else None
+    except Exception:   # nunca derruba o relógio da janela
+        return None
+
+
 class EventReminders:
     def __init__(self):
         self._pending = {}

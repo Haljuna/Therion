@@ -104,6 +104,10 @@ class PcWatch:
         self.in_game = False
         self._worst = {}
 
+    def tight(self):
+        """True se há problema do PC em aberto; vazamento já avisado não deixa a mini orbe âmbar."""
+        return any(not key.startswith('leak:') for key in self._active)
+
     # --- jogo -------------------------------------------------------------------------------------------------
     def game(self, on):
         """Entrar zera o pior momento; sair devolve o resumo da partida, ou None se nada apertou."""

@@ -205,3 +205,13 @@ def test_a_four_pixel_move_is_still_a_click_and_hover_shows_the_last_value_at_on
     QApplication.sendEvent(window, QEvent(QEvent.Enter))
     assert window.label.isVisible() and window.label.text() == 'RAM 62% · VRAM 18% · C 2,5 GB'
     window.shut()
+
+
+def test_hiding_for_a_game_also_closes_the_panel_and_stops_its_watch(app, tmp_path):
+    window, _ = make(tmp_path)
+    window.show()
+    QTest.mouseClick(window, Qt.LeftButton, Qt.NoModifier, QPoint(48, 48))
+    assert window.panel.isVisible() and window.watch_timer.isActive()
+    window.hide_for_game(True)
+    assert not window.panel.isVisible() and not window.watch_timer.isActive()
+    window.shut()

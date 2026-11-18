@@ -43,6 +43,7 @@ from therion.core.orchestrator import OrchestrationResult, Orchestrator, Plan
 from therion.context.second_brain import SecondBrainReader
 from therion.memory.runtime import KnowledgeRuntime
 from therion.interface.native_accessibility import prepare_native_accessibility
+from therion.interface.mini_orb import MiniOrb
 from therion.governance.confirmation import ConfirmationHandler
 from therion.voice.capture import AudioCaptureService
 from therion.voice.pipeline import VoicePipeline
@@ -352,7 +353,14 @@ class MainWindow(QMainWindow):
         self._pc_watch_ticks = 0
         self._pc_watch_thread = None
         self._pc_watch_said = []
-        if self._reminders is not None or self._game_mode or self._pc_watch is not None:
+        # Mini orbe flutuante (ui.mini_orb, ligada por padrão): espelha o estado do orbe e do vigia.
+        self._orbe_state = 'idle'
+        self._mini_orb = None
+        if (self._config.get('ui') or {}).get('mini_orb') is True:
+            self._mini_orb = MiniOrb(path=os.path.join(os.environ.get('LOCALAPPDATA', ''), 'Therion', 'mini_orb.json'),
+                                     on_open_main=self._show_main_window)
+            self._mini_orb.show()
+        if self._reminders is not None or self._game_mode or self._pc_watch is not None or self._mini_orb is not None:
             self._reminder_timer.start()
         self._next_user_channel = 'texto'
         self._command_started_at = None
@@ -1070,8 +1078,12 @@ class MainWindow(QMainWindow):
     def _poll_reminders(self):
         if self._closing or self._quit_requested:
             return
-        from therion.interface.reminders import do_not_disturb
-        full_screen = do_not_disturb()
+        from therion.interface import reminders
+        full_screen = reminders.do_not_disturb()
+        if self._mini_orb is not None:
+            self._mini_orb.set_quiet(full_screen or self._game_forced)
+            rect = reminders.fullscreen_screen()
+            self._mini_orb.hide_for_game(rect is not None and rect.intersects(self._mini_orb.frameGeometry()))
         if self._game_mode:
             self._poll_game_mode(full_screen)
         if self._pc_watch is not None:
@@ -1099,6 +1111,7 @@ class MainWindow(QMainWindow):
                     offer(self._orchestrator)
                 if not quiet and self._speech_output is not None:
                     self._speech_output.speak(message)
+                self._update_orbe(self._orbe_state)   # o âmbar da mini orbe acompanha o problema recém-avisado
         self._pc_watch_ticks += 1
         busy = self._pc_watch_thread is not None and self._pc_watch_thread.is_alive()
         if self._pc_watch_ticks % 4 == 1 and not busy:   # 30 s depois de abrir e depois a cada 2 min
@@ -1860,6 +1873,11 @@ class MainWindow(QMainWindow):
         Resiliente quando widgets ainda não existem (ex: testes com _setup_ui mockado).
         """
         color, text = _ORBE_STATES.get(state, (_ORBE_IDLE, "Pronto"))
+        self._orbe_state = state
+        mini = getattr(self, '_mini_orb', None)
+        if mini is not None:
+            watch = getattr(self, '_pc_watch', None)
+            mini.set_state(state, watch is not None and watch.tight())
         if hasattr(self, "_orbe"):
             self._orbe.setStyleSheet(
                 f"background-color: {color}; border-radius: 28px;"
@@ -1923,7 +1941,17 @@ class MainWindow(QMainWindow):
             self._orchestrator.close()
         if self._tray_icon:
             self._tray_icon.hide()
+        self._shut_mini_orb()
         self._app.quit()
+
+    def _show_main_window(self):
+        self.showNormal()
+        self.raise_()
+        self.activateWindow()
+
+    def _shut_mini_orb(self):
+        if self._mini_orb is not None:
+            self._mini_orb.shut()   # idempotente: fecha o painel, a leitura e o renderizador
 
     def hideEvent(self, event) -> None:
         if not self.isMinimized() and not self._changing_window_mode:
@@ -1947,6 +1975,7 @@ class MainWindow(QMainWindow):
         if self._closing:
             if self._tray_icon:
                 self._tray_icon.hide()
+            self._shut_mini_orb()
             super().closeEvent(event)
             return
 
@@ -1966,6 +1995,7 @@ class MainWindow(QMainWindow):
                 self._tray_icon.hide()
             if hasattr(self._orchestrator, 'close'):
                 self._orchestrator.close()
+            self._shut_mini_orb()
             super().closeEvent(event)
 
 
