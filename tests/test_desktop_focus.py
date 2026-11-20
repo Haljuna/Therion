@@ -164,6 +164,9 @@ class TimerOrb:
     def set_timer(self, look):
         self.looks.append(look)
 
+    def park(self, on):
+        self.parked = on
+
 
 def test_both_orbs_get_the_timer_every_second_only_during_focus(app, window, shared):
     mini, big = TimerOrb(), TimerOrb()

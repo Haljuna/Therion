@@ -28,7 +28,7 @@ from PySide6.QtWidgets import (
     QSizePolicy,
     QSpacerItem,
 )
-from PySide6.QtGui import QAction, QKeyEvent, QFont, QIcon, QShortcut, QKeySequence
+from PySide6.QtGui import QAction, QGuiApplication, QKeyEvent, QFont, QIcon, QShortcut, QKeySequence
 from PySide6.QtCore import Qt, QThread, Signal, Slot, QTimer, QEvent
 from shiboken6 import isValid
 from .surface_dialogs import MessageBox as QMessageBox
@@ -44,7 +44,7 @@ from therion.core.orchestrator import OrchestrationResult, Orchestrator, Plan
 from therion.context.second_brain import SecondBrainReader
 from therion.memory.runtime import KnowledgeRuntime
 from therion.interface.native_accessibility import prepare_native_accessibility
-from therion.interface.mini_orb import MiniOrb
+from therion.interface.mini_orb import MiniOrb, beside
 from therion.governance.confirmation import ConfirmationHandler
 from therion.voice.capture import AudioCaptureService
 from therion.voice.pipeline import VoicePipeline
@@ -358,9 +358,11 @@ class MainWindow(QMainWindow):
         # Mini orbe flutuante (ui.mini_orb, ligada por padrão): espelha o estado do orbe e do vigia.
         self._orbe_state = 'idle'
         self._mini_orb = None
+        # Modo jogo, foco e minimizar levam a orbe ao canto do segundo monitor; ela volta quando o último sai.
+        self._orb_park, self._game_hid, self._orb_compacted = set(), False, False
         if (self._config.get('ui') or {}).get('mini_orb') is True:
             self._mini_orb = MiniOrb(path=os.path.join(os.environ.get('LOCALAPPDATA', ''), 'Therion', 'mini_orb.json'),
-                                     on_open_main=self._show_window)
+                                     on_open_main=self._show_window, on_click=self._toggle_chat_from_orb)
             self._mini_orb.show()
         # Lembretes por voz e foco não têm chave de config: o tique de 30 s roda sempre (reserva do disparo na hora).
         self._reminder_timer.start()
@@ -869,10 +871,20 @@ class MainWindow(QMainWindow):
         self._tray_icon.show()
 
     def _show_window(self) -> None:
+        """Janela completa (menu da orbe, bandeja, fim do modo jogo): desfaz o minimizar e o chat pequeno da orbe."""
+        self._park_orb('minimize', False)
+        if self._orb_compacted:
+            self._orb_compacted = False
+            dashboard = getattr(self, '_dashboard', None)
+            if dashboard is not None and dashboard.compact:
+                dashboard.set_compact(False)
+        self._raise_window()
+
+    def _raise_window(self) -> None:
+        """Mostra e traz a janela para frente."""
         dashboard = getattr(self, '_dashboard', None)
         if dashboard is not None and self._interface_stack.currentWidget() is self._dashboard_scroll:
             dashboard.activate(True)
-        """Mostra e traz a janela para frente."""
         if self.isMinimized():
             self._changing_window_mode=True
             try:self.setWindowState(self.windowState() & ~Qt.WindowMinimized)
@@ -966,8 +978,43 @@ class MainWindow(QMainWindow):
         worker.start()
 
     def _minimize_window(self) -> None:
-        """Minimiza a janela normalmente."""
-        self.showMinimized()
+        """Com a mini orbe, a janela some e fica só a orbe no segundo monitor; sem ela, minimiza normalmente."""
+        if self._mini_orb is None:
+            self.showMinimized()
+            return
+        self._park_orb('minimize', True)
+        self._tuck_to_orb()
+
+    def _park_orb(self, reason, on):
+        """Motivos: 'game', 'focus', 'minimize'. A orbe fica no canto enquanto sobrar algum."""
+        (self._orb_park.add if on else self._orb_park.discard)(reason)
+        if self._mini_orb is not None:
+            self._mini_orb.park(bool(self._orb_park))
+
+    def _tuck_to_orb(self):
+        """Esconde a janela sem o hideEvent encerrar a conversa por voz nem a fala."""
+        if self._mini_orb is None:
+            self.showMinimized()
+            return
+        self._changing_window_mode = True
+        try:
+            self.hide()
+        finally:
+            QTimer.singleShot(0, self._finish_window_mode_change)
+
+    def _toggle_chat_from_orb(self):
+        """Clique na orbe: chat pequeno ao lado dela; outro clique, só a orbe de novo."""
+        if self.isVisible() and not self.isMinimized():
+            self._tuck_to_orb()
+            return
+        dashboard = self._dashboard if self._dashboard is not None and self._dashboard.active else None
+        if dashboard is not None and not dashboard.compact:
+            dashboard.set_compact(True)
+            self._orb_compacted = dashboard.compact
+        self._raise_window()
+        mini = self._mini_orb
+        screen = (QGuiApplication.screenAt(mini.frameGeometry().center()) or QGuiApplication.primaryScreen()).availableGeometry()
+        self.move(beside(mini.frameGeometry(), self.frameGeometry().size(), screen))
 
     def _toggle_full_screen(self):
         """Altera somente o modo da janela, sem tocar na sessão ou no áudio."""
@@ -1093,7 +1140,18 @@ class MainWindow(QMainWindow):
             self._unload_model()
             if not self._reminder_timer.isActive():
                 self._reminder_timer.start()   # os avisos guardados saem quando o modo for desligado
-        # A janela vai para o modo compacto com o jogo e volta só se foi o modo jogo que a encolheu.
+        if self._mini_orb is not None:   # só a orbe no segundo monitor; a janela volta se estava aberta
+            if on:
+                self._game_hid = self._game_hid or (self.isVisible() and not self.isMinimized())
+                self._park_orb('game', True)
+                self._tuck_to_orb()
+            else:
+                self._park_orb('game', False)
+                if self._game_hid:
+                    self._game_hid = False
+                    self._show_window()
+            return
+        # Sem a mini orbe: a janela vai para o modo compacto com o jogo e volta só se foi o modo jogo que a encolheu.
         dashboard = self._dashboard if self._dashboard is not None and self._dashboard.active else None
         if dashboard is not None and on and not dashboard.compact:
             dashboard.set_compact(True)
@@ -1256,6 +1314,7 @@ class MainWindow(QMainWindow):
             self._focus_finished(payload.get('minutes') or 0, datetime.fromisoformat(payload['start']),
                                  payload.get('held') or [])
         self._show_timer()
+        self._park_orb('focus', self._focus_view is not None)
 
     def _timer_look(self):
         view = self._focus_view

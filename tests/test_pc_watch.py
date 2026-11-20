@@ -306,6 +306,12 @@ class FakeMini:
     def frameGeometry(self):
         return self.rect
 
+    def park(self, on):
+        self.calls.append(('park', on))
+
+    def set_timer(self, look):
+        self.calls.append(('timer', look))
+
     def shut(self):
         self.calls.append(('shut',))
 
@@ -427,6 +433,89 @@ def test_game_mode_quiets_the_mini_orb_at_once(app, tmp_path, monkeypatch):
     window._set_game_mode(True)
     assert ('quiet', True) in mini.calls
     window._set_game_mode(False)
-    assert mini.calls[-1] == ('quiet', False)
+    assert [call for call in mini.calls if call[0] == 'quiet'][-1] == ('quiet', False)
     window._mini_orb = None
+    close(app, window)
+
+
+# ---- só a orbe no segundo monitor: modo jogo, foco e minimizar ----
+def _parks(mini):
+    return [call[1] for call in mini.calls if call[0] == 'park']
+
+
+def test_game_mode_hides_the_window_and_parks_the_orb(app, tmp_path, monkeypatch):
+    window = make_mini_window(tmp_path, monkeypatch, watch=False)
+    window.show(); app.processEvents()
+    window._set_game_mode(True); app.processEvents()
+    assert not window.isVisible() and _parks(window._mini_orb)[-1] is True
+    window._set_game_mode(False); app.processEvents()
+    assert window.isVisible() and _parks(window._mini_orb)[-1] is False
+    close(app, window)
+
+
+def test_game_mode_does_not_reopen_a_window_that_was_hidden(app, tmp_path, monkeypatch):
+    window = make_mini_window(tmp_path, monkeypatch, watch=False)
+    window.hide(); app.processEvents()
+    window._set_game_mode(True); window._set_game_mode(False); app.processEvents()
+    assert not window.isVisible()
+    close(app, window)
+
+
+def test_focus_and_game_keep_the_orb_parked_until_both_end(app, tmp_path, monkeypatch):
+    from datetime import datetime
+    window = make_mini_window(tmp_path, monkeypatch, watch=False)
+    window.show(); app.processEvents()
+    window._set_game_mode(True)
+    window._apply_focus({'phase': 'focus', 'start': datetime.now().isoformat(), 'minutes': 25})
+    window._set_game_mode(False)
+    assert _parks(window._mini_orb)[-1] is True
+    window._apply_focus({})
+    assert _parks(window._mini_orb)[-1] is False
+    close(app, window)
+
+
+def test_minimize_hides_into_the_orb_and_full_open_brings_it_back(app, tmp_path, monkeypatch):
+    window = make_mini_window(tmp_path, monkeypatch, watch=False)
+    window.show(); app.processEvents()
+    window._minimize_window(); app.processEvents()
+    assert not window.isVisible() and _parks(window._mini_orb)[-1] is True
+    window._show_window(); app.processEvents()
+    assert window.isVisible() and _parks(window._mini_orb)[-1] is False
+    close(app, window)
+
+
+def test_hiding_into_the_orb_keeps_the_voice_conversation(app, tmp_path, monkeypatch):
+    window = make_mini_window(tmp_path, monkeypatch, watch=False)
+    window.show(); app.processEvents()
+    ended = []
+    monkeypatch.setattr(window, '_end_conversation', lambda *a, **k: ended.append('conversa'))
+    monkeypatch.setattr(window, '_stop_speech', lambda *a, **k: ended.append('fala'))
+    window._minimize_window(); app.processEvents()
+    window._set_game_mode(True); app.processEvents()
+    assert ended == []
+    close(app, window)
+
+
+def test_orb_click_toggles_the_chat(app, tmp_path, monkeypatch):
+    window = make_mini_window(tmp_path, monkeypatch, watch=False)
+    window.show(); app.processEvents()
+    window._set_game_mode(True); app.processEvents()
+    window._toggle_chat_from_orb(); app.processEvents()
+    assert window.isVisible()
+    window._toggle_chat_from_orb(); app.processEvents()
+    assert not window.isVisible() and _parks(window._mini_orb)[-1] is True
+    close(app, window)
+
+
+def test_the_orb_click_is_wired_to_the_chat(app, tmp_path, monkeypatch):
+    window = make_mini_window(tmp_path, monkeypatch, watch=False)
+    assert window._mini_orb.kwargs['on_click'] == window._toggle_chat_from_orb
+    close(app, window)
+
+
+def test_without_mini_orb_minimize_still_minimizes(app, tmp_path, monkeypatch):
+    window = make_mini_window(tmp_path, monkeypatch, mini=False, watch=False)
+    window.show(); app.processEvents()
+    window._minimize_window(); app.processEvents()
+    assert window.isMinimized()
     close(app, window)
