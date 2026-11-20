@@ -231,3 +231,15 @@ def test_tira_a_print_pelo_orquestrador_sem_o_modelo(case, monkeypatch, tmp_path
     assert result.speech_message == 'Print salvo.' and not agent.observations and provider.mock_calls == []
     memo = host.process_command('Therion, anota que o teste passou.')
     assert 'teste passou' in memo.message and provider.mock_calls == []
+
+
+def test_repete_depois_do_print_repete_o_print(case, monkeypatch, tmp_path):
+    # 20/11 ao vivo: rotas rápidas (print, contar e-mails) não entravam na conversa e "Repete" voltava uma resposta.
+    import therion.core.screenshot as screenshot
+    host, provider, _, _ = case
+    enable(host)
+    host._now_func = lambda: datetime(2026, 11, 20, 20, 38, 0)
+    monkeypatch.setattr(screenshot, 'take_screenshot', lambda: tmp_path / 'Therion x.png')
+    host.process_command('Que horas são?')
+    shot = host.process_command('Tira a print.').message
+    assert host.process_command('Repete, por favor.').message == shot

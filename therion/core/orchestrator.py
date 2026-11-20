@@ -916,7 +916,7 @@ class Orchestrator(WorkflowSupport, MemorySupport, PersonalContextSupport, Catal
             try:
                 self._workflow_cancel_event=cancelled if cancelled is not None else threading.Event()
                 navigation=self._mail_navigation(command,cancelled,presentation)
-                if navigation is not None:return navigation
+                if navigation is not None:return self._remember_navigation(command,navigation)
                 agent_result = self._dispatch_agent(command, cancelled)
                 if agent_result is not None:
                     return agent_result
@@ -2197,6 +2197,12 @@ class Orchestrator(WorkflowSupport, MemorySupport, PersonalContextSupport, Catal
         from therion.agent.briefing import acknowledge
         return acknowledge(self,identifier)
 
+    def _remember_navigation(self,command,result):
+        # 20/11: rotas rápidas (print, contar e-mails) ficavam fora da conversa e "Repete" voltava uma resposta.
+        if result.status!='cancelled':
+            self.memory.add_turn('user',command);self.memory.add_turn('therion',result.message)
+        return result
+
     def _mail_navigation(self,command,cancelled=None,presentation=None):
         from therion.agent.briefing import briefing_command,collect
         from therion.agent.contracts import CancellationToken,Cancelled
@@ -2249,7 +2255,7 @@ class Orchestrator(WorkflowSupport, MemorySupport, PersonalContextSupport, Catal
             before = self._pendings()
             try:
                 navigation=self._mail_navigation(command)
-                if navigation is not None:return navigation
+                if navigation is not None:return self._remember_navigation(command,navigation)
                 self._sync_knowledge_access()
                 agent_result = self._dispatch_agent(command)
                 if agent_result is not None:
