@@ -40,8 +40,20 @@ def test_audio_stream_preserves_numbers_and_rejects_empty_or_large_result(monkey
     text='A revisão é às 14:30. O código é 42.'
     assert asyncio.run(edge_worker.download_audio(text,edge_worker.VOICES[0],Client))==b'onetwo'
     assert observed[0][0]==text and observed[0][1]['proxy'] is None
+    assert observed[0][1]['rate']=='+12%' and observed[0][1]['pitch']=='-8Hz'
     monkeypatch.setattr(edge_worker,'MAX_AUDIO_BYTES',2)
     with pytest.raises(ValueError,match='limite'):asyncio.run(edge_worker.download_audio(text,edge_worker.VOICES[0],Client))
+
+
+def test_trim_silence_keeps_short_natural_pause():
+    # 2026-11-16: o Edge devolve ~0,15 s antes e ~0,77 s depois de cada pedaço; somava ~1 s mudo por emenda.
+    import array
+    rate=24000
+    samples=array.array('h',[0]*int(.15*rate)+[1000]*rate+[0]*int(.77*rate))
+    trimmed=array.array('h');trimmed.frombytes(edge_worker.trim_silence(samples.tobytes()))
+    assert len(trimmed)==int(.05*rate)+rate+int(.30*rate)
+    silent=array.array('h',[0]*rate).tobytes()
+    assert edge_worker.trim_silence(silent)==silent
 
 
 def test_mp3_is_decoded_to_valid_mono_wav(tmp_path):

@@ -86,6 +86,19 @@ def test_stt_profile_rejects_mixed_routes(tmp_path,voice):
     assert result.returncode!=0 and 'Nenhuma opcao foi alterada' in result.stderr
 
 
+@pytest.mark.parametrize('voice,online,expected',[
+    (dict(provider='whisper'),True,'whisper'),
+    (dict(provider='parakeet_http',endpoint='http://127.0.0.1:3902/v1/audio/transcriptions'),True,'parakeet'),
+    (dict(provider='whisper'),False,None)])
+def test_stt_profile_accepts_edge_voice_only_when_online_allowed(tmp_path,voice,online,expected):
+    # 2026-11-16: voz Edge (Antonio) no lugar do Jarvis para aliviar a memória.
+    row=dict(voice=dict(model_path=str(tmp_path),**voice),tts=dict(provider='edge',online_allowed=online),
+             ai=dict(endpoint='http://127.0.0.1:11435/api/chat'))
+    result=run(f"Get-TherionSttProfile ('{json.dumps(row).replace(chr(39),chr(39)*2)}' | ConvertFrom-Json)")
+    if expected:assert result.returncode==0 and result.stdout.strip()==expected,result.stderr
+    else:assert result.returncode!=0 and 'Nenhuma opcao foi alterada' in result.stderr
+
+
 def test_stt_profile_rejects_missing_whisper_model(tmp_path):
     row=json.dumps(stt_config(str(tmp_path/'ausente'),provider='whisper',speech='http://127.0.0.1:3901/v1/audio/speech'))
     result=run(f"Get-TherionSttProfile ('{row.replace(chr(39),chr(39)*2)}' | ConvertFrom-Json)")
@@ -113,3 +126,11 @@ def test_jarvis_wait_covers_cold_boot_on_hd():
     text=(SCRIPT.parent/'Start-Therion.ps1').read_text(encoding='utf-8-sig')
     limit=int(re.search(r"TotalSeconds -gt (\d+)\) \{ throw 'Jarvis nao ficou pronto",text).group(1))
     assert limit>=900
+
+
+def test_jarvis_only_starts_when_voice_is_voicestudio():
+    # 2026-11-16: com a voz no Edge o Jarvis (~5 GB de commit) não deve subir.
+    text=(SCRIPT.parent/'Start-Therion.ps1').read_text(encoding='utf-8-sig')
+    assert "$useJarvis=($config.tts.enabled -eq $true -and $config.tts.provider -eq 'voicestudio')" in text
+    assert "if ($useJarvis -and !(Get-NetTCPConnection -LocalPort 3901" in text
+    assert "if ($useJarvis -and !$voice.last_generation)" in text

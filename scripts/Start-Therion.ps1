@@ -48,8 +48,10 @@ try {
     }
     Start-Transcript -LiteralPath (Join-Path $stateRoot 'startup.log') -Force | Out-Null
     $transcript=$true
-    Write-Output ('Preparando '+$(if($sttProfile -eq 'parakeet'){'Parakeet'}else{'faster-whisper'})+', Jarvis e a IA local. A primeira carga pode levar alguns minutos.')
-    if (!(Get-NetTCPConnection -LocalPort 3901 -State Listen -ErrorAction SilentlyContinue)) {
+    # Jarvis só sobe se for a voz escolhida; com o Edge ele ocupava ~5 GB à toa.
+    $useJarvis=($config.tts.enabled -eq $true -and $config.tts.provider -eq 'voicestudio')
+    Write-Output ('Preparando '+$(if($sttProfile -eq 'parakeet'){'Parakeet'}else{'faster-whisper'})+$(if($useJarvis){', Jarvis'}else{''})+' e a IA local. A primeira carga pode levar alguns minutos.')
+    if ($useJarvis -and !(Get-NetTCPConnection -LocalPort 3901 -State Listen -ErrorAction SilentlyContinue)) {
         $models=Read-LocalState 'http://127.0.0.1:11435/api/ps'
         if ($models.models | Where-Object { $_.name -eq $config.ai.model }) {
             Send-LocalJson ($config.ai.endpoint.Replace('/api/chat','/api/generate')) @{model=$config.ai.model;keep_alive=0;stream=$false} 30 | Out-Null
@@ -57,15 +59,17 @@ try {
         & (Join-Path $PSScriptRoot 'omnivoice_minimal\Start-VoiceMinimal.ps1') -RuntimeRoot $installation.voice_runtime
     }
     $timer=[Diagnostics.Stopwatch]::StartNew()
-    do {
-        $voice=Read-LocalState 'http://127.0.0.1:3901/startup/progress'
-        if ($voice.status -eq 'error') { throw ('Jarvis falhou em '+$voice.phase+': '+$voice.failure_type) }
-        if ($voice.status -eq 'ready') { break }
-        if ($timer.Elapsed.TotalSeconds -gt 900) { throw 'Jarvis nao ficou pronto.' } # boot frio no HD chega a ~9 min
-        Start-Sleep -Seconds 2
-    } while ($true)
-    $profile=Read-LocalState 'http://127.0.0.1:3901/profiles/120f734a'
-    if ($profile.id -ne '120f734a') { throw 'Perfil Jarvis nao confirmado.' }
+    if ($useJarvis) {
+        do {
+            $voice=Read-LocalState 'http://127.0.0.1:3901/startup/progress'
+            if ($voice.status -eq 'error') { throw ('Jarvis falhou em '+$voice.phase+': '+$voice.failure_type) }
+            if ($voice.status -eq 'ready') { break }
+            if ($timer.Elapsed.TotalSeconds -gt 900) { throw 'Jarvis nao ficou pronto.' } # boot frio no HD chega a ~9 min
+            Start-Sleep -Seconds 2
+        } while ($true)
+        $profile=Read-LocalState 'http://127.0.0.1:3901/profiles/120f734a'
+        if ($profile.id -ne '120f734a') { throw 'Perfil Jarvis nao confirmado.' }
+    }
     # No perfil faster-whisper a transcricao carrega dentro do Therion; o gateway 3902 nao e usado.
     if ($sttProfile -eq 'parakeet') {
         $gateway=Read-LocalState 'http://127.0.0.1:3902/stt/health'
@@ -104,11 +108,11 @@ try {
     if ($config.agent.context_tokens -is [int] -and $config.agent.context_tokens -ge 1024 -and $config.agent.context_tokens -le 16384) { $warmContext=$config.agent.context_tokens }
     $warm=Send-LocalJson $config.ai.endpoint @{model=$config.ai.model;messages=@(@{role='user';content='Responda somente OK.'});think=$false;stream=$false;keep_alive='5m';options=@{num_ctx=$warmContext;num_predict=8}}
     if (!$warm.done -or !$warm.message.content) { throw 'IA nao confirmou prontidao.' }
-    if (!$voice.last_generation) {
+    if ($useJarvis -and !$voice.last_generation) {
         $warmAudio=Send-LocalJson 'http://127.0.0.1:3901/v1/audio/speech' @{model='tts-1';voice='120f734a';input='Ola.';language='pt';response_format='wav'} 90 -Audio
         if ($warmAudio.Length -lt 44 -or [Text.Encoding]::ASCII.GetString($warmAudio,0,4) -ne 'RIFF' -or [Text.Encoding]::ASCII.GetString($warmAudio,8,4) -ne 'WAVE') { throw 'Aquecimento da voz nao retornou WAV valido.' }
     }
-    @{status='ready';stt=$sttProfile;voice='120f734a';model=$config.ai.model;utc=[DateTime]::UtcNow.ToString('o')} | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $stateRoot 'launch-result.json') -Encoding UTF8
+    @{status='ready';stt=$sttProfile;voice=$(if($useJarvis){'120f734a'}else{[string]$config.tts.provider});model=$config.ai.model;utc=[DateTime]::UtcNow.ToString('o')} | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $stateRoot 'launch-result.json') -Encoding UTF8
     if (!$PrepareOnly) {
         $arguments=@('-m','therion.interface.desktop')
         if ($StartMinimized) { $arguments+='--start-minimized' }

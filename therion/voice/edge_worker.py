@@ -4,6 +4,7 @@ O texto é enviado ao serviço online somente com --allow-online.
 Não importa dependências de rede/áudio no processo da interface.
 """
 import argparse
+import array
 import asyncio
 import io
 import json
@@ -25,13 +26,25 @@ except ImportError:
 VOICES = EDGE_VOICES
 MAX_AUDIO_BYTES = 6 * 1024 * 1024
 MAX_SECONDS = 120
+RATE = '+12%'  # escolhida pelo usuário em 2026-11-16: fala menos pausada
+PITCH = '-8Hz'  # amostra "E" escolhida em 2026-11-16 (F:\Therion\tts-tests\edge\amostras)
+
+
+def trim_silence(pcm, threshold=300, before=0.05, after=0.30):
+    """Encurta o silêncio que o Edge põe nas bordas (~0,15 s e ~0,77 s) para uma pausa natural."""
+    samples = array.array('h');samples.frombytes(pcm)
+    start, end = 0, len(samples)
+    while start < end and abs(samples[start]) <= threshold:start += 1
+    if start == end:return pcm
+    while abs(samples[end - 1]) <= threshold:end -= 1
+    return samples[max(0, start - int(before * 24000)):min(len(samples), end + int(after * 24000))].tobytes()
 
 
 async def download_audio(text, voice, communicate):
     if not isinstance(text, str) or not text.strip() or len(text) > 2000 or voice not in VOICES:
         raise ValueError('Entrada de síntese inválida.')
     content = bytearray()
-    client = communicate(text, voice=voice, proxy=None, connect_timeout=8, receive_timeout=20)
+    client = communicate(text, voice=voice, rate=RATE, pitch=PITCH, proxy=None, connect_timeout=8, receive_timeout=20)
     async for chunk in client.stream():
         if chunk.get('type') == 'audio':
             audio = chunk.get('data')
@@ -47,26 +60,27 @@ def decode_wav(content, output):
     import av
     output = Path(output)
     temporary = output.with_suffix('.wav.partial')
-    samples = 0
+    pcm = bytearray()
     resampler = av.AudioResampler(format='s16', layout='mono', rate=24000)
     try:
-        with av.open(io.BytesIO(content), format='mp3') as source, wave.open(str(temporary), 'wb') as target:
-            target.setnchannels(1);target.setsampwidth(2);target.setframerate(24000)
+        with av.open(io.BytesIO(content), format='mp3') as source:
             def write(frame):
-                nonlocal samples
-                samples += frame.samples
-                if samples > 24000 * MAX_SECONDS:
+                if len(pcm) // 2 + frame.samples > 24000 * MAX_SECONDS:
                     raise ValueError('Duração de áudio acima do limite.')
                 # s16 mono tem dois bytes por amostra; o plano pode incluir
                 # padding de alinhamento. Não exigir NumPy no ambiente de voz.
-                target.writeframesraw(bytes(frame.planes[0])[:frame.samples * 2])
+                pcm.extend(bytes(frame.planes[0])[:frame.samples * 2])
             for frame in source.decode(audio=0):
                 for converted in resampler.resample(frame):write(converted)
             for converted in resampler.resample(None):write(converted)
-        if not samples:
+        if not pcm:
             raise ValueError('Áudio vazio.')
+        trimmed = trim_silence(bytes(pcm))
+        with wave.open(str(temporary), 'wb') as target:
+            target.setnchannels(1);target.setsampwidth(2);target.setframerate(24000)
+            target.writeframes(trimmed)
         temporary.replace(output)
-        return round(samples / 24000, 3)
+        return round(len(trimmed) / 2 / 24000, 3)
     finally:
         temporary.unlink(missing_ok=True)
 

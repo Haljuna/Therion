@@ -41,12 +41,14 @@ public static class TherionStartupMemory {
 
 function Get-TherionSttProfile($Config) {
     # Perfis aprovados: Parakeet no gateway 3902, ou faster-whisper dentro do Therion com Jarvis direto na 3901.
-    if ($Config.tts.provider -ne 'voicestudio' -or $Config.tts.voicestudio_voice -ne '120f734a' -or
+    # Desde 2026-11-16 também a voz Edge online (sem Jarvis), só com online_allowed explícito.
+    $edge=($Config.tts.provider -eq 'edge' -and $Config.tts.online_allowed -eq $true)
+    if ((!$edge -and ($Config.tts.provider -ne 'voicestudio' -or $Config.tts.voicestudio_voice -ne '120f734a')) -or
         $Config.ai.endpoint -ne 'http://127.0.0.1:11435/api/chat') { throw 'A configuracao nao corresponde a um perfil aprovado com Jarvis. Nenhuma opcao foi alterada.' }
     if ($Config.voice.provider -eq 'parakeet_http' -and $Config.voice.endpoint -eq 'http://127.0.0.1:3902/v1/audio/transcriptions' -and
-        $Config.tts.voicestudio_endpoint -eq 'http://127.0.0.1:3902/v1/audio/speech') { return 'parakeet' }
+        ($edge -or $Config.tts.voicestudio_endpoint -eq 'http://127.0.0.1:3902/v1/audio/speech')) { return 'parakeet' }
     if ($Config.voice.provider -eq 'whisper' -and $Config.voice.model_path -and [IO.Directory]::Exists($Config.voice.model_path) -and
-        $Config.tts.voicestudio_endpoint -eq 'http://127.0.0.1:3901/v1/audio/speech') { return 'whisper' }
+        ($edge -or $Config.tts.voicestudio_endpoint -eq 'http://127.0.0.1:3901/v1/audio/speech')) { return 'whisper' }
     throw 'A configuracao nao corresponde ao perfil Parakeet nem ao perfil faster-whisper. Nenhuma opcao foi alterada.'
 }
 
