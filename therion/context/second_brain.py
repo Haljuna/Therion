@@ -274,7 +274,9 @@ class SecondBrainReader:
                     name for name in dirnames
                     # tmp guarda fixtures de teste (~22 mil .md em 04/11) e estourava o limite de 30 s da busca.
                     if name.casefold() not in {'.git','.venv','venv','node_modules','__pycache__',
-                                              '.pytest_cache','.mypy_cache','.ruff_cache','tmp','.obsidian','.trash'}
+                                              '.pytest_cache','.mypy_cache','.ruff_cache','tmp','.obsidian','.trash',
+                                              # Instruções de agentes (.opencode, .agents, .claude) não são notas do usuário (20/11).
+                                              '.opencode','.agents','.claude'}
                     and os.path.normcase(os.path.join(dirpath,name)) not in technical_roots
                     and not os.path.islink(os.path.join(dirpath, name))
                     and not getattr(os.path, 'isjunction', lambda _: False)(os.path.join(dirpath, name))

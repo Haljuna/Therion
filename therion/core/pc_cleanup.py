@@ -18,7 +18,7 @@ from therion.context.language import control
 OFFER_SECONDS = 120
 _GB = 1024 ** 3
 _POLITE = r'(?:,? por favor)?'
-_ASK = re.compile(r'(?:therion,? )?(?:(?:pode |voce pode )?(?:libera|libere|liberar|limpa|limpe|limpar|faz|faca) )'
+_ASK = re.compile(r'(?:therion,? )?(?:(?:pode |voce pode )?(?:libera|libere|liberar|libero|limpa|limpe|limpar|faz|faca) )'
                   r'(?:um pouco de |uma limpeza n[oa] |o )?(?:espaco|disco|disco c|c|temporarios|os temporarios)'
                   r'(?: (?:do|no|n[oa]) (?:pc|computador|disco c|disco|c))?' + _POLITE)
 _YES = {'sim', 'pode', 'pode limpar', 'sim pode', 'pode sim', 'limpa', 'limpe', 'claro', 'manda', 'sim por favor', 'pode ser'}
@@ -174,6 +174,11 @@ def wanted(command, host):
     text = control(command).rstrip('?!. ').replace(',', '')
     return bool(_ASK.fullmatch(control(command).rstrip('?!. '))) or (
         deadline is not None and time.monotonic() < deadline and text in _YES | _NO)
+
+
+def cleanup_request(command):
+    """O pedido "libera espaço", sem oferta pendente."""
+    return _ASK.fullmatch(control(command).rstrip('?!. ')) is not None
 
 
 def answer(command, host, runner=None):

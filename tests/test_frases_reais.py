@@ -1,12 +1,9 @@
 """Roteamento das frases reais em tests/frases_reais.txt; nenhuma frase que já falhou pode voltar a falhar."""
 from pathlib import Path
-from types import SimpleNamespace
-
 import pytest
 
-from therion.agent.briefing import briefing_command
 from therion.core.intent import IntentRecognizer
-from therion.integrations.task_query import task_query_request, task_state_request
+from therion.core.routes import fixed_route
 
 BANK = Path(__file__).with_name('frases_reais.txt')
 
@@ -23,26 +20,10 @@ def cases():
 
 
 def route(phrase):
-    """Mesma ordem do orquestrador: panorama e tarefas antes das regras fixas; o resto vai para a IA."""
-    if briefing_command(phrase):
-        return 'panorama'
-    if task_query_request(phrase):
-        return 'tarefas'
-    from therion.core.workflows import read_only_workflow
-    if read_only_workflow(phrase):
-        return 'composto'
-    from therion.context.conversation_frame import app_close_request
-    if app_close_request(phrase):
-        return 'fechar aplicativo'
-    state = task_state_request(phrase)
-    if state:
-        return 'concluir tarefa' if state['state'] == 'completed' else 'reabrir tarefa'
-    from therion.core.voice_reminders import reminder_request
-    if reminder_request(phrase, SimpleNamespace(desktop_timers=True)):
-        return 'lembrete'
-    from therion.core.focus import focus_request
-    if focus_request(phrase):
-        return 'foco'
+    """Mesma ordem do orquestrador: regras fixas primeiro; o resto vai para a IA."""
+    fixed = fixed_route(phrase, projects={})
+    if fixed:
+        return fixed
     intent = IntentRecognizer().parse(phrase)
     return intent.action if intent else 'conversa'
 

@@ -2218,8 +2218,30 @@ class Orchestrator(WorkflowSupport, MemorySupport, PersonalContextSupport, Catal
             return OrchestrationResult(status='success',message=message,speech_message=speech)
         from therion.agent.mailbox import mail_window_request
         if mail_window_request(command):
+            # "Abre o e-mail para mim" logo depois de "qual foi o meu último e-mail?" abre esse e-mail.
+            current=getattr(self,'_gmail_current_context',None)
+            import time
+            chosen=(current or {}).get('message_id') if current and current.get('session')==self.session_id and time.monotonic()<current.get('deadline',0) else None
             return OrchestrationResult(status='success',message='A janela de e-mails está aberta.',
-                ui_action='open_mail',confirmation_id=self._confirmation_id)
+                ui_action='open_mail',ui_payload={'id':chosen} if chosen else None,confirmation_id=self._confirmation_id)
+        from therion.agent.mailbox import mail_count_request,unread_count
+        if mail_count_request(command) and self._confirmation_id is None:
+            # 18/11: o modelo buscava sem filtro e respondia "nenhum e-mail encontrado".
+            try:counted=unread_count(self._mailbox,CancellationToken(cancelled))
+            except Cancelled:return OrchestrationResult(status='cancelled',message='Contagem de e-mails cancelada.')
+            except Exception:return OrchestrationResult(status='partial',message='Não consegui contar os e-mails agora. Isso não significa caixa vazia.')
+            if counted is None:return OrchestrationResult(status='clarification',message='O Gmail não está conectado. Conecte a conta no painel de e-mails.')
+            total,complete=counted
+            if total==0:return OrchestrationResult(status='success',message='Nenhum e-mail não lido na caixa de entrada.')
+            noun='e-mail não lido' if total==1 else 'e-mails não lidos'
+            return OrchestrationResult(status='success',message=('Você tem ' if complete else 'Você tem mais de ')+f'{total} {noun} na caixa de entrada.')
+        from therion.core.screenshot import screenshot_request,take_screenshot
+        if screenshot_request(command) and self._confirmation_id is None:
+            # A imagem fica só no disco; não vai para o modelo nem para o registro.
+            try:path=take_screenshot()
+            except Exception:return OrchestrationResult(status='execution_failed',message='Não consegui tirar o print agora.')
+            return OrchestrationResult(status='success',message=f'Print salvo em {path.parent.name}: {path.name}.',
+                                       speech_message='Print salvo.')
         return None
 
     def process_command(self, command: str) -> OrchestrationResult:
@@ -2468,6 +2490,15 @@ class Orchestrator(WorkflowSupport, MemorySupport, PersonalContextSupport, Catal
                 self._complete_task()
                 self._finalize_session_result(result)
                 return result
+
+        from therion.context.conversation_frame import repeat_request
+        if repeat_request(command) and self._personal_flow_is_free():
+            # 18/11: "Repete, por favor" ia ao modelo, que buscou notas e inventou uma resposta.
+            said=next((turn.text for turn in reversed(list(self.memory.turns)[:-1]) if turn.role=='therion' and turn.text.strip()),None)
+            result=OrchestrationResult(status='success',message=said or 'Ainda não falei nada nesta conversa.')
+            self._complete_task()
+            self._finalize_session_result(result)
+            return result
 
         if current_time_request(command) and self._personal_flow_is_free():
             now = self._calendar_now()

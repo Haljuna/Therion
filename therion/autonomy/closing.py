@@ -20,6 +20,7 @@ class CloseSupport:
         try:
             entries=self.application_catalog.entries()
             matches=[a for a in entries if target in {control(a.name),control(a.id),*(control(s) for s in a.aliases)}]
+            if not matches:matches=self.application_catalog.resolve(target)   # "navegador" = o único navegador cadastrado
             if not matches and self.voice_conversation and target=='obsidio':
                 matches=[a for a in entries if control(a.name)=='obsidian']
             if not matches and self.voice_conversation and target in {'jaminai','geminai','gemeo'}:

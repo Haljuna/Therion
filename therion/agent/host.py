@@ -397,7 +397,8 @@ class AgentSupport:
         syntax = _parse_scope_syntax(command)
         if syntax.malformed:
             return OrchestrationResult(status='clarification', message='Escopo inválido: ' + syntax.reason)
-        from therion.context.conversation_frame import personal_request, capabilities_request, current_date_request, current_time_request, app_status_request,app_close_request,app_result_request
+        from therion.context.conversation_frame import personal_request, capabilities_request, current_date_request, current_time_request, app_status_request,app_close_request,app_result_request,repeat_request
+        from therion.core.screenshot import screenshot_request
         from therion.core.local_reports import report_request
         from therion.core.pc_cleanup import wanted as cleanup_wanted
         from therion.core.voice_reminders import reminder_request
@@ -408,7 +409,8 @@ class AgentSupport:
                 or cleanup_wanted(syntax.command,self)
                 or reminder_request(syntax.command,self)
                 or focus_wanted(syntax.command,self)
-                or app_close_request(syntax.command) or app_result_request(syntax.command)
+                or app_close_request(syntax.command) or app_result_request(syntax.command) or repeat_request(syntax.command)
+                or screenshot_request(syntax.command)
                 or status_followup):
             # Relógio, capacidades e perfil mantêm seus resolvedores locais.
             # Ativar o runtime não pode ocultá-los nem conceder leitura nova.

@@ -1065,6 +1065,11 @@ class MainWindow(QMainWindow):
         if self._game_polls < 2 or self._game_unloaded or self._processing or not hasattr(provider, 'unload'):
             return
         self._unload_model()
+        # 19/11: entrar e sair da tela cheia repetia o aviso a cada partida; uma vez por hora basta.
+        shown, now = getattr(self, '_game_notice_at', None), time.monotonic()
+        if shown is not None and now - shown < 3600:
+            return
+        self._game_notice_at = now
         message = 'Modo jogo: liberei a placa de vídeo. Meu primeiro pedido depois disso demora um pouco mais.'
         if not self._focus_hold(message):
             self._append('Therion', message)
@@ -1598,7 +1603,7 @@ class MainWindow(QMainWindow):
             self._arm_reminder_timer()
         if result.ui_action=='open_mail':
             if self._dashboard is None or not self._dashboard.active:self._select_interface('constellation',persist=False)
-            if self._dashboard is not None and self._dashboard.active:self._dashboard.open_mail()
+            if self._dashboard is not None and self._dashboard.active:self._dashboard.open_mail((result.ui_payload or {}).get('id') or '')
         if result.ui_action=='open_briefing':
             if self._dashboard is None or not self._dashboard.active:self._select_interface('constellation',persist=False)
             if self._dashboard is not None:
@@ -1749,6 +1754,14 @@ class MainWindow(QMainWindow):
             return
         intent = getattr(result, 'intent', None)
         route = getattr(intent, 'action', intent) if intent else None
+        command = getattr(getattr(self, '_command_worker', None), '_command', None)
+        if route is None and isinstance(command, str):
+            # Modo jogo, foco, lembretes e afins não trazem intenção; antes todos apareciam como "IA/conversa".
+            from therion.core.routes import fixed_route
+            try:
+                route = fixed_route(command)
+            except Exception:
+                route = None
         started = getattr(self, '_command_started_at', None)
         seconds = time.monotonic() - started if started is not None else None
         self._command_started_at = None
@@ -2022,6 +2035,9 @@ class MainWindow(QMainWindow):
                 if self._confirmation_handler.evaluate_response(normalized_answer) is not None:
                     text = normalized_answer
             confidence = getattr(self._voice_pipeline, 'last_confidence', None)
+            if self._background_speech(text):
+                self._try_conversation_listen()
+                return
             self._next_user_channel = 'voz' if not isinstance(confidence, float) else f'voz · confiança {confidence:.2f}'
             self._append('Você', text)
             self._speech_text = ''
@@ -2036,6 +2052,26 @@ class MainWindow(QMainWindow):
                 self._append('Therion', 'Não foi possível processar a fala.')
             return
         self._insert_transcribed_text(text)
+
+    def _background_speech(self, text):
+        """Conversa de fundo: confiança baixa, sem o nome, sem regra fixa e sem pergunta aberta. Ignora em silêncio.
+
+        Nas conversas de 16-20/11 a fala de fundo ficou entre -0,48 e -0,72; comandos reais chegaram a -0,57
+        ("Libere espaço") e respostas a -0,51 ("Cinco horas"), por isso esses dois casos nunca são ignorados.
+        """
+        import re
+        confidence = getattr(getattr(self, '_voice_pipeline', None), 'last_confidence', None)
+        if not isinstance(confidence, float) or confidence >= -0.5:
+            return False
+        if re.search(r'\b(?:therion|terion|eterion)\b', text, re.I):
+            return False
+        orchestrator = self._orchestrator
+        if (getattr(self, '_conversation_awaiting_response', False) or getattr(orchestrator, 'confirmation_id', None)
+                or getattr(getattr(orchestrator, '_conversation_frame', None), 'question', None)
+                or '?' in (getattr(self, '_last_conversation_spoken', '') or '')):
+            return False
+        from therion.core.routes import fixed_route
+        return fixed_route(text) is None
 
     @Slot(int, str)
     def _on_voice_transcription_failed(self, generation: int, error: str) -> None:

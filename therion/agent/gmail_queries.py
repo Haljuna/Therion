@@ -20,11 +20,12 @@ def recent_mail_request(command,now=None):
     match=re.fullmatch(r'(?:liste|lista|listar)(?: (?:os|dos))? assuntos (?:dos|de)(?: meus)? '
         r'(um|dois|tres|1|2|3) (?:e[- ]?mails?|e meios) mais recentes',text)
     if match:return ('headers',{'um':1,'dois':2,'tres':3,'1':1,'2':2,'3':3}[match[1]])
-    match=re.fullmatch(r'(?:qual|quais|liste|lista|listar|mostre|mostra)(?: sao| foram)? (?:os )?(?:meus )?ultimos '
-        r'(um|dois|tres|1|2|3) (?:e[- ]?mails?|e meios)(?: mais recentes)?',text)
-    if match:return ('headers',{'um':1,'dois':2,'tres':3,'1':1,'2':2,'3':3}[match[1]])
+    # "Resume os meus 3 últimos e-mails": o número vem antes ou depois de "últimos"; lista remetente e assunto.
+    match=re.fullmatch(r'(?:qual|quais|liste|lista|listar|mostre|mostra|resume|resuma|me resume)(?: sao| foram)? (?:os )?(?:meus )?'
+        r'(?:ultimos (um|dois|tres|1|2|3)|(um|dois|tres|1|2|3) ultimos) (?:e[- ]?mails?|e meios)(?: mais recentes)?',text)
+    if match:return ('headers',{'um':1,'dois':2,'tres':3,'1':1,'2':2,'3':3}[match[1] or match[2]])
     match=re.fullmatch(r'(?:(?:le|leia|ler|leu) (?:na integra |completo )?|qual (?:foi |e )?)'
-        r'(?:o )?(?:meu )?(ultimo|penultimo|antepenultimo) e[- ]?mail(?: (?:inteiro|completo|na integra))?(?: (?:pra|para) mim)?',text)
+        r'(?:o )?(?:meu )?(ultimo|penultimo|antepenultimo) (?:e[- ]?mail|e meio)(?: (?:inteiro|completo|na integra))?(?: (?:pra|para) mim)?',text)
     # "Qual é meu último e-mail?" pergunta qual é: o cabeçalho responde na hora; o resumo pelo modelo fica oferecido.
     if match:return ('body' if re.search(r'\b(?:integra|inteiro|completo)\b',text) else 'peek' if text.startswith('qual') else 'summary',
         {'ultimo':1,'penultimo':2,'antepenultimo':3}[match[1]])

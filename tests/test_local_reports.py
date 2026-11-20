@@ -110,6 +110,7 @@ def test_reports_answer_through_the_desktop_worker_without_the_model(case, agent
     # Pasta inexistente: o git de verdade roda e falha, sem tocar em nenhum repositório real.
     monkeypatch.setattr(local_reports, 'configured_projects', lambda config=None: {'Prismion': str(tmp_path / 'ausente')})
     monkeypatch.setattr(local_reports, '_measure', lambda: measure())
+    monkeypatch.setattr(local_reports, 'project_note', lambda name, vault=None: {})   # sem ler o cofre real
     for command, start in (('O que eu fiz hoje?', ('Hoje, até agora.', 'Não encontrei registro')),
                            ('Por que o PC está lento?', ('Não achei aperto agora',)),
                            ('Como está o Prismion?', ('Não consegui ler o projeto Prismion',)),
