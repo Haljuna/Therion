@@ -519,3 +519,44 @@ def test_without_mini_orb_minimize_still_minimizes(app, tmp_path, monkeypatch):
     window._minimize_window(); app.processEvents()
     assert window.isMinimized()
     close(app, window)
+
+
+# ---- correções da revisão final ----
+def test_focus_ending_on_its_timer_unparks_the_orb(app, tmp_path, monkeypatch):
+    from datetime import datetime
+    from types import SimpleNamespace
+    from therion.core import focus
+    window = make_mini_window(tmp_path, monkeypatch, watch=False)
+    window._apply_focus({'phase': 'focus', 'start': datetime.now().isoformat(), 'minutes': 25})
+    assert _parks(window._mini_orb)[-1] is True
+    monkeypatch.setattr(focus, 'settle', lambda now: None)
+    monkeypatch.setattr(focus, 'store', lambda: SimpleNamespace(state=lambda: SimpleNamespace(phase='none')))
+    window._focus_due()
+    assert _parks(window._mini_orb)[-1] is False
+    close(app, window)
+
+
+def test_a_second_reason_does_not_park_the_orb_again(app, tmp_path, monkeypatch):
+    from datetime import datetime
+    window = make_mini_window(tmp_path, monkeypatch, watch=False)
+    window._set_game_mode(True)
+    window._apply_focus({'phase': 'focus', 'start': datetime.now().isoformat(), 'minutes': 25})
+    window._minimize_window()
+    assert _parks(window._mini_orb) == [True]   # arrastou no meio: o lugar novo não pode ser desfeito
+    close(app, window)
+
+
+def test_orb_click_with_the_full_window_open_does_not_hide_it(app, tmp_path, monkeypatch):
+    window = make_mini_window(tmp_path, monkeypatch, watch=False)
+    window.show(); app.processEvents()
+    window._toggle_chat_from_orb(); app.processEvents()
+    assert window.isVisible()
+    close(app, window)
+
+
+def test_game_mode_leaves_a_taskbar_minimized_window_minimized(app, tmp_path, monkeypatch):
+    window = make_mini_window(tmp_path, monkeypatch, watch=False)
+    window.show(); window.showMinimized(); app.processEvents()
+    window._set_game_mode(True); app.processEvents()
+    assert window.isMinimized() and window.isVisible()
+    close(app, window)

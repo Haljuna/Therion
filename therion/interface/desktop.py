@@ -359,7 +359,7 @@ class MainWindow(QMainWindow):
         self._orbe_state = 'idle'
         self._mini_orb = None
         # Modo jogo, foco e minimizar levam a orbe ao canto do segundo monitor; ela volta quando o último sai.
-        self._orb_park, self._game_hid, self._orb_compacted = set(), False, False
+        self._orb_park, self._game_hid, self._orb_compacted, self._orb_chat = set(), False, False, False
         if (self._config.get('ui') or {}).get('mini_orb') is True:
             self._mini_orb = MiniOrb(path=os.path.join(os.environ.get('LOCALAPPDATA', ''), 'Therion', 'mini_orb.json'),
                                      on_open_main=self._show_window, on_click=self._toggle_chat_from_orb)
@@ -873,6 +873,7 @@ class MainWindow(QMainWindow):
     def _show_window(self) -> None:
         """Janela completa (menu da orbe, bandeja, fim do modo jogo): desfaz o minimizar e o chat pequeno da orbe."""
         self._park_orb('minimize', False)
+        self._orb_chat = False
         if self._orb_compacted:
             self._orb_compacted = False
             dashboard = getattr(self, '_dashboard', None)
@@ -987,14 +988,19 @@ class MainWindow(QMainWindow):
 
     def _park_orb(self, reason, on):
         """Motivos: 'game', 'focus', 'minimize'. A orbe fica no canto enquanto sobrar algum."""
+        before = bool(self._orb_park)
         (self._orb_park.add if on else self._orb_park.discard)(reason)
-        if self._mini_orb is not None:
+        # só na virada: um 2º motivo não pode desfazer o lugar para onde o usuário arrastou a orbe
+        if self._mini_orb is not None and bool(self._orb_park) != before:
             self._mini_orb.park(bool(self._orb_park))
 
     def _tuck_to_orb(self):
         """Esconde a janela sem o hideEvent encerrar a conversa por voz nem a fala."""
+        self._orb_chat = False
         if self._mini_orb is None:
             self.showMinimized()
+            return
+        if self.isMinimized():   # já está fora do caminho e com o ícone na barra de tarefas
             return
         self._changing_window_mode = True
         try:
@@ -1005,7 +1011,10 @@ class MainWindow(QMainWindow):
     def _toggle_chat_from_orb(self):
         """Clique na orbe: chat pequeno ao lado dela; outro clique, só a orbe de novo."""
         if self.isVisible() and not self.isMinimized():
-            self._tuck_to_orb()
+            if self._orb_chat:
+                self._tuck_to_orb()   # o chat aberto pela orbe: outro clique, só a orbe
+            else:
+                self._raise_window()   # a janela completa já está aberta: só traz para frente
             return
         dashboard = self._dashboard if self._dashboard is not None and self._dashboard.active else None
         if dashboard is not None and not dashboard.compact:
@@ -1015,6 +1024,7 @@ class MainWindow(QMainWindow):
         mini = self._mini_orb
         screen = (QGuiApplication.screenAt(mini.frameGeometry().center()) or QGuiApplication.primaryScreen()).availableGeometry()
         self.move(beside(mini.frameGeometry(), self.frameGeometry().size(), screen))
+        self._orb_chat = True
 
     def _toggle_full_screen(self):
         """Altera somente o modo da janela, sem tocar na sessão ou no áudio."""
@@ -1314,7 +1324,6 @@ class MainWindow(QMainWindow):
             self._focus_finished(payload.get('minutes') or 0, datetime.fromisoformat(payload['start']),
                                  payload.get('held') or [])
         self._show_timer()
-        self._park_orb('focus', self._focus_view is not None)
 
     def _timer_look(self):
         view = self._focus_view
@@ -1327,6 +1336,7 @@ class MainWindow(QMainWindow):
     def _show_timer(self):
         """As duas orbes mostram o tempo do foco/pausa; o tique de 1 s só roda enquanto há tempo a mostrar."""
         look = self._timer_look()
+        self._park_orb('focus', self._focus_view is not None)   # todo fim de foco/pausa passa por aqui
         dashboard = getattr(self, '_dashboard', None)
         for orb in (getattr(self, '_mini_orb', None), getattr(dashboard, 'constellation', None)):
             if orb is not None:
