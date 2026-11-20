@@ -9,7 +9,15 @@ from xml.sax.saxutils import escape
 
 from therion.memory.knowledge import safe_path
 
+import re
+
 READ_TYPES={'.txt','.md','.pdf','.docx','.csv','.xlsx'}
+# Raízes amplas (perfil, disco F) sem pastas de sistema/credenciais nem
+# arquivos pessoais pelo nome. Só o trecho abaixo da raiz autorizada conta.
+PRIVATE_DIRS={'appdata','.ssh','.claude','.codex','.gemini','.copilot','.config','.aws','.gnupg',
+    'cookies','contacts','credentials','dados de aplicativos','configurações locais','dados de apps'}
+PRIVATE_NAME=re.compile(r'(?i)(senha|password|credencia|token|comprovante|statement|extrato|fatura|boleto|'
+    r'\b(?:ci|rg|cpf|cnh|passaporte|passport)\b)')
 WRITE_TYPES={'.txt','.md','.pdf','.docx','.xlsx'}
 
 
@@ -60,7 +68,11 @@ class DocumentAdapter:
         self.write_roots=tuple(str(Path(root).resolve()) for root in write_roots)
 
     def _path(self,value,write=False):
-        path=safe_path(value,self.write_roots if write else self.read_roots)
+        roots=self.write_roots if write else self.read_roots
+        path=safe_path(value,roots)
+        below=max((path.relative_to(root).parts for root in roots if path==Path(root) or Path(root) in path.parents),key=len,default=())
+        if any(part.casefold() in PRIVATE_DIRS for part in below[:-1]) or PRIVATE_NAME.search(path.stem.replace('_',' ')):
+            raise ValueError('Arquivo pessoal ou de sistema fora do acesso do Therion.')
         if path.suffix.lower() not in (WRITE_TYPES if write else READ_TYPES):raise ValueError('Formato de documento não suportado.')
         if path.exists() and (not path.is_file() or path.stat().st_nlink!=1 or path.stat().st_size>20_000_000):
             raise ValueError('Documento fora dos limites ou com vínculo não permitido.')

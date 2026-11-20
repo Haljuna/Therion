@@ -85,13 +85,11 @@ class AgentPanel(QDialog):
         tabs.addTab(scroll,'Capacidades')
         history=QWidget();history_layout=QVBoxLayout(history);tabs.addTab(history,'Histórico')
         pending=QWidget();pending_layout=QVBoxLayout(pending);tabs.addTab(pending,'Propostas')
-        layout.addWidget(QLabel('Ative capacidades individualmente. Autorizações de ações permanecem separadas.'))
+        layout.addWidget(QLabel('Tudo ligado. Ações pessoais continuam pedindo sua confirmação.'))
         current = validate_settings(config.get('agent'))
         self.checks = {}
-        capabilities_layout=layout
-        def group(title):
-            box=QGroupBox(title);part=QVBoxLayout(box);part.setSpacing(8);capabilities_layout.addWidget(box);return part
-        general=group('Assistente e histórico');integrations=group('Integrações disponíveis');advanced=group('Recursos avançados')
+        # Ajustes técnicos saem da tela, mas continuam valendo e são salvos.
+        hidden=QWidget(capabilities);hidden.hide();hidden_layout=QVBoxLayout(hidden)
         for key, label in [('enabled','Núcleo de ferramentas local (experimental)'),
                 ('history_enabled','Guardar conversas por 30 dias'), ('gmail_enabled','Gmail'),('tasks_enabled','Tarefas locais (funciona sem conta Google)'),
                 ('browser_enabled','Navegador controlado'), ('desktop_enabled','Aplicativos com acessibilidade'),
@@ -101,16 +99,13 @@ class AgentPanel(QDialog):
             check = QCheckBox(label)
             check.setChecked(current[key])
             self.checks[key] = check
-            target=general if key in {'enabled','history_enabled','learning_enabled'} else advanced if key in {'source_cache_enabled','mcp_enabled'} else integrations
-            target.addWidget(check)
-        layout=group('Runtime local')
+            hidden_layout.addWidget(check)
+        visible,layout=layout,hidden_layout
         self.protocol = QComboBox()
         self.mcp_servers=deepcopy(current.get('mcp_servers',[]))
-        mcp=QPushButton('Revisar cadastro local de servidores MCP…');mcp.clicked.connect(self.import_mcp);advanced.addWidget(mcp)
         self.protocol.addItems(['json','native'])
         self.protocol.setCurrentText(current['protocol'])
         layout.addWidget(self.protocol)
-        layout.addWidget(QLabel('Perfil do runtime local (o modelo padrão é preservado):'))
         self.thinking=QComboBox()
         self.thinking.addItems(['Herdar pensamento do perfil atual','Pensamento desligado','Pensamento ligado'])
         self.thinking.setCurrentIndex([None,False,True].index(current['think']))
@@ -121,39 +116,46 @@ class AgentPanel(QDialog):
         self.output_tokens.setValue(current['output_tokens']);self.output_tokens.setPrefix('Saída máxima: ')
         self.context_tokens.valueChanged.connect(lambda value:self.output_tokens.setMaximum(value-1))
         layout.addWidget(self.context_tokens);layout.addWidget(self.output_tokens)
-        layout=group('Acesso ao navegador e documentos')
         self.browser_channel=QComboBox()
         self.browser_channel.addItem('Chromium incluído — perfil próprio','chromium')
         self.browser_channel.addItem('Microsoft Edge instalado — perfil próprio','msedge')
         self.browser_channel.setCurrentIndex(self.browser_channel.findData(current['browser_channel']))
         layout.addWidget(self.browser_channel)
-        self.domains=QLineEdit(', '.join(current.get('browser_domains',[])))
-        self.domains.setPlaceholderText('Domínios permitidos, separados por vírgula: exemplo.com')
-        layout.addWidget(self.domains)
+        layout=visible
+        cards=QHBoxLayout();layout.addLayout(cards)
+        def card(title):
+            box=QGroupBox(title);part=QVBoxLayout(box);part.setSpacing(8);cards.addWidget(box,1);return part
+        def link(text,handler,target):
+            button=QPushButton(text);button.setObjectName('textLink');button.clicked.connect(handler);target.addWidget(button,0,Qt.AlignLeft)
+            return button
+        documents=card('Documentos')
         self.scopes={key:list(current.get(key,[])) for key in ('document_read_roots','document_write_roots')}
-        self.scope_label=QLabel(self.scope_text())
-        layout.addWidget(self.scope_label)
-        for key,label in [('document_read_roots','Escolher pasta de leitura'),('document_write_roots','Escolher pasta para salvar documentos')]:
-            button=QPushButton(label)
-            button.clicked.connect(lambda checked=False,key=key:self.choose_folder(key))
-            layout.addWidget(button)
+        self.scope_label=QLabel(self.scope_text());self.scope_label.setWordWrap(True)
+        documents.addWidget(self.scope_label);documents.addStretch()
+        link('Trocar pasta',lambda:self.choose_folder('document_write_roots'),documents)
+        browser=card('Navegador')
+        browser.addWidget(QLabel(self.browser_channel.currentText().split(' — ')[0]))
+        self.domains=QLineEdit(', '.join(current.get('browser_domains',[])))
+        self.domains.setPlaceholderText('Sites liberados: exemplo.com')
+        browser.addWidget(self.domains);browser.addStretch()
+        gmail=card('Gmail')
+        connected=(host._agent_root/'credentials'/'gmail-token.json').exists()
+        self.gmail_status=QLabel('Conectado' if connected else 'Não conectado');gmail.addWidget(self.gmail_status);gmail.addStretch()
+        link('Reconectar' if connected else 'Conectar',self.connect_gmail,gmail)
         self.desktop_targets=dict(current.get('desktop_targets',{}))
         self.discovery_worker=None
         self.oauth_worker=None
-        choose=QPushButton('Escolher janela de aplicativo para controlar')
-        choose.clicked.connect(self.discover_windows)
-        layout.addWidget(choose)
-        connect=QPushButton('Conectar Gmail / rever permissões')
-        connect.clicked.connect(self.connect_gmail);layout.addWidget(connect)
-        procedures=QPushButton('Revisar procedimentos técnicos')
-        procedures.clicked.connect(self.show_procedures);layout.addWidget(procedures)
-        save = QPushButton('Salvar preferências')
-        save.clicked.connect(self.save)
-        layout.addWidget(save)
         temporary = QCheckBox('Conversa atual temporária (não guardar novas mensagens)')
         temporary.setChecked(host._agent_temporary)
         temporary.toggled.connect(lambda value:setattr(host, '_agent_temporary', value))
         layout.addWidget(temporary)
+        footer=QHBoxLayout();layout.addLayout(footer)
+        link('Aplicativos',self.discover_windows,footer);link('Procedimentos',self.show_procedures,footer)
+        footer.addStretch()
+        save = QPushButton('Salvar')
+        save.clicked.connect(self.save)
+        footer.addWidget(save)
+        layout.addStretch()
         layout=pending_layout
         layout.addWidget(QLabel('Propostas pendentes — prévia de uso único, válida por cinco minutos'))
         self.proposal_list = QListWidget()
@@ -254,6 +256,7 @@ class AgentPanel(QDialog):
 
     def gmail_connected(self,message):
         self.oauth_worker.wait();self.oauth_worker.deleteLater();self.oauth_worker=None
+        if message.startswith('Gmail conectado'):self.gmail_status.setText('Conectado')
         QMessageBox.information(self,'Gmail',message)
 
     def save(self):
@@ -304,7 +307,8 @@ class AgentPanel(QDialog):
         except (OSError,ValueError,TypeError,KeyError) as error:QMessageBox.information(self,'Cadastro MCP',str(error))
 
     def scope_text(self):
-        return 'Pastas de leitura: '+', '.join(self.scopes['document_read_roots'])+'\nPastas de escrita: '+', '.join(self.scopes['document_write_roots'])
+        read=', '.join(self.scopes['document_read_roots']) or 'nenhuma pasta'
+        return 'Lê: '+read+' (sem arquivos pessoais)\nSalva em: '+(', '.join(self.scopes['document_write_roots']) or 'nenhuma pasta')
 
     def choose_folder(self,key):
         folder=QFileDialog.getExistingDirectory(self,'Escolher pasta autorizada')
