@@ -560,3 +560,22 @@ def test_game_mode_leaves_a_taskbar_minimized_window_minimized(app, tmp_path, mo
     window._set_game_mode(True); app.processEvents()
     assert window.isMinimized() and window.isVisible()
     close(app, window)
+
+
+def test_title_bar_minimize_parks_the_orb_and_restoring_brings_it_back(app, tmp_path, monkeypatch):
+    window = make_mini_window(tmp_path, monkeypatch, watch=False)
+    window.show(); app.processEvents()
+    window.showMinimized(); app.processEvents()
+    assert _parks(window._mini_orb)[-1] is True
+    window.showNormal(); app.processEvents()
+    assert _parks(window._mini_orb)[-1] is False
+    close(app, window)
+
+
+def test_orb_chat_after_title_bar_minimize_keeps_the_orb_in_the_corner(app, tmp_path, monkeypatch):
+    window = make_mini_window(tmp_path, monkeypatch, watch=False)
+    window.show(); app.processEvents()
+    window.showMinimized(); app.processEvents()
+    window._toggle_chat_from_orb(); app.processEvents()
+    assert window.isVisible() and not window.isMinimized() and _parks(window._mini_orb)[-1] is True
+    close(app, window)

@@ -1020,11 +1020,11 @@ class MainWindow(QMainWindow):
         if dashboard is not None and not dashboard.compact:
             dashboard.set_compact(True)
             self._orb_compacted = dashboard.compact
+        self._orb_chat = True   # antes de desminimizar: o changeEvent não pode tirar a orbe do canto
         self._raise_window()
         mini = self._mini_orb
         screen = (QGuiApplication.screenAt(mini.frameGeometry().center()) or QGuiApplication.primaryScreen()).availableGeometry()
         self.move(beside(mini.frameGeometry(), self.frameGeometry().size(), screen))
-        self._orb_chat = True
 
     def _toggle_full_screen(self):
         """Altera somente o modo da janela, sem tocar na sessão ou no áudio."""
@@ -1057,7 +1057,15 @@ class MainWindow(QMainWindow):
 
     def changeEvent(self,event):
         super().changeEvent(event)
-        if event.type()==QEvent.WindowStateChange:self._sync_full_screen_controls()
+        if event.type()==QEvent.WindowStateChange:
+            self._sync_full_screen_controls()
+            # Minimizar pela barra de título do Windows também leva a orbe ao canto; restaurar a traz de volta
+            # (abrir o chat pela orbe não conta: ela fica no canto, ao lado do chat).
+            if getattr(self, '_mini_orb', None) is not None and not getattr(self, '_closing', False):
+                if self.isMinimized():
+                    self._park_orb('minimize', True)
+                elif event.oldState() & Qt.WindowMinimized and not self._orb_chat:
+                    self._park_orb('minimize', False)
 
     def _on_tray_activated(self, reason: int) -> None:
         """Trata ativações do ícone da bandeja."""
