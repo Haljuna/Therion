@@ -31,7 +31,7 @@ QGroupBox { border:1px solid #373244; border-radius:14px; margin-top:16px; paddi
 QGroupBox::title { color:#C4B5FD; subcontrol-origin:margin; left:12px; padding:0 8px; }
 QWidget { color:#F1F0F7; font-family:"Segoe UI Variable", "Segoe UI"; font-size:13px; }
 QLabel#muted, QLabel[role="muted"], QLabel#clock { color:#B5B1C5; font-size:12px; }
-QLabel#brand { color:#F1F0F7; font-size:18px; font-weight:600; letter-spacing:5px; }
+QLabel#brand { color:#C4B5FD; font-size:16px; font-weight:600; letter-spacing:8px; }
 QLabel#state { color:#DDD6FE; font-size:13px; }
 QLabel#heading, QLabel[role="title"] { font-size:22px; font-weight:600; }
 QPushButton, QToolButton { border-radius:10px; color:#E5E1F0; background:#211D30; border:1px solid #443B58; padding:6px 12px; }

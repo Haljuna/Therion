@@ -167,7 +167,7 @@ class SceneWorkspace(QObject):
         self.host,self.bounds=parent,bounds
         self.opening_bounds=opening_bounds or bounds
         self.panels={}; self.preferred={}; self.order=[];self.anchors={}
-        self.origins={};self._return_to={};self._primary='';self._reflowing=False
+        self.origins={};self._return_to={};self._primary='';self._reflowing=False;self._opened=0
         self.primary_keys={'conversations','calendar','tasks','knowledge','tools','settings','mail'}
         self.cycle_shortcut=QShortcut(QKeySequence('Ctrl+Tab'),parent)
         self.cycle_shortcut.activated.connect(self.cycle)
@@ -204,6 +204,7 @@ class SceneWorkspace(QObject):
             self.reflow();panel.setFocus(Qt.OtherFocusReason)
             return panel
         if panel.window_state=='open' and not panel.isHidden():
+            self.activate(key)   # traz para a frente e avisa a tela (marca dos botões)
             self.reflow()
             return panel
         if not restore:self._return_to.pop(key,None)
@@ -213,10 +214,13 @@ class SceneWorkspace(QObject):
             self._primary=previous
         else:
             self._primary=key
+        # Painéis principais continuam abertos lado a lado; um detalhe só os esconde enquanto estiver na frente.
         for other in self.visible_keys():
-            self.panels[other].window_state='minimized';self.panels[other].hide()
-        self.order=[]
+            if other not in self.primary_keys:
+                self.panels[other].window_state='minimized';self.panels[other].hide()
+        self.order=[item for item in self.order if item in self.primary_keys and self.panels[item].window_state=='open']
         appearing=panel.isHidden()
+        if panel.window_state!='open':self._opened+=1;panel.opened_at=self._opened
         panel.window_state='open';panel.show()
         self.activate(key);self.reflow();panel.setFocus(Qt.OtherFocusReason)
         reduced=getattr(self.host,'reduced',None)
@@ -225,7 +229,7 @@ class SceneWorkspace(QObject):
 
     def toggle(self,key):
         panel=self.panels[key]
-        if not panel.isHidden(): panel.dismiss()
+        if not panel.isHidden() and panel.window_state=='open': panel.dismiss()
         else: self.open(key)
 
     def activate(self,key):
@@ -258,14 +262,8 @@ class SceneWorkspace(QObject):
         keys=list(keys or self.visible_keys())
         if not keys:return
         for panel in self.panels.values():panel.manually_placed=False
-        # At most one main panel plus one detail; navigation retains all content.
-        primary='mail' if 'mail' in keys else keys[0]
-        self.hide_all();self.open(primary)
-        if len(keys)>1:
-            detail=next(key for key in keys if key!=primary)
-            self._return_to[detail]=primary
-            self.panels[detail].window_state='open';self.panels[detail].show()
-            self.activate(detail);self.reflow()
+        self.hide_all()
+        for key in keys:self.open(key)
 
     def reflow(self):
         if self._reflowing:return
@@ -279,12 +277,41 @@ class SceneWorkspace(QObject):
                 return
             area=self.opening_bounds();active=keys[-1]
             previous=self._return_to.get(active,'')
-            split=bool(previous in self.panels and self.host.width()>=1000 and area.width()>=860)
-            for key,panel in self.panels.items():
-                panel.setVisible(key==active or (split and key==previous))
-            if split:
-                side=max(340,round(area.width()*.38));gap=16
-                self.panels[previous].place(QRect(area.x(),area.y(),area.width()-side-gap,area.height()))
-                self.panels[active].place(QRect(area.right()-side+1,area.y(),side,area.height()))
-            else:self.panels[active].place(area)
+            if active not in self.primary_keys:
+                # Detalhe: ao lado do painel de onde veio, se ele ainda estiver aberto.
+                split=bool(previous in self.panels and self.panels[previous].window_state=='open'
+                           and self.host.width()>=1000 and area.width()>=860)
+                for key,panel in self.panels.items():
+                    panel.setVisible(key==active or (split and key==previous))
+                if split:
+                    side=max(340,round(area.width()*.38));gap=16
+                    self.panels[previous].place(QRect(area.x(),area.y(),area.width()-side-gap,area.height()))
+                    self.panels[active].place(QRect(area.right()-side+1,area.y(),side,area.height()))
+                else:self.panels[active].place(area)
+                return
+            self._tile(keys,area)
         finally:self._reflowing=False
+
+    def _tile(self,keys,area):
+        """O primeiro aberto fica junto da barra; cada novo abre à esquerda do anterior."""
+        keys=sorted(keys,key=lambda item:getattr(self.panels[item],'opened_at',0))
+        width_for=getattr(self.host,'drawer_width',None)
+        left=self.bounds().left()+getattr(self.host,'tile_reserve',0);gap=16;minimum=300
+        if getattr(self.host,'compact',False) or self.host.width()<1000:
+            # Janela estreita (mesmo limite do detalhe): só o mais recente; os outros ficam recolhidos no menu.
+            for oldest in keys[:-1]:self.order.remove(oldest);self.panels[oldest].window_state='minimized'
+            keys=keys[-1:]
+        while True:
+            widths=[width_for(key) if width_for else area.width() for key in keys]
+            room=area.right()-left+1-gap*(len(keys)-1)
+            if sum(widths)>room:widths=[round(width*room/sum(widths)) for width in widths]
+            if len(keys)==1 or min(widths)>=minimum:break
+            # Não cabe mais um: recolhe o mais antigo, que fica no menu.
+            oldest=keys.pop(0);self.order.remove(oldest)
+            self.panels[oldest].window_state='minimized'
+        for key,panel in self.panels.items():
+            panel.setVisible(key in keys)
+        right=area.right()
+        for key,width in zip(keys,widths):
+            self.panels[key].place(QRect(right-width+1,area.y(),width,area.height()))
+            right-=width+gap

@@ -138,8 +138,8 @@ def test_background_preload_and_calendar_click_never_send_a_chat_request(window)
     with patch.object(window,'_send_command') as command:
         d.activity_buttons['calendar'].click();d.mail_button.click();settle(lambda:not d.mailbox.busy)
         command.assert_not_called()
-    assert d.workspace.visible_keys()==['mail']
-    assert d.workspace.panels['calendar'].window_state=='minimized'
+    assert d.workspace.visible_keys()==['calendar','mail']   # lado a lado
+    assert d.workspace.panels['calendar'].window_state=='open'
     assert window._input.toPlainText()=='Rascunho preservado' and window._history.toPlainText()==before
     assert d.mailbox.list.count()==10
 
@@ -233,3 +233,17 @@ def test_preload_does_not_block_gui_timer(window):
         settle(lambda:not d.mailbox.busy,timeout=8)
     finally:timer.stop()
     assert len(beats)>=5 and d.mail_preview.list.count()==2
+
+
+def test_panorama_mail_closes_and_minimizes_with_calendar_open(window):
+    d,_=ready(window);d.open_mail();d.workspace.organize(['mail','calendar']);QApplication.processEvents()
+    mail,agenda=d.workspace.panels['mail'],d.workspace.panels['calendar']
+    assert not mail.isHidden() and not agenda.isHidden()
+    assert agenda.geometry().right()<mail.geometry().left()   # agenda ao lado, à esquerda
+    mail.title_bar.controls['close'].click();QApplication.processEvents();d._arrange_scene()
+    assert mail.isHidden() and mail.window_state=='closed' and not agenda.isHidden()
+    assert not d.mail_nav.property('windowOpen')
+    d.toggle_mail();QApplication.processEvents()
+    mail.title_bar.controls['minimize'].click();QApplication.processEvents();d._arrange_scene()
+    assert mail.isHidden() and mail.window_state=='minimized' and not agenda.isHidden()
+

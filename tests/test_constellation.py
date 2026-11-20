@@ -369,10 +369,12 @@ def test_navigation_uses_stable_panels_and_preserves_previous_content(window):
     QTest.mousePress(panel.title_bar,Qt.LeftButton,Qt.NoModifier,QPoint(40,15))
     QTest.mouseMove(panel.title_bar,QPoint(10,15),20)
     QTest.mouseRelease(panel.title_bar,Qt.LeftButton,Qt.NoModifier,QPoint(10,15))
-    assert panel.geometry()!=old and panel.manually_placed and agenda.isHidden()
-    assert d.workspace.visible_keys()==['tasks']
-    assert old==d.panel_opening_rect()
-    d.navigate(2);assert d.workspace.panels['calendar'] is agenda
+    # Agenda continua aberta; Tarefas abriu ao lado, à esquerda.
+    assert panel.geometry()!=old and panel.manually_placed and not agenda.isHidden()
+    assert d.workspace.visible_keys()==['calendar','tasks']
+    assert old.right()<agenda.geometry().left()
+    d.navigate(2);assert d.workspace.panels['calendar'] is agenda and agenda.isHidden()   # clicar de novo fecha
+    d.navigate(2);assert not agenda.isHidden()
     d.navigate(0);assert d.workspace.visible_keys()==[]
 
 
@@ -636,3 +638,22 @@ def test_spoken_game_mode_turns_compact_on_and_back_off(window):
     # Se o usuário já estava no compacto, sair do modo jogo não muda o tamanho que ele escolheu.
     d.set_compact(True);game(True);game(False);assert d.compact
     d.set_compact(False)
+
+
+def test_sections_open_side_by_side_and_close_on_second_click(window):
+    window._select_interface('constellation',persist=False)
+    window.resize(1920,1040);window.show();QApplication.processEvents()
+    d=window._dashboard;settle(lambda:not d.workers)
+    d.navigate(1);d.navigate(2);d.navigate(3);QApplication.processEvents()
+    chat,agenda,tasks=(d.workspace.panels[k] for k in ('conversations','calendar','tasks'))
+    assert d.workspace.visible_keys()==['conversations','calendar','tasks']
+    # O primeiro fica junto da barra; cada novo abre à esquerda, sem sobrepor.
+    assert tasks.geometry().right()<agenda.geometry().left() and agenda.geometry().right()<chat.geometry().left()
+    assert all(d.nav_buttons[i].property('windowOpen') for i in (1,2,3))
+    d.navigate(2);QApplication.processEvents()
+    assert agenda.isHidden() and agenda.window_state=='closed' and not d.nav_buttons[2].property('windowOpen')
+    assert d.workspace.visible_keys()==['conversations','tasks']
+    assert tasks.geometry().right()<chat.geometry().left()
+    d.navigate(1);d.navigate(3);assert d.workspace.visible_keys()==[]
+    d.navigate(2);assert d.workspace.visible_keys()==['calendar'] and agenda.geometry()==d.panel_opening_rect()
+

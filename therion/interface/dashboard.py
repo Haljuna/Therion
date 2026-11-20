@@ -23,13 +23,13 @@ from .presentation import Presentation, QualityController, normalized_level, Wor
 from .design_system import COMPONENT_STYLE, history_html, COLORS
 from .voice_meter import VoiceMeter
 from .workspace import SceneWorkspace
-from .singularity_chrome import OrbBrand, OrbShortcut, GlyphSkin, AgendaDelegate, TaskDelegate
+from .singularity_chrome import OrbShortcut, GlyphSkin, AgendaDelegate, TaskDelegate
 from .surface_dialogs import SurfaceHost, InputDialog as QInputDialog, MessageBox as QMessageBox, FileDialog as QFileDialog
 from .mailbox_panel import MailboxPanel, MailPreview
 from shiboken6 import isValid
 
 SECTION_KEYS=('', 'conversations','calendar','tasks','knowledge','tools','settings')
-SECTION_TITLES=('Início','Conversas','Agenda','Tarefas','Conhecimento','Ferramentas','Ajustes')
+SECTION_TITLES=('Início','Conversas','Agenda','Tarefas','Conhecimento','Ferramentas','Configurações')
 
 
 STYLE = """
@@ -81,7 +81,7 @@ PATHS = [
     'M4 12l5 5L20 5M3 4h7M3 21h18',
     'M3 5l9-3 9 3v15l-9-3-9 3zM12 2v15',
     'M14 3a5 5 0 0 0-6 6L2 15l7 7 6-6a5 5 0 0 0 6-6l-4 4-5-5z',
-    'M12 3v3M12 18v3M3 12h3M18 12h3M5 5l2 2M17 17l2 2M5 19l2-2M17 7l2-2M16 12a4 4 0 1 1-8 0 4 4 0 0 1 8 0',
+    'M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 0 0 2.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 0 0 1.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 0 0-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 0 0-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 0 0-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 0 0-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 0 0 1.066-2.573c-.94-1.543.826-3.31 2.37-2.37c1 .608 2.296.07 2.572-1.065zM9 12a3 3 0 1 0 6 0a3 3 0 0 0-6 0',   # engrenagem (Configurações)
     'M3 5h18v14H3zM3 6l9 7 9-7',
     'M21 21l-6-6M17 10a7 7 0 1 1-14 0 7 7 0 0 1 14 0',
     'M8 3H3v5M16 3h5v5M21 16v5h-5M8 21H3v-5',
@@ -294,8 +294,7 @@ class Dashboard(QWidget):
         self.menu_toggle.setToolTip('Expandir ou recolher navegação');self.menu_toggle.clicked.connect(self.toggle_navigation)
         top.addWidget(self.menu_toggle)
         self.menu_toggle.hide()   # layout gaveta: a barra da direita é sempre só ícones
-        top.addWidget(OrbBrand())
-        top.addWidget(label('THERION','brand')); top.addStretch()
+        self.brand_label=label('THERION','brand');top.addWidget(self.brand_label); top.addStretch()
         self.organize_button=QToolButton();self.organize_button.setObjectName('headerAction')
         self.organize_button.setText('Organizar');self.organize_button.setToolTip('Restaurar a organização dos painéis abertos')
         self.organize_button.clicked.connect(lambda:self.workspace.organize());top.addWidget(self.organize_button)
@@ -340,7 +339,8 @@ class Dashboard(QWidget):
             b.setObjectName('nav'); b.setCheckable(True); b.setIcon(icon(index)); b.setIconSize(QSize(20,20))
             b.setFixedHeight(42)
             b.setToolTip(title); self.nav_buttons.append(b); nav.addWidget(b)
-        self.mail_nav=button('E-mails',lambda:self.open_mail());self.mail_nav.setObjectName('nav')
+        self.nav_buttons[5].hide()   # Ferramentas agora fica dentro de Configurações
+        self.mail_nav=button('E-mails',lambda:self.toggle_mail());self.mail_nav.setObjectName('nav')
         self.mail_nav.setCheckable(True);self.mail_nav.setIcon(icon(7));self.mail_nav.setIconSize(QSize(20,20))
         self.mail_nav.setFixedHeight(42);self.mail_nav.setToolTip('Caixa de e-mails');nav.insertWidget(4,self.mail_nav)
         self.nav_caption=label('INTELIGÊNCIA\nEM MOVIMENTO','muted'); nav.addWidget(self.nav_caption)
@@ -456,18 +456,19 @@ class Dashboard(QWidget):
         layout.addWidget(button('Revisões disponíveis',lambda:self.command('liste as revisoes de aprendizados')))
         layout.addStretch(); self.pages.addWidget(knowledge)
         tools, layout = scroll_page()
-        layout.addWidget(label('Central de ferramentas','heading'))
+        layout.addWidget(label('As ferramentas agora ficam em Configurações.','muted')); layout.addStretch()
+        self.pages.addWidget(tools)
+        settings, layout = scroll_page()
+        layout.addWidget(label('Configurações','heading'))
+        settings_root=layout
+        def settings_group(title):
+            box=QGroupBox(title);part=QVBoxLayout(box);part.setSpacing(12);settings_root.addWidget(box);return part
+        layout=settings_group('Ferramentas')
         layout.addWidget(label('Capacidades, propostas e procedimentos seguem as autorizações do Therion.','muted'))
         self.agent_slot = QVBoxLayout(); layout.addLayout(self.agent_slot)
         layout.addWidget(button('Propostas pendentes',lambda:self.agent_tab(2)))
         layout.addWidget(button('Procedimentos',self.procedures))
-        self.details_slot = QVBoxLayout(); layout.addLayout(self.details_slot); layout.addStretch()
-        self.pages.addWidget(tools)
-        settings, layout = scroll_page()
-        layout.addWidget(label('Preferências','heading'))
-        settings_root=layout
-        def settings_group(title):
-            box=QGroupBox(title);part=QVBoxLayout(box);part.setSpacing(12);settings_root.addWidget(box);return part
+        self.details_slot = QVBoxLayout(); layout.addLayout(self.details_slot)
         layout=settings_group('Aparência')
         self.settings_status = label('','muted')
         self.quality = QComboBox()
@@ -828,6 +829,9 @@ class Dashboard(QWidget):
         if not 0<=index<len(SECTION_KEYS): return
         if index==2:self.set_calendar_compact(False)
         first_open=index!=0 and not self.workspace.panels[SECTION_KEYS[index]].positioned
+        panel=self.workspace.panels.get(SECTION_KEYS[index])
+        if panel is not None and panel.window_state=='open' and not panel.isHidden():
+            panel.dismiss();return   # clicar de novo no mesmo botão fecha
         if index==0: self.workspace.hide_all()
         else: self.workspace.open(SECTION_KEYS[index])
         self._select_navigation(index)
@@ -846,7 +850,7 @@ class Dashboard(QWidget):
             b.setIcon(icon(i,i==index))
 
     def _workspace_changed(self,key):
-        self._select_navigation(1 if key=='sessions' else -1 if key=='mail' else SECTION_KEYS.index(key) if key in SECTION_KEYS else (5 if key else 0))
+        self._select_navigation(1 if key=='sessions' else -1 if key=='mail' else SECTION_KEYS.index(key) if key in SECTION_KEYS else (6 if key else 0))
         if hasattr(self,'mail_button'):
             self.mail_button.setChecked(key=='mail');self.mail_button.setIcon(icon(7,'mail' in self.workspace.visible_keys()))
         for kind,launcher in self.activity_buttons.items():
@@ -858,11 +862,11 @@ class Dashboard(QWidget):
             self.sessions_toggle.setChecked(bool(panel and not panel.isHidden()))
         self._sync_home_copy()
         for i,b in enumerate(self.nav_buttons):
-            panel=self.workspace.panels.get(SECTION_KEYS[i]);opened=bool(panel and panel.window_state!='closed')
+            panel=self.workspace.panels.get(SECTION_KEYS[i]);opened=bool(panel and panel.window_state=='open' and not panel.isHidden())
             if b.property('windowOpen')!=opened:
                 b.setProperty('windowOpen',opened);b.style().unpolish(b);b.style().polish(b)
         mail=self.workspace.panels.get('mail');self.mail_nav.setChecked(key=='mail')
-        self.mail_nav.setProperty('windowOpen',bool(mail and mail.window_state!='closed'))
+        self.mail_nav.setProperty('windowOpen',bool(mail and mail.window_state=='open' and not mail.isHidden()))
         self.mail_nav.style().unpolish(self.mail_nav);self.mail_nav.style().polish(self.mail_nav)
         self._arrange_scene()
         # Só uma confirmação pendente tem prioridade sobre a janela ativa.
@@ -896,6 +900,11 @@ class Dashboard(QWidget):
         if key in self.workspace.visible_keys(): self.refresh(key)
         if key=='calendar':self.mailbox.poll(force=True)
 
+    def toggle_mail(self):
+        panel=self.workspace.panels['mail']
+        if panel.window_state=='open' and not panel.isHidden():panel.dismiss()
+        else:self.open_mail()
+
     def open_mail(self,identifier=''):
         self.mailbox.show();self.workspace.open('mail');self.mailbox.opened(identifier)
 
@@ -908,7 +917,7 @@ class Dashboard(QWidget):
                 if kind in self.workers:self.workers[kind].token.cancel()
                 self.dirty.discard(kind)
                 self.workspace.open(kind)
-            self.open_mail();self.workspace.organize(['mail','calendar','tasks'])
+            self.open_mail();self.workspace.organize(['mail','calendar'])
             self.render_calendar(dict(state='loading',items=[],message='Preparando sua agenda…'),self.day)
             self.render_tasks(dict(state='loading',message='Consultando suas tarefas…'))
         if payload:
@@ -951,10 +960,20 @@ class Dashboard(QWidget):
         width=340
         return QRect(self.width()-self.nav.width()-12-width,72,width,self.height()-72-24)
 
-    def drawer_rect(self):
+    @property
+    def tile_reserve(self):
+        # Painéis lado a lado param antes de cobrir a orbe e o campo de digitar.
+        composer=getattr(self,'composer',None)
+        need=composer.minimumSizeHint().width()+72 if composer is not None else 0
+        return 0 if self.compact else max(380,need)
+
+    def drawer_width(self,key):
+        return self.drawer_rect(key).width()
+
+    def drawer_rect(self,key=None):
         """Gaveta colada na barra da direita; e-mail e painel com detalhe pedem mais largura."""
         workspace=getattr(self,'workspace',None)
-        key=workspace.order[-1] if workspace is not None and workspace.order else ''
+        if key is None:key=workspace.order[-1] if workspace is not None and workspace.order else ''
         wide=key=='mail' or bool(workspace is not None and workspace._return_to.get(key))
         if self.compact:
             # Compacto: a seção cobre a orbe e para acima do campo, que continua à mão.
@@ -972,8 +991,14 @@ class Dashboard(QWidget):
         right=self.width()-self._rail()-24
         workspace=getattr(self,'workspace',None)
         if workspace is not None and workspace.visible_keys() and not self.compact:
-            right=min(right,self.drawer_rect().x()-24)
+            right=min(right,min(self._panel_left(workspace.panels[key]) for key in workspace.visible_keys())-24)
         return 24,max(200,right-24)
+
+    @staticmethod
+    def _panel_left(panel):
+        # Durante a entrada deslizando, vale a posição final do painel.
+        slide=getattr(panel,'_slide',None)
+        return slide.endValue().x() if slide is not None and slide.state()==slide.State.Running else panel.x()
 
     def workspace_rect(self):
         # Área onde as janelas podem ficar: abaixo do cabeçalho e à esquerda da barra.
@@ -1001,6 +1026,7 @@ class Dashboard(QWidget):
 
     def _arrange_scene(self):
         if not isValid(self) or not hasattr(self,'workspace'): return
+        self.workspace.reflow()   # posiciona os painéis antes de a orbe medir o espaço livre
         self.constellation.setGeometry(self.rect())
         self.constellation.lower()
         opened=self.workspace.visible_keys()
@@ -1009,7 +1035,8 @@ class Dashboard(QWidget):
         side=max(160,min(round(self.height()*.46),region-48))
         if self.compact:side=max(140,min(round(self.height()*.33),region-40))
         if opened and region<220:
-            target=QRect(left,4,48,48)   # sem espaço ao lado da gaveta: orbe pequena no canto
+            brand=self.brand_label.mapTo(self,QPoint(self.brand_label.width(),0)).x()
+            target=QRect(max(left,brand+12),4,48,48)   # sem espaço ao lado da gaveta: orbe pequena depois do nome
         else:
             target=QRect(left+(region-side)//2,64 if self.compact else 88,side,side)
         anchor=self.hero_container.mapFrom(self,target.topLeft())
