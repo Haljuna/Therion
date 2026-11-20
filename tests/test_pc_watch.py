@@ -303,6 +303,9 @@ class FakeMini:
     def hide_for_game(self, hidden):
         self.calls.append(('hide', hidden))
 
+    def set_game(self, on):
+        self.calls.append(('game', on))
+
     def frameGeometry(self):
         return self.rect
 
@@ -425,8 +428,8 @@ def test_game_mode_quiets_the_mini_orb_at_once(app, tmp_path, monkeypatch):
     mini = window._mini_orb
     monkeypatch.setattr(reminders, 'do_not_disturb', lambda: False)
     window._set_game_mode(True)
-    assert ('quiet', True) in mini.calls
+    assert ('quiet', True) in mini.calls and ('game', True) in mini.calls
     window._set_game_mode(False)
-    assert mini.calls[-1] == ('quiet', False)
+    assert ('quiet', False) in mini.calls and mini.calls[-1] == ('game', False)
     window._mini_orb = None
     close(app, window)

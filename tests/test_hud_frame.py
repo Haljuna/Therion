@@ -132,3 +132,25 @@ def test_painter_state_is_restored(app):
     paint_hud_frame(p, hud_layout(0, 0, 200, 200), frame())
     assert abs(p.opacity()-.3) < 1e-9
     p.end()
+
+
+def _brightest(img, x, y):
+    return max((img.pixelColor(x+dx, y+dy) for dx in (-1, 0, 1) for dy in (-1, 0, 1)), key=lambda c: c.alpha())
+
+
+def test_game_mode_turns_only_the_arcs_and_the_name_red(app):
+    lay = hud_layout(0, 0, 400, 400)
+    img = render(400, 400, frame(game=1.))
+    arc = _brightest(img, round(lay.cx+.97*lay.Rf), round(lay.cy))
+    assert arc.red() > 200 and arc.green() < 120 and arc.blue() < 120
+    tick = _brightest(img, round(lay.cx+1.18*lay.Rf), round(lay.cy))   # marca fixa do quarto continua ciano
+    assert tick.blue() > tick.red()
+    reds = [c for y in range(round(lay.label_y), round(lay.label_y+20)) for x in range(400)
+            if (c := img.pixelColor(x, y)).alpha() > 120]
+    assert reds and all(c.red() > c.blue() for c in reds)
+
+
+def test_amber_wins_over_game_red(app):
+    lay = hud_layout(0, 0, 400, 400)
+    arc = _brightest(render(400, 400, frame(game=1., amber=1.)), round(lay.cx+.97*lay.Rf), round(lay.cy))
+    assert arc.green() > 140   # âmbar (255, 180, 90), não vermelho

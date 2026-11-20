@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from PySide6.QtCore import Qt, QPointF, QRectF
 from PySide6.QtGui import QColor, QFont, QFontMetricsF, QPainter, QPen, QRadialGradient
 from therion.core.focus import TimerLook
-from .hud_style import AMBER, FRAME, HudLayout
+from .hud_style import AMBER, FRAME, GAME_RED, HudLayout
 
 LEVEL_DOTS = 25
 PAUSE_GREEN = (140, 230, 170)
@@ -24,15 +24,19 @@ class FrameState:
     amber: float          # 0 = ciano, 1 = âmbar
     voice_ring: float
     voice: float
+    game: float = 0.      # modo de jogo: arcos e nome vermelhos (o âmbar ganha)
 
 
 def paint_hud_frame(painter: QPainter, layout: HudLayout, frame: FrameState, label=True) -> None:
     """`label=False` (mini orbe) desenha só o anel, sem os pontinhos de nível e o nome do estado."""
     cx, cy, R, Rf = layout.cx, layout.cy, layout.R, layout.Rf
     unit = max(.75, R/170.)   # espessuras do protótipo valem para R ≈ 170 px
-    rgb = [a+(b-a)*min(1., max(0., frame.amber)) for a, b in zip(FRAME, AMBER)]
+    amber = min(1., max(0., frame.amber))
+    rgb = [a+(b-a)*amber for a, b in zip(FRAME, AMBER)]
+    red = min(1., max(0., frame.game))*(1.-amber)
+    hot = [a+(b-a)*red for a, b in zip(rgb, GAME_RED)]   # arcos grossos e nome do estado
 
-    def pen(alpha, width, cap=Qt.FlatCap):
+    def pen(alpha, width, cap=Qt.FlatCap, rgb=rgb):
         color = QColor(*map(round, rgb)); color.setAlphaF(min(1., max(0., alpha)))
         return QPen(color, width*unit, Qt.SolidLine, cap)
 
@@ -64,7 +68,7 @@ def paint_hud_frame(painter: QPainter, layout: HudLayout, frame: FrameState, lab
     for center in (180., 0.):
         start = center-span/2-math.degrees(frame.arc_rotation)
         for alpha, width in ((.2, 7), (.9, 2.2)):
-            painter.setPen(pen(alpha*frame.blink, width))
+            painter.setPen(pen(alpha*frame.blink, width, rgb=hot))
             painter.drawArc(circle(Rf*.97), round(start*16), round(span*16))
     ring = .6*frame.voice_ring*frame.voice+.18*min(1., frame.voice_ring*3)
     if ring > .01:
@@ -91,7 +95,7 @@ def paint_hud_frame(painter: QPainter, layout: HudLayout, frame: FrameState, lab
     spacing = max(0., min(4*unit, (room-width)/count))
     font.setLetterSpacing(QFont.AbsoluteSpacing, spacing)
     painter.setFont(font)
-    color = QColor(*map(round, rgb)); color.setAlphaF(.95); painter.setPen(color)
+    color = QColor(*map(round, hot)); color.setAlphaF(.95); painter.setPen(color)
     # O espaçamento também sobra depois da última letra; meio espaçamento recentra.
     box = QRectF(cx-room/2+spacing/2, layout.label_y, room, 4*pixels)
     painter.drawText(box, Qt.AlignHCenter | Qt.AlignTop | Qt.TextDontClip, frame.label)

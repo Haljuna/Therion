@@ -1,7 +1,7 @@
 """Movimento contínuo da Orbe HUD, sem acesso a áudio ou serviços."""
 import math
 from .hud_frame import FrameState
-from .hud_style import HudLook, LOOKS, LOOK_FIELDS, label_for, look_for
+from .hud_style import GAME_LABEL, HudLook, LOOKS, LOOK_FIELDS, label_for, look_for
 from .presentation import normalized_level
 
 THINKING_STATES = {'thinking', 'executing'}
@@ -31,6 +31,10 @@ class OrbMotion:
         self.flash = 0.; self.flash_ready_in = 0.; self.assembly = 1.
         self.sweep_phase = self.orbit_phase = self.frame_spin = self.arc_angle = 0.
         self.reduced = False
+        self.game = self.game_target = 0.   # modo de jogo: 0 = azul, 1 = arcos e núcleo vermelhos
+
+    def set_game(self, on):
+        self.game_target = 1. if on else 0.
 
     def set_visual(self, state, intensity=0.):
         state = state if state in LOOKS else 'idle'
@@ -54,12 +58,14 @@ class OrbMotion:
             self.look = target
             self.energy = self.pulse = self._excitation = self.spin_rate = self.flash = 0.
             self.assembly = 1.
+            self.game = self.game_target
             return
         dt = min(.1, max(0., float(seconds))) if math.isfinite(seconds) else 0.
         if dt <= 0.:
             return
         self.clock += dt
         blend = 1.-math.exp(-dt/LOOK_EASE)
+        self.game += (self.game_target-self.game)*blend
         look = self.look = HudLook(*(getattr(self.look, name)+(getattr(target, name)-getattr(self.look, name))*blend
                                     for name in LOOK_FIELDS))
         # Integração analítica: a cadência dos quadros não altera o giro.
@@ -93,6 +99,11 @@ class OrbMotion:
         return 0. if self.reduced else self.look.trail
 
     @property
+    def red(self):
+        """Peso do vermelho do modo de jogo; o âmbar do alerta ganha dele."""
+        return max(0., min(1., self.game*(1.-self.look.amber)))
+
+    @property
     def voice(self):
         """A voz do próprio Therion empurrando a superfície."""
         return max(0., min(1., self.energy*self.look.voice_bulge))
@@ -114,9 +125,10 @@ class OrbMotion:
 
     def frame_state(self) -> FrameState:
         look = self.look
-        return FrameState(label=label_for(self.state), level=self.level,
+        label = GAME_LABEL if self.state == 'idle' and self.game_target else label_for(self.state)
+        return FrameState(label=label, level=self.level,
                           arc_deg=look.arc_deg+10.*self.voice,
                           arc_scale=look.arc_scale*(.3+.7*self.assembly),
                           arc_rotation=self.arc_angle, tick_rotation=self.frame_spin*.3,
                           dash_rotation=self.frame_spin*.6, blink=self.blink, amber=look.amber,
-                          voice_ring=look.voice_ring, voice=self.voice)
+                          voice_ring=look.voice_ring, voice=self.voice, game=self.game)

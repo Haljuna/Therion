@@ -1,7 +1,7 @@
 """Print da Orbe HUD para comparar com o protótipo.
 
 Uso: python scripts/orb_snapshot.py --state idle --size 720 --seconds 1 --out orbe.png [--sheet 12]
-     [--timer 0.64:32:focus] [--mini]
+     [--timer 0.64:32:focus] [--mini] [--game]
 
 --timer FRAÇÃO:RÓTULO:fase desenha o tempo do modo foco (fase focus|pause; âmbar quando a fração cabe nos
 últimos 5 min de um foco de 50). --mini tira o print da mini orbe de verdade (110 px, transparente), colada
@@ -27,6 +27,7 @@ def main():
     parser.add_argument('--out', required=True)
     parser.add_argument('--timer', default='', help='FRAÇÃO:RÓTULO:fase, ex. 0.64:32:focus')
     parser.add_argument('--mini', action='store_true')
+    parser.add_argument('--game', action='store_true', help='modo de jogo: arcos e núcleo vermelhos')
     args = parser.parse_args()
 
     from therion.interface.graphics import prepare_graphics
@@ -57,6 +58,8 @@ def main():
         view.show(); view.set_visual(args.state, args.intensity); view.set_active(True)
         set_timer = view.set_timer
     view.metrics.connect(print)
+    if args.game:
+        view.set_game(True)
     if look is not None:
         set_timer(look)
         resend = QTimer(); resend.timeout.connect(lambda: set_timer(look)); resend.start(1000)   # como o tique da janela

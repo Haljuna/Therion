@@ -5,7 +5,7 @@ from PySide6.QtCore import Qt, QTimer, QRectF
 from PySide6.QtGui import QColor, QPainter, QRadialGradient
 from PySide6.QtWidgets import QWidget, QStackedWidget, QLabel
 from .hud_frame import FrameState, paint_hud_frame
-from .hud_style import CORE, DOT, hud_layout, label_for, look_for
+from .hud_style import CORE, DOT, GAME_CORE, GAME_LABEL, hud_layout, label_for, look_for
 from .orb_geometry import fib_sphere, _rot_x, _rot_y
 from .orb_renderer import OrbGL
 
@@ -20,6 +20,7 @@ class StaticConstellation(QWidget):
         k = 3.4/(3.4-v[:, 2])   # mesma perspectiva do shader
         self.dots = np.column_stack((v[:, 0]*k, -v[:, 1]*k, (v[:, 2]+1.)/2.))[np.argsort(v[:, 2])]
         self.state = 'idle'
+        self.game = False
         self.focus_rect = None
         self.setMinimumSize(160, 160)
 
@@ -36,10 +37,11 @@ class StaticConstellation(QWidget):
         focus = self.focus_rect or QRectF(self.rect())
         lay = hud_layout(focus.x(), focus.y(), focus.width(), focus.height())
         look = look_for(self.state)
+        core = GAME_CORE if self.game and not look.amber else CORE
         glow = QRadialGradient(lay.cx, lay.cy, lay.R*1.25)
-        glow.setColorAt(0, QColor(*CORE, round(255*look.core)))
-        glow.setColorAt(.55, QColor(*CORE, round(255*look.core*.45)))
-        glow.setColorAt(1, QColor(*CORE, 0))
+        glow.setColorAt(0, QColor(*core, round(255*look.core)))
+        glow.setColorAt(.55, QColor(*core, round(255*look.core*.45)))
+        glow.setColorAt(1, QColor(*core, 0))
         painter.fillRect(self.rect(), glow)
         painter.setPen(Qt.NoPen)
         scale = (2600/STATIC_POINTS)**.5*lay.R/170.
@@ -48,9 +50,9 @@ class StaticConstellation(QWidget):
             painter.setBrush(QColor(*DOT, round(255*(.12+.88*depth)*.8*look.dim)))
             painter.drawEllipse(QRectF(lay.cx+x*lay.R-size/2, lay.cy+y*lay.R-size/2, size, size))
         paint_hud_frame(painter, lay, FrameState(
-            label=label_for(self.state), level=0., arc_deg=look.arc_deg, arc_scale=look.arc_scale,
+            label=GAME_LABEL if self.game and self.state == 'idle' else label_for(self.state), level=0., arc_deg=look.arc_deg, arc_scale=look.arc_scale,
             arc_rotation=0., tick_rotation=0., dash_rotation=0., blink=1., amber=look.amber,
-            voice_ring=0., voice=0.))
+            voice_ring=0., voice=0., game=float(self.game)))
 
 
 class Constellation(QWidget):
@@ -110,6 +112,11 @@ class Constellation(QWidget):
             self.renderer.set_visual(state,intensity)
         self.still.set_state(state)
         self.setAccessibleDescription(state)
+
+    def set_game(self, on):
+        if self.renderer:
+            self.renderer.set_game(on)
+        self.still.game = on; self.still.update()
 
     def set_scene_pointer(self,x,y):
         if self.renderer:self.renderer.scene_motion.aim(x,y)

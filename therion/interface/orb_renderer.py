@@ -10,7 +10,7 @@ from PySide6.QtOpenGL import (QOpenGLBuffer, QOpenGLShader, QOpenGLShaderProgram
                              QOpenGLFramebufferObject, QOpenGLFramebufferObjectFormat)
 from .graphics import FRAME_INTERVAL_MS
 from .hud_frame import paint_hud_frame, paint_timer, paint_timer_flash
-from .hud_style import AMBER, CORE, DOT, FRAME, HOT, hud_layout, point_count
+from .hud_style import AMBER, CORE, DOT, FRAME, GAME_CORE, HOT, hud_layout, point_count
 from .orb_geometry import build_orb, VERTEX_FLOATS
 from .orb_motion import OrbMotion, THINKING_STATES
 from .orb_shaders import (SCENE_VERTEX, SCENE_FRAGMENT, QUAD_VERTEX, AURA_FRAGMENT,
@@ -149,6 +149,13 @@ class OrbGL(QOpenGLWidget):
         if self.reduced and changed:
             self.animation.advance(0., reduced=True)
             self.update()
+
+    def set_game(self, on):
+        """Modo de jogo: arcos e núcleo vermelhos. Parada (reduzida ou inativa), já troca a cor de uma vez."""
+        self.animation.set_game(on)
+        if self.reduced or not self.timer.isActive():
+            self.animation.game = self.animation.game_target
+        self.update()
 
     def set_quality(self, quality):
         self.quality = QualityController(quality)
@@ -398,7 +405,8 @@ class OrbGL(QOpenGLWidget):
         gl.glUniform4f(b.uniformLocation('anchor'), lay.cx/max(1, self.width()), 1.-lay.cy/max(1, self.height()),
                        lay.R/max(1, self.height()), float(width/height))
         gl.glUniform1f(b.uniformLocation('strength'), a.look.core+.35*a.voice+.1*a.energy+.08*a.pulse)
-        gl.glUniform3f(b.uniformLocation('colCore'), *(c/255. for c in CORE))
+        core = (c+(g-c)*a.red for c, g in zip(CORE, GAME_CORE))   # vermelho-magenta no modo de jogo
+        gl.glUniform3f(b.uniformLocation('colCore'), *(c/255. for c in core))
         gl.glUniform1f(b.uniformLocation('lightAlpha'), 1. if self.transparent else 0.)
         self._quad(b); b.release()
 

@@ -6,6 +6,9 @@ HOT = (200, 255, 250)
 CORE = (110, 90, 230)
 FRAME = (120, 215, 232)
 AMBER = (255, 180, 90)
+GAME_RED = (255, 60, 55)     # modo de jogo: arcos e nome do estado
+GAME_CORE = (200, 40, 70)    # modo de jogo: brilho atrás da esfera
+GAME_LABEL = 'MODO DE JOGO'
 
 
 @dataclass(frozen=True)

@@ -120,3 +120,26 @@ def test_speaking_pulses_on_each_syllable():
 def test_listening_stays_smooth_between_syllables():
     values = _syllables('listening')
     assert min(values) > .4*max(values)   # o microfone do usuario tem ruido: nao tremer
+
+
+def test_game_mode_eases_in_and_out():
+    m = OrbMotion(); m.set_game(True); m.advance(1/60)
+    assert 0. < m.game < .5
+    run(m, 2); assert m.game > .99 and m.frame_state().game > .99
+    m.set_game(False); run(m, 2); assert m.game < .01
+
+
+def test_game_mode_names_the_idle_state():
+    m = OrbMotion(); m.set_game(True); run(m, 1)
+    assert m.frame_state().label == 'MODO DE JOGO'
+    m.set_visual('listening'); assert m.frame_state().label == 'OUVINDO'
+
+
+def test_amber_cancels_game_red():
+    m = OrbMotion(); m.set_game(True); m.set_visual('error'); run(m, 2)
+    assert m.red < .01
+
+
+def test_reduced_motion_applies_game_mode_at_once():
+    m = OrbMotion(); m.set_game(True); m.advance(0., reduced=True)
+    assert m.game == 1.

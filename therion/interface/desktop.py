@@ -1089,6 +1089,10 @@ class MainWindow(QMainWindow):
         if self._mini_orb is not None:
             from therion.interface import reminders
             self._mini_orb.set_quiet(on or reminders.do_not_disturb())   # sem esperar o tick de 30 s
+            self._mini_orb.set_game(on)
+        constellation = getattr(self._dashboard, 'constellation', None)
+        if constellation is not None:
+            constellation.set_game(on)   # arcos e núcleo vermelhos também no painel
         if on:
             self._unload_model()
             if not self._reminder_timer.isActive():

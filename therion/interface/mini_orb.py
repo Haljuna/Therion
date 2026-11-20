@@ -263,6 +263,11 @@ class MiniOrb(QWidget):
             self._renderer.reduced = quiet
         self._sync_renderer()
 
+    def set_game(self, on):
+        """Modo de jogo ligado pelo usuário: arcos e núcleo vermelhos."""
+        if not self._shut and self._renderer is not None:
+            self._renderer.set_game(on)
+
     def hide_for_game(self, hidden):
         if self._shut:
             return
