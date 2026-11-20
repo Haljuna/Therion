@@ -90,7 +90,7 @@ def account_identity(root,filename='gmail-token.json'):
 
 
 class GmailSession:
-    READ={'search','thread','draft','metadata','attachment','labels','profile'}
+    READ={'search','thread','draft','metadata','metadata_many','attachment','labels','profile'}
     WRITE={'save_draft':'compose','send_draft':'compose','modify':'modify'}
     def __init__(self,config):
         self.config=config
@@ -122,6 +122,7 @@ class GmailSession:
         if operation=='labels':return adapter.labels()
         if operation=='search':return adapter.search(args['query'],args.get('page'),**({'limit':args['limit']} if 'limit' in args else {}))
         if operation in {'thread','draft','metadata','send_draft'}:return getattr(adapter,operation)(args['identifier'])
+        if operation=='metadata_many':return adapter.metadata_many(args['identifiers'])
         if operation=='attachment':return {'base64':base64.b64encode(adapter.attachment(args['message_id'],args['attachment_id'])).decode()}
         if operation=='save_draft':return adapter.save_draft(args)
         return adapter.modify(args['identifier'],args['add'],args['remove'])
@@ -140,6 +141,7 @@ class RemoteGmailAdapter:
     def thread(self,identifier):return self.worker.call('thread',{'identifier':identifier},self.token)
     def draft(self,identifier):return self.worker.call('draft',{'identifier':identifier},self.token)
     def metadata(self,identifier):return self.worker.call('metadata',{'identifier':identifier},self.token)
+    def metadata_many(self,identifiers):return self.worker.call('metadata_many',{'identifiers':list(identifiers)},self.token)
     def save_draft(self,arguments):return self.worker.call('save_draft',arguments,self.token)
     def send_draft(self,identifier):return self.worker.call('send_draft',{'identifier':identifier},self.token)
     def modify(self,identifier,add,remove):return self.worker.call('modify',{'identifier':identifier,'add':add,'remove':remove},self.token)
@@ -264,6 +266,23 @@ class GmailAdapter:
 
     def metadata(self,identifier):
         return self.service.users().messages().get(userId='me',id=identifier,format='metadata',metadataHeaders=['Subject','From','To','Date']).execute()
+
+    def metadata_many(self,identifiers):
+        """Metadados de até 10 e-mails numa só viagem (lote do Gmail): 0,4 s em vez de 2,6 s no panorama."""
+        if (not isinstance(identifiers,list) or not 1<=len(identifiers)<=10
+                or any(not isinstance(i,str) or not i or len(i)>100 for i in identifiers) or len(set(identifiers))!=len(identifiers)):
+            raise ValueError('Lista de e-mails inválida.')
+        rows,failed={},[]
+        def got(request_id,response,exception):
+            if exception is not None:failed.append(exception)
+            else:rows[request_id]=response
+        batch=self.service.new_batch_http_request(callback=got)
+        for number,identifier in enumerate(identifiers):
+            batch.add(self.service.users().messages().get(userId='me',id=identifier,format='metadata',
+                metadataHeaders=['Subject','From','To','Date']),request_id=str(number))
+        batch.execute()
+        if failed or len(rows)!=len(identifiers):raise ValueError('O lote do Gmail não trouxe todos os e-mails.')
+        return {'messages':[rows[str(number)] for number in range(len(identifiers))]}
 
     def attachment(self,message_id,attachment_id):
         result=self.service.users().messages().attachments().get(userId='me',messageId=message_id,id=attachment_id).execute()

@@ -92,6 +92,9 @@ def explain(photo, free_now, sizes_now, now):
     return start + '; não foi nas pastas de sempre, pode ser atualização ou programa novo.'
 
 
+SUMMARY_GAP = 3600   # o mesmo resumo de partida só volta depois de 1 hora
+
+
 class PcWatch:
     def __init__(self, photo_path=None, service=service_of, clock=time.monotonic):
         self._active = set()   # problemas já avisados que ainda não passaram
@@ -126,6 +129,11 @@ class PcWatch:
             parts.append(f'o disco C desceu a {_gb(worst["c"])}')
         if not parts:
             return None
+        # 19/11: sair e voltar da tela cheia repetia o mesmo resumo várias vezes por noite.
+        kinds, last = frozenset(part.split(' ')[1] for part in parts), getattr(self, '_last_summary', None)
+        if last and last[0] >= kinds and self._clock() - last[1] < SUMMARY_GAP:
+            return None
+        self._last_summary = (kinds, self._clock())
         return 'Senhor, na partida ' + (', '.join(parts[:-1]) + ' e ' + parts[-1] if len(parts) > 1 else parts[0]) + '.'
 
     def _keep_worst(self, measure, gpu_temp):

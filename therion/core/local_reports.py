@@ -23,7 +23,7 @@ _PC = re.compile(
     r'|como (?:esta|ta) (?:a memoria|a saude) do (?:pc|computador)|(?:saude|estado) do (?:pc|computador)' + _POLITE)
 _PROJECT = re.compile(
     r'(?:como (?:esta|ta|anda|vai)|(?:qual (?:e )?)?(?:o )?(?:status|estado|situacao) d[oe]) (?:o |a )?(projeto )?(.+?)' + _POLITE)
-_GAME = r'(?:o |a )?mod[oa] (?:de )?(?:jogo|game)'  # o Whisper ouve "moda de jogo"
+_GAME = r'(?:o |a )?mod[oa]s? (?:de )?(?:jogo|game)'  # o Whisper ouve "moda de jogo"
 _GAME_ON = re.compile(r'(?:(?:ativa|ative|ativar|liga|ligue|ligar|entra n|entre n|entrar n|coloca n|inicia|inicie)(?:o | o | )?)?' + _GAME + '|vou jogar(?: agora)?' + _POLITE)
 _GAME_OFF = re.compile(r'(?:desativa|desative|desativar|desliga|desligue|desligar|sai d|saia d|sair d|encerra|encerre|tira d)(?:o | o | )?' + _GAME
                        + r'|parei de jogar|terminei de jogar|modo normal' + _POLITE)
@@ -44,7 +44,8 @@ def configured_projects(config=None):
 
 def game_mode_request(command):
     """True liga, False desliga, None não é sobre o modo jogo."""
-    text = control(command).rstrip('?!. ')
+    # "Aham, desliga o modo de jogo": a interjeição da fala não muda o pedido.
+    text = re.sub(r'^(?:aham|ah|ok|ta|beleza|mano|entao|agora|isso)[, ]+', '', control(command).rstrip('?!. '))
     if _GAME_OFF.fullmatch(text):
         return False
     return True if _GAME_ON.fullmatch(text) else None
@@ -87,14 +88,37 @@ def _plural(count, one, many):
     return f'{count} {one if count == 1 else many}'
 
 
-def project_status(name, path, git=_git):
+def project_note(name, vault=None):
+    """Propriedades painel_* da nota do projeto no cofre (só o cabeçalho); {} se não houver."""
+    if vault is None:
+        from therion.context.second_brain import SecondBrainReader
+        vault = SecondBrainReader.DEFAULT_VAULT_ROOT
+    try:
+        with (Path(vault) / '10 - Projetos' / name / f'{name}.md').open(encoding='utf-8', errors='replace') as stream:
+            head = stream.read(4000)
+    except (OSError, ValueError):
+        return {}
+    match = re.match(r'---\r?\n(.*?)\r?\n---', head, re.S)
+    rows = re.findall(r'^(painel_\w+):[ \t]*(.*?)[ \t]*$', match[1], re.M) if match else []
+    return {key: value.strip('"\'') for key, value in rows
+            if control(value.strip('"\'')) not in {'', 'nao informado', 'nenhum', '-'}}
+
+
+def project_status(name, path, git=_git, note=None):
+    # Fase e próximo passo vêm da nota do projeto; o git diz o que falta guardar.
+    note = note or {}
+    items = [prefix + note[key][:160].rstrip('.') + '.' for key, prefix in
+             (('painel_fase', ''), ('painel_proxima_acao', 'Próximo passo: '), ('painel_bloqueio', 'Bloqueio: '))
+             if note.get(key)]
+    lead = f'{name}: ' + ' '.join(items) if items else ''
     branch = git(path, 'rev-parse', '--abbrev-ref', 'HEAD')
     if branch is None:
-        return f'Não consegui ler o projeto {name}: a pasta cadastrada não respondeu como repositório git.'
+        failed = f'Não consegui ler o projeto {name}: a pasta cadastrada não respondeu como repositório git.'
+        return f'{lead} {failed}' if lead else failed
     changed = len([line for line in (git(path, 'status', '--porcelain') or '').splitlines() if line.strip()])
     ahead = git(path, 'rev-list', '--count', '@{u}..HEAD')
     last = git(path, 'log', '-1', '--pretty=%cd — %s', '--date=format:%d/%m %H:%M')
-    parts = [f'{name}: ramo {branch}.',
+    parts = [f'Ramo {branch}.' if lead else f'{name}: ramo {branch}.',
              'Tudo commitado.' if not changed else _plural(changed, 'arquivo', 'arquivos') + ' sem commit.']
     if ahead is None or not ahead.isdigit():
         parts.append('Este ramo não tem remoto para comparar.')
@@ -102,7 +126,7 @@ def project_status(name, path, git=_git):
         parts.append('Tudo enviado.' if ahead == '0' else _plural(int(ahead), 'commit', 'commits') + ' sem push.')
     if last:
         parts.append(f'Último commit: {last[:160]}.')
-    return ' '.join(parts)
+    return ' '.join([lead] * bool(lead) + parts)
 
 
 def _conversations(folder, day):
@@ -224,7 +248,7 @@ def answer(command, host):
         except (OSError, AttributeError):
             return 'Não consegui medir a memória e os discos agora.'
     if request[0] == 'project':
-        return project_status(request[1], request[2])
+        return project_status(request[1], request[2], note=project_note(request[1]))
     names = ', '.join(request[1])
     return ('Não conheço esse projeto. Cadastrados: ' + names + '.' if names else
             'Nenhum projeto está cadastrado. Adicione "projects": {"nome": "caminho"} na configuração do Therion.')

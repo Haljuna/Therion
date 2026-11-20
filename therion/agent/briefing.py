@@ -17,7 +17,7 @@ def briefing_command(command):
     text=re.sub(r'[,;:]',' ',control(command));text=' '.join(text.split())
     match=re.fullmatch(r'(?:(?:fala|oi|ola|e ai|ei) )?(?:(?:therion|terion|eterion) )?(bom dia|boa tarde|boa noite)(?: (?:therion|terion|eterion|senhor))?',text)
     if match:return match[1].capitalize()
-    if re.fullmatch(r'(?:por favor )?(?:mostre|mostra|mostrar|abra|abrir|quero ver) (?:o |meu |o meu )?panorama(?: do dia)?(?: por favor)?',text):return 'Olá'
+    if re.fullmatch(r'(?:por favor )?(?:mostre|mostra|mostrar|abra|abre|abrir|quero ver) (?:o |meu |o meu )?panorama(?: do dia)?(?: por favor)?',text):return 'Olá'
     return None
 
 
@@ -63,9 +63,10 @@ def mail_since(host,token,cutoff):
     if account is None:return box.status()
     marker=BriefingMarker(host._agent_root,account)
     previous=marker.read()
-    page=box.page('in:inbox',None,token,force=True)
-    result=dict(state='ready',page=page,account=account,cutoff_ms=cutoff,first=previous is None,count=0,complete=True)
-    if previous is None:return result
+    result=dict(state='ready',page=None,account=account,cutoff_ms=cutoff,first=previous is None,count=0,complete=True)
+    if previous is None:
+        result['page']=box.page('in:inbox',None,token,force=True)
+        return result
     if previous>cutoff:raise ValueError('O relógio está anterior ao último panorama. Marco preservado.')
     # O Gmail filtra por segundo: o miolo do intervalo conta só pelos ids; as bordas (2–3 s de cada lado)
     # conferem a hora exata. Abrir mensagem por mensagem estourava o prazo e o marco nunca avançava.
@@ -75,6 +76,10 @@ def mail_since(host,token,cutoff):
     try:
         with box.io_lock:
             with box._adapter(account,token) as adapter:
+                # Lista e contagem no mesmo worker: um processo do Gmail a menos por panorama (~1 s).
+                # Falha da lista sobe como antes (não é contagem incompleta).
+                try:result['page']=box.page('in:inbox',None,token,force=True,adapter=adapter)
+                except Exception as error:raise _PageFailed() from error
                 def ids(query):
                     found=[];pages=set();next_page=None
                     while True:
@@ -93,10 +98,15 @@ def mail_since(host,token,cutoff):
                     received=int(metadata['internalDate'])
                     if previous<=received<cutoff and 'INBOX' in metadata.get('labelIds',[]):result['count']+=1
         box._check(account,token)
+    except _PageFailed as failed:raise failed.__cause__
     except Cancelled:raise
     except (OSError,ValueError,TimeoutError,KeyError,TypeError):
         result.update(state='partial',complete=False,message='A contagem de e-mails está incompleta; o marco anterior foi preservado.')
     return result
+
+
+class _PageFailed(Exception):
+    """Embrulha a falha da lista para ela não virar "contagem incompleta"."""
 
 
 def collect(host,command,token,progress=None):
@@ -124,7 +134,8 @@ def collect(host,command,token,progress=None):
     if mail.get('first'):parts.append('Estou começando o acompanhamento dos e-mails a partir deste panorama.')
     elif mail.get('state') in {'ready','partial'}:
         noun='e-mail' if mail['count']==1 else 'e-mails'
-        parts.append(('Encontrei pelo menos ' if not mail.get('complete') else 'Recebeu ')+str(mail['count'])+' '+noun+' desde o último panorama.')
+        if mail['count']==0 and mail.get('complete'):parts.append('Nenhum e-mail novo desde o último panorama.')
+        else:parts.append(('Encontrei pelo menos ' if not mail.get('complete') else 'Recebeu ')+str(mail['count'])+' '+noun+' desde o último panorama.')
     else:parts.append('Não consegui consultar os novos e-mails. Confira o estado da conexão na caixa de entrada.')
     agenda=rows['calendar'];tasks=rows['tasks']
     if agenda.get('state')=='ready':

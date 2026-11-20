@@ -36,6 +36,9 @@ def executable_identity(path):
         size=after.st_size)
 
 
+BROWSERS = {'chrome', 'google chrome', 'edge', 'microsoft edge', 'firefox', 'brave', 'opera'}
+
+
 @dataclass(frozen=True)
 class Application:
     id: str
@@ -79,8 +82,12 @@ class ApplicationCatalog:
 
     def resolve(self, name):
         name = name.strip().casefold()
-        return [a for a in self.entries() if name in {a.id.casefold(), a.name.casefold(),
+        found = [a for a in self.entries() if name in {a.id.casefold(), a.name.casefold(),
             *(alias.casefold() for alias in a.aliases)}]
+        if not found and name in {'navegador', 'navigador', 'browser'}:
+            # "Fecha o navegador": vale o navegador cadastrado; com dois, quem chama pede o nome.
+            found = [a for a in self.entries() if a.name.casefold() in BROWSERS or a.id.casefold() in BROWSERS]
+        return found
 
     def register(self, name, path, aliases=(), source='manual'):
         if not isinstance(name,str) or not name.strip() or len(name)>100:

@@ -48,9 +48,16 @@ def app_result_request(command):
 
 def app_close_request(command):
     match=re.fullmatch(r'(?:(?:therion|terion|terio|theo)[, ]+)?(?:(?:agora|entao)[, ]+)?'
-                       r'(?:fecha|feche|fechar|fecho)[, ]+(?:o |a )?(.+?)(?: (?:pra|para) mim| por favor)?',application_control(command))
+                       r'(?:fecha|feche|fechar|fecho)[, ]+(?:o |a |no |na )?(.+?)(?: (?:pra|para) mim| por favor)?',application_control(command))
     if not match or re.search(r'\b(?:nao|nunca|nem|talvez|se|e|ou)\b',match[1]):return None
     return match[1]
+
+
+def repeat_request(command):
+    """"Repete, por favor": repetir a última resposta, sem o modelo."""
+    return re.fullmatch(r'(?:(?:voce )?pode )?(?:repete|repita|repetir|fala de novo|diz de novo|fala outra vez)'
+                        r'(?: (?:isso|o que (?:voce )?disse|a (?:ultima )?resposta))?(?: (?:pra|para) mim)?(?:,? por favor)?',
+                        control(command)) is not None
 
 
 def current_time_request(command):
