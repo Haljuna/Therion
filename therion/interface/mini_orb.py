@@ -182,12 +182,13 @@ class _Panel(QFrame):
 class MiniOrb(QWidget):
     reading_ready = Signal(dict)
 
-    def __init__(self, *, path, renderer_factory=OrbGL, reader=full_reading, on_open_main=None,
+    def __init__(self, *, path, renderer_factory=OrbGL, reader=full_reading, on_open_main=None, on_click=None,
                  key_state=_key_down, cursor_pos=QCursor.pos):
         super().__init__()
         _floating(self)
         self.setFixedSize(ORB_PX, ORB_PX)
         self._path, self._reader, self._on_open_main = path, reader, on_open_main
+        self._on_click, self._home = on_click, None   # _home: lugar do usuário enquanto estacionada
         self._key_state, self._cursor_pos, self._last_full = key_state, cursor_pos, None
         self._visual, self._busy, self._pending = 'idle', False, False
         self._thread, self._press, self._dragged = None, None, False
@@ -298,7 +299,25 @@ class MiniOrb(QWidget):
         paint.setPen(Qt.NoPen)
         paint.drawEllipse(self.rect().adjusted(8, 8, -8, -8))
 
-    # ---- mouse: clique abre o painel, arrastar só move ----
+    # ---- estacionar no canto (modo jogo, foco, minimizar) ----
+    @property
+    def parked(self):
+        return self._home is not None
+
+    def park(self, on):
+        """Leva a orbe ao canto do segundo monitor e, ao soltar, de volta ao lugar do usuário (sem gravar o canto)."""
+        if self._shut or on == self.parked:
+            return
+        screens = _screens()
+        if on:
+            self._home = self.pos()
+            if screens:
+                self.move(default_position(screens, QGuiApplication.primaryScreen().availableGeometry(), self.size()))
+        else:
+            home, self._home = self._home, None
+            self.move(clamp(home, self.size(), screens) if screens else home)
+
+    # ---- mouse: clique chama a janela (ou abre o painel), arrastar só move ----
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
             self._press, self._dragged = event.globalPosition().toPoint() - self.pos(), False
@@ -318,7 +337,10 @@ class MiniOrb(QWidget):
         if event.button() == Qt.LeftButton and self._press is not None:
             self._press = None
             if self._dragged:
+                self._home = None   # arrastou estacionada: o lugar novo é do usuário
                 save(self._path, self.pos())   # o desligamento do Windows não passa por shut()
+            elif self._on_click is not None:
+                self._on_click()
             else:
                 if self.panel.isVisible():
                     self._close_panel()
@@ -328,6 +350,7 @@ class MiniOrb(QWidget):
     def contextMenuEvent(self, event):
         menu = QMenu(self)
         menu.addAction('Abrir o Therion', lambda: self._on_open_main and self._on_open_main())
+        menu.addAction('Uso do PC', self._open_panel)
         menu.addAction('Esconder até reiniciar', self._dismiss)
         menu.exec(event.globalPos())
 
@@ -412,6 +435,6 @@ class MiniOrb(QWidget):
         if self._renderer is not None:
             self._renderer.disabled = True   # um quadro atrasado não pode religar o timer do GL
             self._renderer.cleanup()
-        save(self._path, self.pos())
+        save(self._path, self._home if self._home is not None else self.pos())
         self.panel.close()
         self.close()

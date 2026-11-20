@@ -354,3 +354,88 @@ def test_a_screen_going_away_pulls_the_orb_back_inside(app, tmp_path, monkeypatc
     window._reclamp()
     assert window.pos() == QPoint(1920 - mini_orb.ORB_PX, 300)
     window.shut()
+
+
+# ---- estacionar no canto (modo jogo, foco, minimizar) e clique repassado ----
+def _corner(window):
+    from PySide6.QtGui import QGuiApplication
+    from therion.interface.mini_orb import _screens
+    return default_position(_screens(), QGuiApplication.primaryScreen().availableGeometry(), window.size())
+
+
+def test_park_moves_to_the_corner_and_back(app, tmp_path):
+    window, _ = make(tmp_path)
+    window.move(300, 300)
+    window.park(True)
+    assert window.pos() == _corner(window) and window.parked
+    window.park(False)
+    assert window.pos() == QPoint(300, 300) and not window.parked
+    window.shut()
+
+
+def test_park_twice_keeps_the_first_spot(app, tmp_path):
+    window, _ = make(tmp_path)
+    window.move(300, 300)
+    window.park(True)
+    window.park(True)
+    window.park(False)
+    assert window.pos() == QPoint(300, 300)
+    window.shut()
+
+
+def test_dragging_while_parked_keeps_the_new_spot(app, tmp_path):
+    window, _ = make(tmp_path)
+    window.move(300, 300)
+    window.show()
+    window.park(True)
+    center = QPoint(48, 48)
+    QTest.mousePress(window, Qt.LeftButton, Qt.NoModifier, center)
+    QTest.mouseMove(window, center + QPoint(-30, -30))
+    QTest.mouseRelease(window, Qt.LeftButton, Qt.NoModifier, center + QPoint(-30, -30))
+    dropped = window.pos()
+    window.park(False)
+    assert window.pos() == dropped and not window.parked
+    window.shut()
+
+
+def test_shut_while_parked_saves_the_users_spot(app, tmp_path):
+    window, _ = make(tmp_path)
+    window.move(300, 300)
+    window.park(True)
+    window.shut()
+    assert restore(str(tmp_path / 'pos.json'), [QRect(0, 0, 4000, 4000)], QSize(96, 96)) == QPoint(300, 300)
+
+
+def test_click_calls_on_click_instead_of_the_panel(app, tmp_path):
+    hits = []
+    window, _ = make(tmp_path, on_click=lambda: hits.append(1))
+    window.move(300, 300)
+    window.show()
+    QTest.mouseClick(window, Qt.LeftButton, Qt.NoModifier, QPoint(48, 48))
+    assert hits == [1] and not window.panel.isVisible()
+    window.shut()
+
+
+def test_menu_has_pc_usage_and_it_opens_the_panel(app, tmp_path, monkeypatch):
+    from PySide6.QtGui import QContextMenuEvent
+    from therion.interface import mini_orb
+    seen = {}
+
+    class FakeMenu:   # QMenu.exec bloquearia o teste
+        def __init__(self, _parent):
+            self.items = []
+
+        def addAction(self, text, callback):
+            self.items.append((text, callback))
+
+        def exec(self, _pos):
+            seen.update(self.items)
+    window, _ = make(tmp_path)
+    window.move(300, 300)
+    window.show()
+    monkeypatch.setattr(mini_orb, 'QMenu', FakeMenu)
+    window.contextMenuEvent(QContextMenuEvent(QContextMenuEvent.Mouse, QPoint(1, 1)))
+    assert list(seen) == ['Abrir o Therion', 'Uso do PC', 'Esconder até reiniciar']
+    seen['Uso do PC']()
+    assert window.panel.isVisible()
+    window.shut()
