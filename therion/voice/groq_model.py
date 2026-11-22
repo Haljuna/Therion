@@ -10,6 +10,8 @@ from therion.core import groq
 from therion.voice.http_model import wav_bytes
 
 LOCAL_IDLE_SECONDS = 300
+# A Groq aceita até 25 MB; 10 min de WAV 16 kHz dão ~19 MB. A conversa contínua pode passar de 30 s.
+GROQ_MAX_SAMPLES = 16000 * 600
 
 
 class GroqVoiceModel:
@@ -22,9 +24,11 @@ class GroqVoiceModel:
 
     def transcribe(self, audio, **options):
         data = np.asarray(audio)
-        if data.ndim != 1 or not 0 < len(data) <= 480000 or not np.isfinite(data).all():
-            raise ValueError('Áudio inválido: esperado mono 16 kHz, até 30 segundos')
+        if data.ndim != 1 or not len(data) or not np.isfinite(data).all():
+            raise ValueError('Áudio inválido: esperado mono 16 kHz')
         try:
+            if len(data) > GROQ_MAX_SAMPLES:
+                raise groq.GroqUnavailable('Áudio longo demais para a Groq.')
             result = self._groq(data, options)
         except groq.GroqUnavailable as error:
             print(f'[Therion] Groq indisponível ({error}); transcrevendo no PC.')
