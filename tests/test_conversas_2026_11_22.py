@@ -66,3 +66,16 @@ def test_falha_das_rotinas_guarda_o_traceback_no_pc(tmp_path):
     path.write_text('x' * 30000, encoding='utf-8')
     log_autonomy_error(ValueError('y'), path)
     assert len(path.read_text(encoding='utf-8')) < 21000   # o arquivo não cresce sem fim
+
+
+def test_oferta_vencida_nao_desliga_o_filtro_da_fala_de_fundo():
+    import time
+    from types import SimpleNamespace
+    from therion.interface.desktop import MainWindow
+    def voz(pendentes):
+        return SimpleNamespace(_voice_pipeline=SimpleNamespace(last_confidence=-0.6), _conversation_awaiting_response=False,
+                               _last_conversation_spoken='', _orchestrator=SimpleNamespace(confirmation_id=None,
+                               _conversation_frame=SimpleNamespace(question=None), _pendings=lambda: pendentes))
+    agora = time.monotonic()
+    assert MainWindow._background_speech(voz([agora - 1, None, (agora - 1, 'pick', ())]), 'Boa logo!')
+    assert not MainWindow._background_speech(voz([None, (agora + 60, 'pick', ())]), 'Boa logo!')

@@ -2116,7 +2116,9 @@ class MainWindow(QMainWindow):
         if getattr(self, '_wake_score', None) is not None:   # chamou pelo nome (o áudio inicial corta o nome do texto)
             return False
         pendings = getattr(self._orchestrator, '_pendings', None)
-        if callable(pendings) and any(value is not None for value in pendings()):   # resposta a uma oferta viva
+        now = time.monotonic()   # cada oferta é um prazo ou uma tupla que começa pelo prazo; a vencida não conta
+        if callable(pendings) and any(value is not None and (value if isinstance(value, float) else value[0]) > now
+                                      for value in pendings()):   # resposta a uma oferta viva
             return False
         if re.search(r'\b(?:therion|terion|eterion)\b', text, re.I):
             return False

@@ -346,3 +346,24 @@ def test_the_microphone_callback_is_not_blocked_while_the_late_preroll_is_analys
     audio = service.stop()
     assert free == [True]
     assert len(audio) == 3200 + 1280 and np.allclose(audio[:3200], .2) and np.allclose(audio[3200:], 0)
+
+
+def test_preroll_alone_of_at_least_0_2_s_is_a_valid_capture():
+    service = AudioCaptureService(stream_factory=lambda **k: FakeInputStream(**k), activity_factory=lambda: (lambda s: False))
+    service.start(automatic=True, preroll=np.full(3200, .2, np.float32))
+    audio = service.stop()   # nenhum bloco do microfone: o áudio inicial sozinho já passa do mínimo
+    assert audio is not None and len(audio) == 3200
+
+
+def test_a_late_preroll_that_returns_none_is_not_forwarded():
+    streams = []
+    def factory(**kwargs):
+        streams.append(FakeInputStream(**kwargs))
+        return streams[-1]
+    service = AudioCaptureService(stream_factory=factory, activity_factory=lambda: (lambda s: False))
+    assert service.start(automatic=True, preroll=lambda: None) is True
+    streams[0].feed(1280, 0.0)
+    streams[0].feed(1280, 0.0)
+    streams[0].feed(1280, 0.0)
+    audio = service.stop()
+    assert audio is not None and len(audio) == 3840   # só o microfone; nada de None nem bloco vazio na emenda

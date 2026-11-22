@@ -29,6 +29,7 @@ def mail_count_request(command):
 
 
 def mail_today_request(command):
+    """"Quantos e-mails eu tenho hoje?": a contagem é dos que chegaram desde a meia-noite local."""
     from therion.context.language import control
     return mail_count_request(command) and bool(re.search(r'\bhoje\b',control(command)))
 

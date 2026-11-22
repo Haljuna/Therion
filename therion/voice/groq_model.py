@@ -2,8 +2,8 @@
 import json
 import re
 import threading
-import unicodedata
 import time
+import unicodedata
 from types import SimpleNamespace
 
 import numpy as np
