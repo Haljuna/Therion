@@ -106,8 +106,11 @@ try {
     # Aquecer com o mesmo num_ctx do agente; outro valor faz o Ollama recarregar o modelo na primeira pergunta.
     $warmContext=8192
     if ($config.agent.context_tokens -is [int] -and $config.agent.context_tokens -ge 1024 -and $config.agent.context_tokens -le 16384) { $warmContext=$config.agent.context_tokens }
-    $warm=Send-LocalJson $config.ai.endpoint @{model=$config.ai.model;messages=@(@{role='user';content='Responda somente OK.'});think=$false;stream=$false;keep_alive='5m';options=@{num_ctx=$warmContext;num_predict=8}}
-    if (!$warm.done -or !$warm.message.content) { throw 'IA nao confirmou prontidao.' }
+    # Com a Groq, o modelo local e so reserva: nao carregar na memoria ao abrir.
+    if ($config.ai.online -ne 'groq') {
+        $warm=Send-LocalJson $config.ai.endpoint @{model=$config.ai.model;messages=@(@{role='user';content='Responda somente OK.'});think=$false;stream=$false;keep_alive='5m';options=@{num_ctx=$warmContext;num_predict=8}}
+        if (!$warm.done -or !$warm.message.content) { throw 'IA nao confirmou prontidao.' }
+    }
     if ($useJarvis -and !$voice.last_generation) {
         $warmAudio=Send-LocalJson 'http://127.0.0.1:3901/v1/audio/speech' @{model='tts-1';voice='120f734a';input='Ola.';language='pt';response_format='wav'} 90 -Audio
         if ($warmAudio.Length -lt 44 -or [Text.Encoding]::ASCII.GetString($warmAudio,0,4) -ne 'RIFF' -or [Text.Encoding]::ASCII.GetString($warmAudio,8,4) -ne 'WAVE') { throw 'Aquecimento da voz nao retornou WAV valido.' }

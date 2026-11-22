@@ -468,7 +468,8 @@ class AgentSupport:
             provider=DraftProvider(direct_draft)
         elif direct_gmail:
             summarizer=(getattr(self,'_gmail_summary_provider',None) or
-                (OllamaAgentProvider(core_provider.ENDPOINT,core_provider.model,protocol=config.get('protocol','json'),think=False)
+                (OllamaAgentProvider(core_provider.ENDPOINT,core_provider.model,protocol=config.get('protocol','json'),think=False,
+                    online=getattr(core_provider,'online',False))
                  if core_provider is not None and direct_gmail[0]=='summary' else None))
             provider=RecentMailProvider(direct_gmail,summarizer=summarizer,selected=gmail_followup)
         elif direct_app or direct_calendar:
@@ -479,7 +480,8 @@ class AgentSupport:
             provider=ExplicitSearchProvider(legacy_intent.target.rstrip('.!?').strip())
         else:
             provider = self._agent_provider or (OllamaAgentProvider(core_provider.ENDPOINT, core_provider.model,
-                protocol=config.get('protocol', 'json'), think=core_provider.think if config.get('think') is None else config['think']) if core_provider is not None else None)
+                protocol=config.get('protocol', 'json'), think=core_provider.think if config.get('think') is None else config['think'],
+                online=getattr(core_provider,'online',False)) if core_provider is not None else None)
         if grounded_kind and provider is not None:
             if scope is None:
                 requested=('10 - Projetos/Therion' if grounded_kind=='project' else '02 - Faculdade',)

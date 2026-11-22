@@ -30,7 +30,7 @@ def final_text(value):
 
 
 class OllamaAgentProvider:
-    def __init__(self, endpoint, model, *, protocol='json', think=None, client_factory=None,background=False):
+    def __init__(self, endpoint, model, *, protocol='json', think=None, client_factory=None,background=False,online=False):
         if not is_local_ollama_endpoint(endpoint) or protocol not in {'json', 'native'}:
             raise AgentError('Provider deve usar Ollama local e protocolo conhecido.')
         self.endpoint, self.model, self.protocol, self.think = endpoint, model, protocol, think
@@ -40,10 +40,12 @@ class OllamaAgentProvider:
         self.diagnostics = []
         self._clients = {}
         self.background=background is True
+        # Groq só no protocolo nativo (ferramentas no formato OpenAI); o Ollama local fica de reserva.
+        self.online=online is True and protocol=='native'
 
     def background_copy(self):
         return OllamaAgentProvider(self.endpoint,self.model,protocol=self.protocol,think=self.think,
-            client_factory=self.client_factory,background=True)
+            client_factory=self.client_factory,background=True,online=self.online)
 
     async def decide(self, messages, schemas, budget, token, event):
         import httpx
@@ -128,6 +130,25 @@ class OllamaAgentProvider:
             if loop not in self._clients:
                 self._clients[loop] = factory(trust_env=False, follow_redirects=False, timeout=httpx.Timeout(budget.seconds))
             client = self._clients[loop]
+            if client and self.online:
+                from therion.core import groq
+                state={'spoke':False}
+                task = asyncio.create_task(self._read_groq(client, rows, schemas, budget, event, state))
+                try:
+                    while not task.done():
+                        token.check()
+                        await asyncio.wait({task}, timeout=.025)
+                    token.check()
+                    return task.result()
+                except (groq.GroqUnavailable, httpx.TransportError) as error:
+                    # Depois de já ter falado o começo, repetir no local duplicaria a fala.
+                    if state['spoke']:
+                        raise ProviderUnavailable('A conexão com a Groq caiu no meio da resposta; nenhuma decisão foi aplicada.') from error
+                    print(f'[Therion] Groq indisponível ({error}); usando o modelo local.')
+                finally:
+                    if not task.done():
+                        task.cancel()
+                        await asyncio.gather(task, return_exceptions=True)
             if client:
                 task = asyncio.create_task(self._read(client, payload, event))
                 try:
@@ -192,6 +213,67 @@ class OllamaAgentProvider:
                         raise AgentError('Geração truncada pelo orçamento; nenhuma decisão aplicada.')
         if not complete:
             raise AgentError('Stream terminou sem confirmação de conclusão.')
+        return self._decision(content, calls)
+
+    async def _read_groq(self, client, rows, schemas, budget, event, state):
+        import httpx
+        from therion.core import groq
+        from therion.voice.stream_prefix import first_sentence
+        groq.check(groq.CHAT_MODEL)
+        key = groq.api_key()
+        if not key:
+            raise groq.GroqUnavailable('Sem chave da Groq.')
+        body = dict(model=groq.CHAT_MODEL, stream=True, temperature=0, reasoning_effort='none',
+                    max_completion_tokens=min(budget.output_tokens, groq.MAX_OUTPUT),
+                    messages=[{k: v for k, v in row.items() if k in ('role', 'content', 'tool_calls', 'tool_call_id')} for row in rows
+                              if row.get('content') != '<think>\n\n</think>\n\n'])  # prefill do Qwen local
+        if schemas:
+            body['tools'] = schemas
+        content, parts, size, finish = [], {}, 0, None
+        async with client.stream('POST', groq.BASE + 'chat/completions', json=body,
+                                 headers={'Authorization': 'Bearer ' + key},
+                                 timeout=httpx.Timeout(30, connect=5)) as response:  # travou: vai ao local
+            if response.status_code != 200:
+                if response.status_code in (413, 429):
+                    groq.block(groq.CHAT_MODEL, response.headers.get('retry-after'))
+                raise groq.GroqUnavailable(f'Groq recusou: HTTP {response.status_code}.')
+            async for line in response.aiter_lines():
+                if not line.startswith('data:'):
+                    continue
+                data = line[5:].strip()
+                if data == '[DONE]':
+                    break
+                size += len(data)
+                if size > 2_000_000:
+                    raise AgentError('Resposta do provider acima do limite.')
+                try:
+                    choice = json.loads(data)['choices'][0]
+                except (ValueError, TypeError, KeyError, IndexError) as error:
+                    raise AgentError('Stream Groq inválido.') from error
+                delta = choice.get('delta') or {}
+                content.append(delta.get('content') or '')
+                for call in delta.get('tool_calls') or []:
+                    part = parts.setdefault(call.get('index', 0), {'name': '', 'arguments': ''})
+                    function = call.get('function') or {}
+                    part['name'] += function.get('name') or ''
+                    part['arguments'] += function.get('arguments') or ''
+                if not parts and not state['spoke']:
+                    prefix = first_sentence(''.join(content))
+                    if prefix:
+                        event('response_prefix', text=prefix)
+                        state['spoke'] = True
+                event('provider_activity')
+                finish = choice.get('finish_reason') or finish
+        if finish == 'length':
+            if budget.output_tokens > groq.MAX_OUTPUT and not state['spoke']:
+                raise groq.GroqUnavailable('Resposta maior que o limite da Groq.')  # o local tem orçamento maior
+            raise AgentError('Geração truncada pelo orçamento; nenhuma decisão aplicada.')
+        if finish is None:
+            raise groq.GroqUnavailable('Stream da Groq terminou sem conclusão.')
+        calls = [{'function': parts[index]} for index in sorted(parts)]
+        return self._decision(content, calls)
+
+    def _decision(self, content, calls):
         if self.protocol == 'json':
             self.last_response = ''.join(content)
             try:
