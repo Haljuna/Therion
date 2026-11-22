@@ -1628,7 +1628,7 @@ class MainWindow(QMainWindow):
             if getattr(self, '_wake', None) is None:
                 result=replace(result, message='A escuta pelo nome não está ligada agora.', speech_message=None)
             else:
-                self._wake.gate.muted = True   # até reiniciar o Therion
+                self._stop_wake()   # fecha o microfone do detector até reiniciar o Therion
                 self._wake_end_after_reply = self._conversation_mode
         if result.ui_action=='reminders':   # o depósito mudou: rearma o disparo na hora
             self._arm_reminder_timer()
@@ -2099,6 +2099,11 @@ class MainWindow(QMainWindow):
         confidence = getattr(getattr(self, '_voice_pipeline', None), 'last_confidence', None)
         if not isinstance(confidence, float) or confidence >= -0.5:
             return False
+        if getattr(self, '_wake_score', None) is not None:   # chamou pelo nome (o áudio inicial corta o nome do texto)
+            return False
+        pendings = getattr(self._orchestrator, '_pendings', None)
+        if callable(pendings) and any(value is not None for value in pendings()):   # resposta a uma oferta viva
+            return False
         if re.search(r'\b(?:therion|terion|eterion)\b', text, re.I):
             return False
         orchestrator = self._orchestrator
@@ -2364,6 +2369,8 @@ class MainWindow(QMainWindow):
     def _wake_ignored(self):
         if self._closing or self._quit_requested:
             return 'encerrando'
+        if self._wake is None:   # disparo que já estava na fila quando o detector desligou
+            return 'escuta pelo nome desligada'
         if self._processing:
             return 'pedido em andamento'
         pipeline = self._voice_pipeline
@@ -2376,6 +2383,18 @@ class MainWindow(QMainWindow):
                 and 'therion' in (spoken or '').casefold()):
             return 'a fala tem o nome'   # o detector ouviu a própria voz do Therion
         return None
+
+    def _wake_preroll(self, audio):
+        """O áudio depois do nome, lido do detector só quando o microfone da captura já abriu."""
+        wake = self._wake
+        mark, since = getattr(wake, 'wake_mark', None), getattr(wake, 'since', None)
+        if mark is None or not callable(since):
+            return audio
+
+        def late():
+            fresh = since(mark)
+            return fresh if len(fresh) >= len(audio) else audio   # saiu do buffer: fica a foto do disparo
+        return late
 
     @Slot(object, float)
     def _on_wake(self, audio, score):
@@ -2400,7 +2419,8 @@ class MainWindow(QMainWindow):
             # Grava antes de abrir a conversa: o aquecimento da voz trava novas capturas, e a fala logo
             # depois do nome ("Therion, abre o Discord") se perderia esperando por ele.
             pipeline = self._voice_pipeline
-            early = pipeline is not None and pipeline.start(automatic=True, preroll=audio, no_speech_seconds=5.0)
+            early = pipeline is not None and pipeline.start(
+                automatic=True, preroll=self._wake_preroll(audio), no_speech_seconds=5.0)
             self._toggle_conversation()
             if not self._conversation_mode:
                 if early:

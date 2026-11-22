@@ -2243,8 +2243,8 @@ class Orchestrator(WorkflowSupport, MemorySupport, PersonalContextSupport, Catal
             # 18/11: o modelo buscava sem filtro e respondia "nenhum e-mail encontrado".
             today=mail_today_request(command)
             # Com "hoje": chegaram desde a meia-noite local e, desses, os ainda não lidos.
-            since=f'in:inbox after:{int(self._calendar_now().replace(hour=0,minute=0,second=0,microsecond=0).timestamp())}' if today else None
             try:
+                since=f'in:inbox after:{int(self._calendar_now().replace(hour=0,minute=0,second=0,microsecond=0).timestamp())}' if today else None
                 token=CancellationToken(cancelled)
                 counted=unread_count(self._mailbox,token,since) if today else unread_count(self._mailbox,token)
                 unread=unread_count(self._mailbox,token,since+' is:unread') if today and counted else None

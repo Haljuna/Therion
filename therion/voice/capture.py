@@ -41,6 +41,7 @@ class AudioCaptureService:
         self._endpoint = None
         self._last_frame_at = 0.0
         self._activity_factory = activity_factory or StreamingSpeechActivity
+        self._held: list[np.ndarray] | None = None   # blocos ao vivo guardados até o áudio inicial tardio chegar
 
     @property
     def level(self) -> float:
@@ -73,8 +74,15 @@ class AudioCaptureService:
         with self._lock:
             return self._recording
 
-    def start(self, *, automatic=False, preroll: np.ndarray | None = None, no_speech_seconds: float | None = None) -> bool:
-        """Inicia a captura. Retorna False se já estiver gravando ou em caso de erro."""
+    def start(self, *, automatic=False, preroll=None, no_speech_seconds: float | None = None) -> bool:
+        """Inicia a captura. Retorna False se já estiver gravando ou em caso de erro.
+
+        `preroll` é o áudio que vem antes do microfone: um array, ou uma função lida logo depois de o
+        microfone abrir (o detector do nome segue ouvindo enquanto o dispositivo abre; assim nada se perde).
+        """
+        late = preroll if callable(preroll) else None
+        if late is not None:
+            preroll = None
         with self._lock:
             if self._recording:
                 return False
@@ -83,6 +91,7 @@ class AudioCaptureService:
             self._endpoint = None
             self._last_frame_at = time.monotonic()
             self._recording = True
+            self._held = [] if late is not None else None
 
         try:
             if automatic:
@@ -109,10 +118,13 @@ class AudioCaptureService:
             )
             self._stream = stream
             stream.start()
+            if late is not None:
+                self._take_late_preroll(late)
         except Exception:
             self._cleanup_stream()
             with self._lock:
                 self._recording = False
+                self._held = None
                 self._chunks.clear()
             return False
 
@@ -122,6 +134,20 @@ class AudioCaptureService:
             # Abrir o dispositivo pode levar segundos; o silêncio só conta a partir daqui.
             self._last_frame_at = time.monotonic()
         return True
+
+    def _take_late_preroll(self, late) -> None:
+        audio = late()
+        audio = np.zeros(0, np.float32) if audio is None else np.asarray(audio, dtype=np.float32)
+        with self._lock:
+            held, self._held = self._held or [], None
+            if not self._recording:
+                return
+            # Um pouco de áudio repetido na emenda é melhor que um buraco no meio da frase.
+            blocks = [audio[i:i + 1280] for i in range(0, len(audio), 1280)] + held
+            for block in blocks:
+                if self._endpoint is not None and not self._endpoint.complete:
+                    self._endpoint.feed(block)
+                self._chunks.append(block.copy())
 
     def stop(self) -> np.ndarray | None:
         """Para a captura e retorna o áudio concatenado, ou None se curto demais/inválido."""
@@ -178,6 +204,9 @@ class AudioCaptureService:
                 rms = float(np.sqrt(np.mean(indata[:, 0] ** 2))) if frames else 0.0
                 self._level = min(1.0, max(0.0, (rms - 0.003) * 5)) if np.isfinite(rms) else 0.0
                 self._last_frame_at = time.monotonic()
+                if self._held is not None:   # o áudio inicial ainda vai entrar na frente
+                    self._held.append(indata[:, 0].copy())
+                    return
                 if self._endpoint is not None:
                     if self._endpoint.complete:
                         return

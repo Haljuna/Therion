@@ -296,3 +296,29 @@ def test_speech_in_the_preroll_counts_as_speech_and_no_speech_deadline_applies()
     quiet.start(automatic=True, preroll=np.zeros(16000 * 6, np.float32), no_speech_seconds=5.0)
     assert quiet.utterance_complete and quiet.endpoint_reason == 'no_speech'
     quiet.cancel()
+
+
+def test_a_late_preroll_is_read_after_the_microphone_opens_and_still_comes_first():
+    streams, order = [], []
+
+    class Opening(FakeInputStream):
+        def start(self):
+            super().start()
+            order.append('open')
+            self.feed(1280, 0.0)   # bloco ao vivo que chega antes de ler o áudio inicial
+
+    def factory(**kwargs):
+        streams.append(Opening(**kwargs))
+        return streams[-1]
+
+    def late():
+        order.append('preroll')   # lido do buffer do detector só agora: cobre a abertura do microfone
+        return np.full(3200, .2, np.float32)
+
+    service = AudioCaptureService(stream_factory=factory, activity_factory=lambda: (lambda s: False))
+    assert service.start(automatic=True, preroll=late, no_speech_seconds=5.0) is True
+    streams[0].feed(1280, 0.0)
+    audio = service.stop()
+    assert order == ['open', 'preroll']
+    assert len(audio) == 3200 + 2560
+    assert np.allclose(audio[:3200], .2) and np.allclose(audio[3200:], 0)

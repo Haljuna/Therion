@@ -89,3 +89,11 @@ def test_hoje_acima_do_teto_diz_mais_de(case):
         messages=[{'id': str(i)} for i in range(500)], next_page=f'p{page}'))
     host, _, _ = _host(case, client)
     assert host.process_command('Quantos e-mails chegaram hoje?').message.startswith('Chegaram mais de 2000 e-mails hoje')
+
+
+def test_hoje_com_fuso_invalido_responde_que_nao_conseguiu_contar(case):
+    host, agent, provider = _host(case, _Client())
+    host._calendar_tz_error = 'Fuso horário inválido na configuração.'
+    result = host.process_command('Quantos e-mails eu tenho hoje?')
+    assert result.status == 'partial'
+    assert result.message.startswith('Não consegui contar os e-mails agora.')

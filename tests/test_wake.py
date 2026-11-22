@@ -208,3 +208,16 @@ def test_a_stopped_thread_still_blocked_is_not_revived_by_a_new_start(tmp_path):
     threading.Event().wait(0.3)
     assert sum(t.name == 'wake-listener' and t.is_alive() for t in threading.enumerate()) == 1
     listener.stop()
+
+
+def test_the_audio_after_the_name_keeps_growing_for_a_late_reader(tmp_path):
+    got, done = [], threading.Event()
+    def on_wake(audio, score): got.append(audio); done.set()
+    listener = WakeListener(_model_file(tmp_path), on_wake, model_factory=lambda p: FakeModel([0, 0, .9]),
+                            stream_factory=lambda cb: FakeStream(cb, _blocks(9)))
+    assert listener.start() is True
+    assert done.wait(3)
+    threading.Event().wait(0.3); listener.stop()
+    later = listener.since(listener.wake_mark)   # o que a captura lê depois de abrir o microfone
+    assert len(got[0]) == 4 * 1280 and len(later) == 6 * 1280
+    assert np.allclose(later[-1280:], 9 / 32768)

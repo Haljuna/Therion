@@ -42,6 +42,8 @@ class FakePipeline:
         self.input_stalled, self.last_confidence = False, None
 
     def start(self, **kwargs):
+        if callable(kwargs.get('preroll')):   # a captura real lê o áudio inicial depois de abrir o microfone
+            kwargs['preroll'] = kwargs['preroll']()
         self.starts.append(kwargs)
         self.generation += 1
         self.state = 'recording'
@@ -193,11 +195,12 @@ def test_the_button_conversation_keeps_listening_without_a_deadline(app, tmp_pat
     close(app, window)
 
 
-def test_stop_listening_answer_mutes_the_wake_word(app, tmp_path, monkeypatch):
+def test_stop_listening_answer_closes_the_microphone_of_the_wake_word(app, tmp_path, monkeypatch):
     window, pipeline = make_window(tmp_path, monkeypatch)
     window._apply_command_result(OrchestrationResult(
         status='success', message='Tudo bem, parei de ouvir pelo nome até o senhor me abrir de novo.', ui_action='wake_off'))
-    assert FakeListener.last.gate.muted is True
+    assert 'stop' in FakeListener.last.calls and window._wake is None   # nada de microfone aberto até reiniciar
+    assert window._speech_text == 'Tudo bem, parei de ouvir pelo nome até o senhor me abrir de novo.'
     close(app, window)
 
 
@@ -405,4 +408,36 @@ def test_the_name_while_the_voice_rewarms_after_a_stop_records_at_once(app, tmp_
     before = len(pipeline.starts)
     window._on_wake(np.ones(600, np.float32), .8)
     assert len(pipeline.starts) == before + 1 and len(pipeline.starts[-1]['preroll']) == 600
+    close(app, window)
+
+
+def test_a_request_after_the_name_is_never_taken_for_background_talk(app, tmp_path, monkeypatch):
+    window, pipeline = make_window(tmp_path, monkeypatch)
+    pipeline.last_confidence = -0.7      # pouca confiança, sem o nome (o áudio inicial corta o nome)
+    window._on_wake(np.ones(800, np.float32), .8)
+    window._on_voice_transcribed(pipeline.generation, 'Conta uma piada.')
+    window._start_command_worker.assert_called_once_with('Conta uma piada.')
+    close(app, window)
+
+
+def test_an_answer_to_a_live_offer_is_never_taken_for_background_talk(app, tmp_path, monkeypatch):
+    window, pipeline = make_window(tmp_path, monkeypatch)
+    window._orchestrator._focus_offer = (10 ** 9, 'pausa')
+    pipeline.last_confidence = -0.7
+    window._toggle_conversation()
+    window._on_ai_warmed(window._ai_warm_token, True)
+    window._try_conversation_listen()
+    window._on_voice_transcribed(pipeline.generation, 'Pode.')
+    window._start_command_worker.assert_called_once_with('Pode.')
+    close(app, window)
+
+
+def test_the_capture_reads_the_audio_after_the_name_once_the_microphone_is_open(app, tmp_path, monkeypatch):
+    window, pipeline = make_window(tmp_path, monkeypatch)
+    listener = FakeListener.last
+    listener.wake_mark = 42
+    listener.since = lambda mark: np.full(2400, .1, np.float32) if mark == 42 else np.zeros(0, np.float32)
+    window._on_wake(np.ones(800, np.float32), .8)
+    preroll = pipeline.starts[-1]['preroll']
+    assert len(preroll) == 2400   # o que o detector ouviu até a captura abrir, não só a foto do disparo
     close(app, window)

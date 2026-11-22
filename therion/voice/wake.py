@@ -108,6 +108,8 @@ class WakeListener:
         self._retry = retry_seconds
         self.gate = WakeGate(threshold)
         self._ring = RingBuffer(3.0, RATE)
+        self._ring_lock = threading.Lock()   # a captura lê o buffer da thread do Qt
+        self.wake_mark = None   # posição do fim do último disparo no buffer
         self._stop = threading.Event()  # um por thread (criado no start): thread parada nunca revive
         self._paused = threading.Event()
         self._thread: threading.Thread | None = None
@@ -131,6 +133,11 @@ class WakeListener:
         thread, self._thread = self._thread, None
         if thread:
             thread.join(2)
+
+    def since(self, mark) -> np.ndarray:
+        """Áudio do buffer desde `mark` até agora (vazio se já saiu do buffer); seguro de qualquer thread."""
+        with self._ring_lock:
+            return self._ring.since(mark)
 
     def pause(self) -> None:
         self._paused.set()
@@ -201,7 +208,8 @@ class WakeListener:
             if self._paused.is_set():
                 pending = None
                 continue
-            self._ring.push(block)
+            with self._ring_lock:
+                self._ring.push(block)
             score = self._model.predict(block).get(self._name, 0.0)
             if pending:
                 pending[2] -= 1
@@ -212,7 +220,8 @@ class WakeListener:
                 pending = [self._ring.mark(), score, AFTER_WAKE_BLOCKS]
 
     def _deliver(self, pending) -> None:
+        self.wake_mark = pending[0]
         try:
-            self._on_wake(self._ring.since(pending[0]), pending[1])
+            self._on_wake(self.since(pending[0]), pending[1])
         except Exception:  # erro de quem recebe não é falha do microfone nem do detector
             print('[wake] on_wake falhou:', traceback.format_exc())
