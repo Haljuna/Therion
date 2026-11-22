@@ -109,7 +109,7 @@ class WakeListener:
         self.gate = WakeGate(threshold)
         self._ring = RingBuffer(3.0, RATE)
         self._ring_lock = threading.Lock()   # a captura lê o buffer da thread do Qt
-        self.wake_mark = None   # posição do fim do último disparo no buffer
+        self.wake_mark = None   # ponto do disparo no buffer: o que vem depois dele é a fala após o nome
         self._stop = threading.Event()  # um por thread (criado no start): thread parada nunca revive
         self._paused = threading.Event()
         self._thread: threading.Thread | None = None

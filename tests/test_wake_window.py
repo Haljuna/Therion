@@ -437,7 +437,40 @@ def test_the_capture_reads_the_audio_after_the_name_once_the_microphone_is_open(
     listener = FakeListener.last
     listener.wake_mark = 42
     listener.since = lambda mark: np.full(2400, .1, np.float32) if mark == 42 else np.zeros(0, np.float32)
-    window._on_wake(np.ones(800, np.float32), .8)
+    listener.on_wake(np.ones(800, np.float32), .8)   # a marca vem junto com o disparo
     preroll = pipeline.starts[-1]['preroll']
     assert len(preroll) == 2400   # o que o detector ouviu até a captura abrir, não só a foto do disparo
+    close(app, window)
+
+
+def test_a_name_inside_an_open_conversation_also_reads_the_audio_once_the_microphone_opens(app, tmp_path, monkeypatch):
+    window, pipeline, set_state = speaking_window(tmp_path, monkeypatch)
+    listener = FakeListener.last
+    window._on_wake(np.ones(800, np.float32), .8)   # abre a conversa
+    window._on_ai_warmed(window._ai_warm_token, True)
+    window._on_voice_transcribed(pipeline.generation, 'Conta uma história.')
+    window._set_processing(False)
+    pipeline.state = 'idle'
+    set_state('playing')
+    listener.wake_mark = 7                          # o detector marca o disparo e segue enchendo o buffer
+    listener.since = lambda mark: np.full(2400, .1, np.float32) if mark == 7 else np.zeros(0, np.float32)
+    listener.on_wake(np.ones(600, np.float32), .8)  # nome no meio da resposta, pela thread do detector
+    listener.wake_mark = 99                         # um disparo seguinte não pode trocar a marca deste
+    assert len(pipeline.starts[-1]['preroll']) == 2400
+    close(app, window)
+
+
+def test_a_discarded_name_turn_does_not_exempt_the_next_turn_from_the_background_filter(app, tmp_path, monkeypatch):
+    window, pipeline = make_window(tmp_path, monkeypatch)
+    window._on_wake(np.ones(800, np.float32), .8)
+    window._on_ai_warmed(window._ai_warm_token, True)
+    token = ['outra']
+    monkeypatch.setattr(type(window._orchestrator), 'confirmation_id', property(lambda self: token[0]))
+    window._on_voice_transcribed(pipeline.generation, 'Abre o Discord.')   # descartado: a confirmação mudou
+    token[0] = None
+    pipeline.state = 'idle'
+    window._try_conversation_listen()                                       # continuação, sem o nome
+    pipeline.last_confidence = -0.7
+    window._on_voice_transcribed(pipeline.generation, 'Conversa de fundo qualquer.')
+    window._start_command_worker.assert_not_called()
     close(app, window)

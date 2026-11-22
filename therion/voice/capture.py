@@ -138,16 +138,28 @@ class AudioCaptureService:
     def _take_late_preroll(self, late) -> None:
         audio = late()
         audio = np.zeros(0, np.float32) if audio is None else np.asarray(audio, dtype=np.float32)
-        with self._lock:
-            held, self._held = self._held or [], None
-            if not self._recording:
-                return
-            # Um pouco de áudio repetido na emenda é melhor que um buraco no meio da frase.
-            blocks = [audio[i:i + 1280] for i in range(0, len(audio), 1280)] + held
+        # Um pouco de áudio repetido na emenda é melhor que um buraco no meio da frase.
+        blocks = [audio[i:i + 1280] for i in range(0, len(audio), 1280)]
+        while True:
+            with self._lock:
+                endpoint = self._endpoint if self._recording else None
+                recording = self._recording
+            if not recording:
+                break
+            # Fora da trava: o callback do microfone segue guardando blocos em _held enquanto o VAD analisa.
             for block in blocks:
-                if self._endpoint is not None and not self._endpoint.complete:
-                    self._endpoint.feed(block)
-                self._chunks.append(block.copy())
+                if endpoint is not None and not endpoint.complete:
+                    endpoint.feed(block)
+            with self._lock:
+                if not self._recording:
+                    break
+                self._chunks.extend(block.copy() for block in blocks)
+                blocks, self._held = self._held or [], []
+                if not blocks:   # nada chegou durante a análise: os próximos blocos já vão direto
+                    self._held = None
+                    return
+        with self._lock:
+            self._held = None
 
     def stop(self) -> np.ndarray | None:
         """Para a captura e retorna o áudio concatenado, ou None se curto demais/inválido."""

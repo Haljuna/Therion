@@ -322,3 +322,27 @@ def test_a_late_preroll_is_read_after_the_microphone_opens_and_still_comes_first
     assert order == ['open', 'preroll']
     assert len(audio) == 3200 + 2560
     assert np.allclose(audio[:3200], .2) and np.allclose(audio[3200:], 0)
+
+
+def test_the_microphone_callback_is_not_blocked_while_the_late_preroll_is_analysed():
+    import threading
+    streams, free = [], []
+
+    def factory(**kwargs):
+        streams.append(FakeInputStream(**kwargs))
+        return streams[-1]
+
+    def activity():
+        def speech(samples):
+            if not free:   # durante a análise do áudio inicial, o microfone entrega um bloco por outra thread
+                worker = threading.Thread(target=streams[0].feed, args=(1280, 0.0))
+                worker.start(); worker.join(1)
+                free.append(not worker.is_alive())
+            return False
+        return speech
+
+    service = AudioCaptureService(stream_factory=factory, activity_factory=activity)
+    assert service.start(automatic=True, preroll=lambda: np.full(3200, .2, np.float32), no_speech_seconds=5.0)
+    audio = service.stop()
+    assert free == [True]
+    assert len(audio) == 3200 + 1280 and np.allclose(audio[:3200], .2) and np.allclose(audio[3200:], 0)

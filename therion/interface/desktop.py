@@ -315,7 +315,7 @@ class MainWindow(QMainWindow):
     """Janela principal mínima do Therion."""
     _warm_finished = Signal(int, bool)
     _focus_mail_ready = Signal(object)   # (minutos focados, avisos guardados, e-mails, começo) da thread do fim do foco
-    _wake_heard = Signal(object, float)   # (áudio depois do nome, pontuação) da thread do detector
+    _wake_heard = Signal(object, float, object)   # (áudio depois do nome, pontuação, marca no buffer) da thread do detector
     _wake_problem = Signal(str)
     # Reuso curto evita um segundo preload ao clicar depois da abertura. Não é
     # monitoramento da saúde do Ollama; falhas reais invalidam a prontidão.
@@ -463,6 +463,7 @@ class MainWindow(QMainWindow):
         self._conversation_capture_started_at = 0.0
         self._wake = None
         self._wake_turn = None      # áudio depois do nome, à espera da primeira captura
+        self._wake_mark = None      # ponto do disparo no buffer do detector
         self._wake_score = None     # disparo ainda sem desfecho no registro
         self._wake_opened = False   # conversa aberta pelo nome: continuação de 8 s e volta a dormir no silêncio
         self._wake_sound = None
@@ -2330,8 +2331,10 @@ class MainWindow(QMainWindow):
         self._wake_sound.setVolume(0.35)
 
     def _emit_wake(self, audio, score):
+        # Roda na entrega do disparo (thread do detector): a marca lida aqui é a deste disparo.
+        mark = getattr(self._wake, 'wake_mark', None)
         try:
-            self._wake_heard.emit(audio, float(score))
+            self._wake_heard.emit(audio, float(score), mark)
         except RuntimeError:   # janela já destruída
             pass
 
@@ -2386,8 +2389,7 @@ class MainWindow(QMainWindow):
 
     def _wake_preroll(self, audio):
         """O áudio depois do nome, lido do detector só quando o microfone da captura já abriu."""
-        wake = self._wake
-        mark, since = getattr(wake, 'wake_mark', None), getattr(wake, 'since', None)
+        mark, since = self._wake_mark, getattr(self._wake, 'since', None)
         if mark is None or not callable(since):
             return audio
 
@@ -2396,8 +2398,8 @@ class MainWindow(QMainWindow):
             return fresh if len(fresh) >= len(audio) else audio   # saiu do buffer: fica a foto do disparo
         return late
 
-    @Slot(object, float)
-    def _on_wake(self, audio, score):
+    @Slot(object, float, object)
+    def _on_wake(self, audio, score, mark=None):
         """O detector ouviu o nome: abre um turno de voz que começa pelo áudio dito logo depois dele."""
         reason = self._wake_ignored()
         if reason is None and not self._conversation_mode and (self._pending_plan is not None or self._speech_output is None):
@@ -2406,6 +2408,7 @@ class MainWindow(QMainWindow):
             self._wake_log(score, 'ignorado: ' + reason)
             return
         self._wake_turn = audio   # antes de parar a fala: o reaquecimento da voz não pode travar a captura
+        self._wake_mark = mark
         speech = self._speech_output
         speaking = speech is not None and speech.state not in {'idle', 'warming'}
         if speaking:
@@ -2713,7 +2716,9 @@ class MainWindow(QMainWindow):
         if pipeline is None or pipeline.state != VoicePipeline.STATE_IDLE:
             return
         pipeline.set_fast_mode(False)
-        listen = ({'preroll': wake_turn, 'no_speech_seconds': 5.0} if wake_turn is not None
+        if wake_turn is None:   # turno novo sem o nome: um disparo ainda sem desfecho não vale mais para ele
+            self._wake_outcome('ignorado: turno descartado')
+        listen = ({'preroll': self._wake_preroll(wake_turn), 'no_speech_seconds': 5.0} if wake_turn is not None
                   else {'no_speech_seconds': 8.0} if getattr(self, '_wake_opened', False) else {})
         if not pipeline.start(automatic=True, **listen):
             self._end_conversation()
