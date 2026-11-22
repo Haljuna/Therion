@@ -257,7 +257,7 @@ def test_messages():
     assert late_message([one], 0) == 'Enquanto eu estava fechado, passou da hora de: tirar a roupa da máquina (18:00).'
     four = [_r(f'item {n}', datetime(2026, 11, 18, 18, n)) for n in range(4)]
     assert late_message(four, 0) == 'Passaram 4 lembretes enquanto eu estava fechado: item 0, item 1, item 2 e mais 1.'
-    assert late_message([one], 2) == ('Enquanto eu estava fechado, passou da hora de: tirar a roupa da máquina (18:00) e mais 2 antigos.')
+    assert late_message([one], 2) == ('Enquanto eu estava fechado, passou da hora de: tirar a roupa da máquina (18:00). Passaram também 2 lembretes antigos.')
 
 
 def test_invalid_utf8_is_quarantined(tmp_path):
@@ -313,7 +313,7 @@ def test_take_due_speaks_even_when_write_fails(tmp_path, monkeypatch):
 def test_late_sorted_and_plural_forms():
     a = _r('a', datetime(2026, 11, 18, 9, 0))
     b = _r('b', datetime(2026, 11, 18, 8, 0))
-    assert late_message([a], 1) == 'Enquanto eu estava fechado, passou da hora de: a (09:00) e mais 1 antigo.'
+    assert late_message([a], 1) == 'Enquanto eu estava fechado, passou da hora de: a (09:00). Passou também 1 lembrete antigo.'
     assert late_message([], 1) == 'Passou 1 lembrete antigo enquanto eu estava fechado.'
     assert late_message([], 3) == 'Passaram 3 lembretes antigos enquanto eu estava fechado.'
 
@@ -598,3 +598,91 @@ def test_midnight_and_noon_are_spoken_names(env):
     assert say(env, 'me lembra ao meio-dia de almoçar') == 'Combinado: amanhã, quinta, ao meio-dia, almoçar.'
     assert say(env, 'me lembra todo dia à meia-noite de dormir') == 'Combinado: todo dia à meia-noite, dormir. O próximo é amanhã.'
     assert 'à 0h' not in say(env, 'meus lembretes')
+
+
+# --- itens adiados (rodada autônoma) -------------------------------------------------------------------------
+def test_repeat_with_relative_time_starts_in_that_time():
+    parsed = parse_reminder('me lembra todo dia em 10 minutos de beber água', NOW)
+    assert (parsed.kind, parsed.text, parsed.due, parsed.repeat) == ('create', 'beber água', datetime(2026, 11, 18, 14, 10), Repeat(ALL, '14:10'))
+    weekly = parse_reminder('me lembra toda sexta daqui a 2 horas de ligar', NOW)   # quarta: a 1ª vez é na próxima sexta
+    assert (weekly.due, weekly.repeat) == (datetime(2026, 11, 20, 16, 0), Repeat((4,), '16:00'))
+
+
+def test_second_clock_stays_in_text_and_only_first_is_the_time():
+    parsed = parse_reminder('me lembra às 8h de ligar às 9', NOW)
+    assert (parsed.kind, parsed.text, parsed.due) == ('create', 'ligar às 9', datetime(2026, 11, 19, 8, 0))
+
+
+@pytest.mark.parametrize('phrase, text, due', [
+    ('me lembra de almoçar a meio-dia', 'almoçar', datetime(2026, 11, 19, 12, 0)),
+    ('me lembra de sair a 18 horas', 'sair', datetime(2026, 11, 18, 18, 0)),
+    ('me lembra de sair a dezoito e meia', 'sair', datetime(2026, 11, 18, 18, 30)),
+    ('me lembra de ligar a 19 e meia', 'ligar', datetime(2026, 11, 18, 19, 30)),
+])
+def test_clock_without_as(phrase, text, due):
+    parsed = parse_reminder(phrase, NOW)
+    assert (parsed.kind, parsed.text, parsed.due) == ('create', text, due)
+
+
+def test_decimal_hours_are_not_broken():
+    parsed = parse_reminder('me lembra daqui a 1,5 hora de ligar', NOW)
+    assert (parsed.kind, parsed.due) == ('create', datetime(2026, 11, 18, 15, 30))
+
+
+def test_quarantine_never_overwrites_an_earlier_bad_file(tmp_path, monkeypatch):
+    class Frozen(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(2026, 11, 18, 14, 0, 0)
+    monkeypatch.setattr(voice_reminders, 'datetime', Frozen)
+    path = tmp_path / 'lembretes.json'
+    for content in ('{a', '{b'):
+        path.write_text(content, encoding='utf-8')
+        ReminderStore(path)
+    assert sorted(p.read_text(encoding='utf-8') for p in tmp_path.glob('lembretes.json.bad-*')) == ['{a', '{b']
+
+
+def test_empty_due_message_is_empty():
+    assert due_message([]) == ''
+
+
+def test_late_message_wording_with_old():
+    a = Reminder('a', 'a', datetime(2026, 11, 18, 9, 0), None, NOW)
+    four = [Reminder(str(i), f'item {i}', datetime(2026, 11, 18, 9, 0), None, NOW) for i in range(4)]
+    assert late_message([a], 2) == 'Enquanto eu estava fechado, passou da hora de: a (09:00). Passaram também 2 lembretes antigos.'
+    assert late_message([a], 1) == 'Enquanto eu estava fechado, passou da hora de: a (09:00). Passou também 1 lembrete antigo.'
+    assert late_message(four, 3) == ('Passaram 4 lembretes enquanto eu estava fechado: item 0, item 1, item 2 e mais 1. '
+                                     'Passaram também 3 lembretes antigos.')
+
+
+@pytest.mark.parametrize('reply', ['sim', 'Sim, pode.', 'não'])
+def test_yes_no_never_becomes_the_reminder_text(env, reply):
+    assert say(env, 'me lembra em 10 minutos') == 'Te lembro do quê?'
+    say(env, reply)
+    assert env.store.items() == []
+
+
+def test_snooze_and_decimals_in_spoken_amount(env):
+    snooze_window(env.host, 'ligar')
+    assert say(env, 'adia 1,5 hora') == 'Combinado: em 1 hora e 30 minutos, às 15h30, ligar.'
+
+
+def test_store_is_one_instance_across_threads(tmp_path, monkeypatch):
+    import threading
+    monkeypatch.setenv('LOCALAPPDATA', str(tmp_path))
+    monkeypatch.setattr(voice_reminders, '_shared', None)
+    built = []
+    real = voice_reminders.ReminderStore
+
+    def slow(*args, **kwargs):
+        time.sleep(0.05)   # sem o lock, as duas threads passariam do "if _shared is None"
+        built.append(1)
+        return real(*args, **kwargs)
+    monkeypatch.setattr(voice_reminders, 'ReminderStore', slow)
+    found = []
+    threads = [threading.Thread(target=lambda: found.append(voice_reminders.store())) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert len(built) == 1 and found[0] is found[1]

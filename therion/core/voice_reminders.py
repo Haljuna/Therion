@@ -26,6 +26,7 @@ _WD = r'(?:' + '|'.join(_WEEKDAYS) + r')s?(?:-feiras?)?'
 _WD_LIST = rf'{_WD}(?:(?:\s*,\s*|\s+e\s+){_WD})*'
 _N = rf'(?:\d{{1,2}}|{_SPOKEN_PATTERN})'
 _COUNT = rf'(?:\d+|{_SPOKEN_PATTERN})'
+_QTY = rf'(?:\d+(?:[.,]\d+)?|{_SPOKEN_PATTERN})'   # "1,5 hora"
 
 _TRIGGER = re.compile(
     r'^\s*(?:(?:therion|por favor)[,\s]+)*'
@@ -37,12 +38,12 @@ _EVERY = re.compile(rf'(?<!\w)tod[ao]s?\s+(?:(?:as|os)\s+)?({_WD_LIST})(?!\w)')
 _PLURAL = re.compile(rf'(?<!\w)as\s+((?:{"|".join(_WEEKDAYS)})s(?:-feiras)?(?:(?:\s*,\s*|\s+e\s+){_WD})*)(?!\w)')
 _RELATIVE = re.compile(
     rf'(?<!\w)(?:em|daqui\s+a)\s+(?:(?P<soon>pouco)|(?P<half>meia\s+hora)'
-    rf'|(?P<n>{_COUNT})\s*(?P<unit>horas?|h|minutos?|min)(?:\s+e\s+(?:(?P<more_half>meia)|(?P<more>{_COUNT})(?:\s*(?:minutos?|min))?))?)(?!\w)')
+    rf'|(?P<n>{_QTY})\s*(?P<unit>horas?|h|minutos?|min)(?:\s+e\s+(?:(?P<more_half>meia)|(?P<more>{_COUNT})(?:\s*(?:minutos?|min))?))?)(?!\w)')
 _PHRASE = (rf'{_N}(?:h\d{{2}}|:\d{{2}}|h|\s+horas?)?(?:\s+(?:e\s+)?(?:{_N}|meia)(?:\s+minutos?)?)?'
            r'(?:\s+(?:da|de)\s+(?:manha|tarde|noite|madrugada))?')
 _DAY = r'depois\s+de\s+amanha|amanha|hoje|(?:proxim[ao]\s+)?' + rf'(?:{"|".join(_WEEKDAYS)})(?:-feira)?(?:\s+que\s+vem)?|dia\s+\d{{1,2}}'
 _CLOCK = re.compile(
-    rf'(?<!\w)(?:(?P<day>{_DAY})\s+)?(?:(?:as|ao)\s+|a\s+(?=meia[\s-]?noite|\d{{1,2}}(?:h|:\d|\s+da\s)|(?:uma|duas)\s+(?:horas?|da\s)|{_N}\s*$))(?:(?P<noon>meio[\s-]?dia)|(?P<mid>meia[\s-]?noite)|(?P<t>{_PHRASE}))(?!\w|:)')
+    rf'(?<!\w)(?:(?P<day>{_DAY})\s+)?(?:(?:as|ao)\s+|a\s+(?=meia[\s-]?noite|\d{{1,2}}(?:h|:\d|\s+da\s)|meio[\s-]?dia|(?:uma|duas)\s+(?:horas?|da\s)|\d{{1,2}}\s+horas?|{_N}\s+e\s+meia|{_N}\s*$))(?:(?P<noon>meio[\s-]?dia)|(?P<mid>meia[\s-]?noite)|(?P<t>{_PHRASE}))(?!\w|:)')
 _DAY_ONLY = re.compile(rf'(?<!\w)(?P<day>{_DAY})(?!\w|/)')
 _PERIOD = re.compile(r'\s(?:da|de)\s+(?:manha|tarde|noite|madrugada)$')
 
@@ -74,7 +75,7 @@ def _fold(text):
 
 
 def _count(raw):
-    return int(raw) if raw.isdigit() else _SPOKEN[raw]
+    return int(raw) if raw.isdigit() else _SPOKEN[raw] if raw in _SPOKEN else float(raw.replace(',', '.'))
 
 
 def _weekdays(raw):
@@ -164,14 +165,14 @@ def parse_reminder(command, now):
         days = (0, 1, 2, 3, 4, 5, 6)
     # Relativo
     minutes = None
-    if rel := (None if days else take(_RELATIVE)):
+    if rel := take(_RELATIVE):
         if rel['soon']:
             minutes = SOON_MINUTES
         elif rel['half']:
             minutes = 30
         else:
             hours = rel['unit'].startswith('h')
-            minutes = _count(rel['n']) * (60 if hours else 1)
+            minutes = round(_count(rel['n']) * (60 if hours else 1))
             if hours and rel['more_half']:
                 minutes += 30
             elif hours and rel['more']:
@@ -184,6 +185,8 @@ def parse_reminder(command, now):
             day = only['day']
     rest = ''.join(work[trigger.end():])
     when = bool(days or minutes is not None or clock)
+    if days and clock:
+        minutes = None  # dia e hora marcados valem mais que um "em 10 minutos" perdido na frase
     if not when and re.match(r'\s*que\b', rest):
         return None  # memória: "me lembra que X"
     shown = ''.join(c if work[i] != ' ' or c == ' ' else ' ' for i, c in enumerate(original))[trigger.end():]
@@ -194,7 +197,7 @@ def parse_reminder(command, now):
     if text and len(text) > MAX_TEXT:
         return Parsed('invalid', question='O lembrete pode ter até 200 caracteres.')
     repeat = Repeat(days, '') if days else None
-    if not when or (days and not clock):
+    if not when or (days and not clock and minutes is None):
         found = None
         if day and not clock:
             try:
@@ -216,7 +219,11 @@ def parse_reminder(command, now):
                 ambiguous = 1 <= hour <= 11 and not _PERIOD.search(phrase) and not re.search(r'\d(?:h|:)', phrase)
         except CalendarError as err:
             return Parsed('invalid', question=str(err))
-    if days:
+    if days and minutes is not None:
+        start = now + timedelta(minutes=minutes)   # a 1ª vez é daqui a pouco; depois repete todo dia nesse horário
+        repeat = Repeat(days, f'{start:%H:%M}')
+        due = start if start.weekday() in days else next_due(repeat, start)
+    elif days:
         if ambiguous:
             return Parsed('need_period', text, repeat=Repeat(days, ''), hour=hour, minute=minute)
         repeat = Repeat(days, f'{hour:02d}:{minute:02d}')
@@ -298,7 +305,12 @@ class ReminderStore:
             return self._quarantine()
 
     def _quarantine(self):
-        kept = self._path.with_name(f'{self._path.name}.bad-{datetime.now():%Y%m%d-%H%M%S}')
+        stamp = f'{self._path.name}.bad-{datetime.now():%Y%m%d-%H%M%S}'
+        kept = self._path.with_name(stamp)
+        for number in range(2, 1000):   # dois estragos no mesmo segundo não podem se sobrescrever
+            if not kept.exists():
+                break
+            kept = self._path.with_name(f'{stamp}-{number}')
         try:
             os.replace(self._path, kept)
         except OSError:
@@ -412,22 +424,24 @@ def _number(count):
 
 
 def due_message(reminders):
+    if not reminders:
+        return ''
     if len(reminders) == 1:
         return f'Lembrete: {reminders[0].text}.'
     return f'{_number(len(reminders)).capitalize()} lembretes: ' + '; '.join(r.text for r in reminders) + '.'
 
 
 def late_message(late, old):
-    more = f' e mais {old} antigo{"s" if old != 1 else ""}' if old else ''
+    more = (' Passou também 1 lembrete antigo.' if old == 1 else f' Passaram também {old} lembretes antigos.') if old else ''
     if not late:
         if not old:
             return None
         return ('Passou 1 lembrete antigo' if old == 1 else f'Passaram {old} lembretes antigos') + ' enquanto eu estava fechado.'
     if len(late) > 3:
         names = ', '.join(r.text for r in late[:3])
-        return f'Passaram {len(late)} lembretes enquanto eu estava fechado: {names} e mais {len(late) - 3}{more}.'
+        return f'Passaram {len(late)} lembretes enquanto eu estava fechado: {names} e mais {len(late) - 3}.{more}'
     shown = '; '.join(f'{r.text} ({r.due:%H:%M})' for r in late)
-    return f'Enquanto eu estava fechado, passou da hora de: {shown}{more}.'
+    return f'Enquanto eu estava fechado, passou da hora de: {shown}.{more}'
 
 
 # --- frases: criar, perguntar, listar, cancelar, adiar -------------------------------------------------------
@@ -449,11 +463,11 @@ _LIST = re.compile(
 _CANCEL = re.compile(
     r'^(?:cancela|cancele|cancelar|apaga|apague|apagar|remove|remova|exclui|exclua)\s+(?P<all>(?:todos|todas)\s+)?'
     r'(?:(?:o|os)\s+)?(?:meus?\s+)?(?P<noun>lembretes?)(?!\w)\s*(?P<rest>.*)$')
-_AMOUNT = rf'(?:(?:em|daqui\s+a|por)\s+)?(?:pouco|meia\s+hora|{_COUNT}\s*(?:horas?|h|minutos?|min))'
+_AMOUNT = rf'(?:(?:em|daqui\s+a|por)\s+)?(?:pouco|meia\s+hora|{_QTY}\s*(?:horas?|h|minutos?|min))'
 _SNOOZE_VERB = re.compile(
     r'^(?:(?:me\s+)?(?:adia|adie|adiar)(?:\s+(?:isso|o\s+lembrete|ai))?|me\s+(?:lembra|lembre|avisa|avise)\s+(?:de\s+novo|outra\s+vez))'
     rf'(?:\s+(?P<amount>{_AMOUNT}))?$')
-_SNOOZE_BARE = re.compile(rf'^(?P<amount>(?:em|daqui\s+a)\s+(?:pouco|meia\s+hora|{_COUNT}\s*(?:horas?|h|minutos?|min)))$')
+_SNOOZE_BARE = re.compile(rf'^(?P<amount>(?:em|daqui\s+a)\s+(?:pouco|meia\s+hora|{_QTY}\s*(?:horas?|h|minutos?|min)))$')
 _PERIOD_WORD = re.compile(r'^(?:(?:da|de)\s+)?(manha|madrugada|tarde|noite)$')
 _ORDER = re.compile(r'^(?:(?:o|a|numero)\s+)?(\w+)$')
 
@@ -628,6 +642,8 @@ def _followup(command, text, kind, data, now):
             return None
         if text in _STOP:
             return ('say', 'Tudo bem.')
+        if text in _YES:
+            return None   # "sim" solto não é o texto do lembrete
         cleaned = re.sub(r'^(?:(?:de|para|pra|que)\b\s*)+', '', command.strip().rstrip('.!?').rstrip(), flags=re.I).strip()
         if not cleaned:
             return None
@@ -669,8 +685,8 @@ def _followup(command, text, kind, data, now):
 
 def _classify(command, host, now):
     """Para onde vai a frase, sem efeito colateral: (ação, …) ou None."""
-    text = control(command).replace(',', '')   # a transcrição põe vírgulas: "Sim, pode."
-    pending =getattr(host, '_reminder_pending', None)
+    text = re.sub(r'(?<!\d),|,(?!\d)', '', control(command))   # a transcrição põe vírgulas ("Sim, pode."); decimal "1,5" fica
+    pending = getattr(host, '_reminder_pending', None)
     if pending and time.monotonic() < pending[0]:
         if found := _followup(command, text, pending[1], pending[2], now):
             return found
