@@ -45,7 +45,8 @@ def test_parses(phrase, now, text, due):
 def test_missing_when_or_what():
     assert parse_reminder('me lembra de pagar o boleto', NOW).kind == 'need_when'
     assert parse_reminder('me lembra amanhã de pagar o boleto', NOW).kind == 'need_when'
-    for phrase in ('me lembra de ligar a uma amiga', 'me lembra de dar comida a 2 gatos'):
+    for phrase in ('me lembra de ligar a uma amiga', 'me lembra de dar comida a 2 gatos', 'me lembra de esperar a 2 horas',
+                   'me lembra de pagar a 2 e meia dúzia de ovos', 'me lembra de ligar a 3 pessoas', 'me lembra de dar 5 reais a 2 filhos'):
         assert parse_reminder(phrase, NOW).kind == 'need_when'
     day = parse_reminder('me lembra amanhã de levar o carregador', NOW)
     assert (day.kind, day.text, day.day) == ('need_when', 'levar o carregador', date(2026, 11, 19))

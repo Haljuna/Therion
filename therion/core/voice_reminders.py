@@ -43,7 +43,7 @@ _PHRASE = (rf'{_N}(?:h\d{{2}}|:\d{{2}}|h|\s+horas?)?(?:\s+(?:e\s+)?(?:{_N}|meia)
            r'(?:\s+(?:da|de)\s+(?:manha|tarde|noite|madrugada))?')
 _DAY = r'depois\s+de\s+amanha|amanha|hoje|(?:proxim[ao]\s+)?' + rf'(?:{"|".join(_WEEKDAYS)})(?:-feira)?(?:\s+que\s+vem)?|dia\s+\d{{1,2}}'
 _CLOCK = re.compile(
-    rf'(?<!\w)(?:(?P<day>{_DAY})\s+)?(?:(?:as|ao)\s+|a\s+(?=meia[\s-]?noite|\d{{1,2}}(?:h|:\d|\s+da\s)|meio[\s-]?dia|(?:uma|duas)\s+(?:horas?|da\s)|\d{{1,2}}\s+horas?|{_N}\s+e\s+meia|{_N}\s*$))(?:(?P<noon>meio[\s-]?dia)|(?P<mid>meia[\s-]?noite)|(?P<t>{_PHRASE}))(?!\w|:)')
+    rf'(?<!\w)(?:(?P<day>{_DAY})\s+)?(?:(?:as|ao)\s+|a\s+(?=meia[\s-]?noite|\d{{1,2}}(?:h|:\d|\s+da\s)|meio[\s-]?dia|(?:uma|duas)\s+(?:horas?|da\s)|(?:1\d|2[0-3])\s+horas?|{_N}\s+e\s+meia(?!\s+duzia)|{_N}\s*$))(?:(?P<noon>meio[\s-]?dia)|(?P<mid>meia[\s-]?noite)|(?P<t>{_PHRASE}))(?!\w|:)')
 _DAY_ONLY = re.compile(rf'(?<!\w)(?P<day>{_DAY})(?!\w|/)')
 _PERIOD = re.compile(r'\s(?:da|de)\s+(?:manha|tarde|noite|madrugada)$')
 
