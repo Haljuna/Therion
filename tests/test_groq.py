@@ -171,3 +171,18 @@ def test_rate_limit_pauses_groq_and_goes_local(key, monkeypatch):
     with pytest.raises(groq.GroqUnavailable):
         groq.post('chat/completions', b'{}', 'application/json', 1, 'm')
     assert len(calls) == 2
+
+
+def test_long_conversation_audio_goes_to_groq_and_huge_audio_to_local(monkeypatch):
+    from therion.voice import groq_model
+    sent = []
+    monkeypatch.setattr(groq, 'post', lambda *a: sent.append(1) or {'segments': [{'text': 'longo'}]})
+
+    class Local:
+        def transcribe(self, audio, **options):
+            return [SimpleNamespace(text='local')], None
+    model = GroqVoiceModel(Local)
+    # 40 s: a conversa contínua juntou várias falas (falhava com o limite de 30 s do Parakeet).
+    assert model.transcribe(np.zeros(16000 * 40, dtype=np.float32))[0][0].text == 'longo'
+    assert model.transcribe(np.zeros(groq_model.GROQ_MAX_SAMPLES + 1, dtype=np.float32))[0][0].text == 'local'
+    assert sent == [1]
