@@ -266,3 +266,33 @@ def test_slow_microphone_open_is_not_reported_as_stalled(monkeypatch):
     assert not service.input_stalled
     clock[0] += 3.1  # agora sim: aberto e sem enviar áudio
     assert service.input_stalled
+
+
+def test_preroll_audio_comes_first_in_the_capture():
+    streams = []
+
+    def factory(**kwargs):
+        streams.append(FakeInputStream(**kwargs))
+        return streams[-1]
+
+    service = AudioCaptureService(stream_factory=factory, activity_factory=lambda: (lambda s: False))
+    assert service.start(automatic=True, preroll=np.full(1600, .2, np.float32)) is True
+    streams[0].feed(1280, 0.0)
+    streams[0].feed(1280, 0.0)  # abaixo de 0,2 s no total a captura seria descartada
+    audio = service.stop()
+    assert len(audio) == 1600 + 2560
+    assert np.allclose(audio[:1600], .2) and np.allclose(audio[1600:], 0)
+
+
+def test_speech_in_the_preroll_counts_as_speech_and_no_speech_deadline_applies():
+    voiced = lambda: (lambda s: True)
+    service = AudioCaptureService(stream_factory=lambda **k: FakeInputStream(**k), activity_factory=voiced)
+    service.start(automatic=True, preroll=np.full(3200, .2, np.float32), no_speech_seconds=5.0)
+    assert service.has_speech
+    service.cancel()
+
+    quiet = AudioCaptureService(stream_factory=lambda **k: FakeInputStream(**k),
+                                activity_factory=lambda: (lambda s: False))
+    quiet.start(automatic=True, preroll=np.zeros(16000 * 6, np.float32), no_speech_seconds=5.0)
+    assert quiet.utterance_complete and quiet.endpoint_reason == 'no_speech'
+    quiet.cancel()

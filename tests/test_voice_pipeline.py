@@ -218,3 +218,17 @@ def test_falha_na_transcricao_emite_erro():
     transcription.fail(gen, "erro simulado de transcrição")
     assert pipeline.state == VoicePipeline.STATE_IDLE
     assert failures == [(gen, "erro simulado de transcrição")]
+
+
+def test_pipeline_passes_preroll_and_timeout_to_the_capture():
+    calls = []
+
+    class Capture(FakeCapture):
+        def start(self, **kwargs):
+            calls.append(kwargs)
+            return True
+
+    pipeline = VoicePipeline(Capture(), FakeTranscription())
+    preroll = np.zeros(10, np.float32)
+    assert pipeline.start(automatic=True, preroll=preroll, no_speech_seconds=5.0) is True
+    assert calls == [{'automatic': True, 'preroll': preroll, 'no_speech_seconds': 5.0}]

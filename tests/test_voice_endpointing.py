@@ -47,3 +47,12 @@ def test_wait_before_speaking_does_not_shorten_phrase_limit():
     assert not detector.complete
     feed(detector,1.2,0.02)
     assert detector.complete and detector.reason=='limit'
+
+
+def test_endpoint_gives_up_when_nobody_speaks():
+    end = SpeechEndpoint(16000, no_speech_seconds=5.0, activity=lambda s: False)
+    for _ in range(62):
+        end.feed(np.zeros(1280, np.float32))
+    assert not end.complete
+    end.feed(np.zeros(1280, np.float32))
+    assert end.complete and end.reason == 'no_speech'

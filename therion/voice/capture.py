@@ -73,7 +73,7 @@ class AudioCaptureService:
         with self._lock:
             return self._recording
 
-    def start(self, *, automatic=False) -> bool:
+    def start(self, *, automatic=False, preroll: np.ndarray | None = None, no_speech_seconds: float | None = None) -> bool:
         """Inicia a captura. Retorna False se já estiver gravando ou em caso de erro."""
         with self._lock:
             if self._recording:
@@ -88,11 +88,19 @@ class AudioCaptureService:
             if automatic:
                 if self._sample_rate != 16000:
                     raise ValueError('A detecção de fala automática requer 16 kHz.')
-                endpoint = SpeechEndpoint(self._sample_rate, activity=self._activity_factory())
+                endpoint = SpeechEndpoint(
+                    self._sample_rate, activity=self._activity_factory(), no_speech_seconds=no_speech_seconds)
+                if preroll is not None:
+                    # Mesmo caminho dos blocos ao vivo, para a fala do áudio inicial contar.
+                    for i in range(0, len(preroll), 1280):
+                        endpoint.feed(preroll[i:i + 1280])
                 with self._lock:
                     if not self._recording:
                         return False
                     self._endpoint = endpoint
+            if preroll is not None and len(preroll):
+                with self._lock:
+                    self._chunks.append(np.asarray(preroll, dtype=np.float32).copy())
             stream = self._stream_factory(
                 samplerate=self._sample_rate,
                 channels=self.CHANNELS,

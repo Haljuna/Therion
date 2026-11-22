@@ -86,7 +86,7 @@ class VoicePipeline(QObject):
     def cycle_state(self):
         return self.cycle.state(self.state)
 
-    def start(self, *, automatic=False) -> bool:
+    def start(self, *, automatic=False, preroll=None, no_speech_seconds=None) -> bool:
         """Inicia a captura de áudio com uma nova generation.
 
         Retorna False se o pipeline não estiver ocioso (idle) ou se a captura falhar.
@@ -100,7 +100,8 @@ class VoicePipeline(QObject):
             self._capture_reserved = True
 
         try:
-            success = self._capture.start(automatic=True) if automatic else self._capture.start()
+            extra = {k: v for k, v in (('preroll', preroll), ('no_speech_seconds', no_speech_seconds)) if v is not None}
+            success = self._capture.start(automatic=True, **extra) if automatic else self._capture.start(**extra)
             if not success:
                 with self._lock:
                     if self._generation == gen:self._state = self.STATE_IDLE
