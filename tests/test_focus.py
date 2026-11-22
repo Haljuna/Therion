@@ -134,14 +134,14 @@ def test_stop_without_focus_or_right_away(box, host):
 
 
 def test_pause_by_phrase_and_end_of_pause(box, host):
-    box.save(FocusState('focus', NOW - timedelta(minutes=50), 50, []))   # o foco acabou de acabar; sem foco não há pausa
+    box.add_minutes(NOW.date(), 50)   # um foco já concluído hoje
     text, payload = answer('pausa de 10 minutos', host, NOW)
     assert text == 'Pausa de 10 minutos, até as 15h.' and payload['phase'] == 'pause' and payload['minutes'] == 10
     assert answer('quanto falta', host, NOW + timedelta(minutes=4))[0] == 'Faltam 6 minutos de pausa.'
     assert answer('faz uma pausa', host, NOW + timedelta(minutes=4)) == ('Você já está em pausa; faltam 6 minutos.', None)
     text, payload = answer('sai da pausa', host, NOW + timedelta(minutes=5))
     assert text == 'Pausa encerrada.' and payload['phase'] == 'off'
-    assert box.today(NOW.date()) == 0                     # pausa não conta
+    assert box.today(NOW.date()) == 50                    # pausa não conta (só o foco de antes)
     assert answer('sai da pausa', host, NOW) == ('Você não está em pausa.', None)
 
 
@@ -444,3 +444,24 @@ def test_stop_and_natural_end_credit_the_day_the_focus_started(box, host):
     box.save(FocusState('focus', start, 50, []))
     focus.settle(datetime(2026, 11, 19, 0, 30))
     assert box.today(date(2026, 11, 18)) == 80 and box.today(date(2026, 11, 19)) == 0
+
+
+def test_pause_by_phrase_after_focus_settles_and_offer_is_armed(box, host):
+    box.save(FocusState('focus', NOW, 50, []))
+    assert focus.settle(NOW + timedelta(minutes=50)) is not None and box.state().phase == 'off'
+    offer(host, 'pause')
+    text, payload = answer('pausa de 15 minutos', host, NOW + timedelta(minutes=51))
+    assert text.startswith('Pausa de 15 minutos') and payload['minutes'] == 15
+    box.save(FocusState('off', None, 0, []))
+    assert answer('pausa de 15 minutos', host, NOW + timedelta(minutes=80))[0].startswith('Pausa de 15 minutos')   # focus de hoje já contado
+
+
+def test_pause_by_phrase_with_no_focus_today_and_no_offer_is_refused(box, host):
+    box.add_minutes(NOW.date() - timedelta(days=1), 50)
+    assert answer('pausa de 15 minutos', host, NOW) == ('Você não está em foco.', None)
+    offer(host, 'pause')
+    assert answer('pausa de 15 minutos', host, NOW)[1]['phase'] == 'pause'
+
+
+def test_ended_text_without_today_total_drops_hoje():
+    assert 'Hoje' not in ended_text(50, None, None, [], None)

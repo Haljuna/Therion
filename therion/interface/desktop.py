@@ -379,6 +379,7 @@ class MainWindow(QMainWindow):
         self._timer_tick.timeout.connect(self._show_timer)
         self._focus_mail_thread = None
         self._focus_mail_token = None
+        self._focus_held_unsaid = None   # avisos do foco cuja fala ainda não saiu
         self._focus_mail_ready.connect(self._focus_summary)
         self._spoken_queue = []   # falas que nasceram sozinhas, esperando o Therion ficar livre
         self._next_user_channel = 'texto'
@@ -1345,6 +1346,9 @@ class MainWindow(QMainWindow):
         from therion.core import focus
         if self._focus_mail_token is not None:
             self._focus_mail_token.cancel()   # dois focos seguidos: a contagem do anterior não fala depois da deste
+            if self._focus_held_unsaid is not None:
+                self._write_held(self._focus_held_unsaid)   # mas os avisos que ele guardou não se perdem
+        self._focus_held_unsaid = list(held)
         token = self._focus_mail_token = CancellationToken()
         host, ready = self._orchestrator, self._focus_mail_ready
         def count():
@@ -1367,8 +1371,9 @@ class MainWindow(QMainWindow):
             return
         from therion.core import focus
         minutes_done, held, mail, start = row
+        self._focus_held_unsaid = None
         try:
-            today = focus.store().today(start.date())   # o foco conta no dia em que começou
+            today = focus.store().today(start.date()) if start.date() == datetime.now().date() else None   # conta no dia em que começou
         except OSError:
             today = minutes_done
         # Fala em tela cheia e no modo jogo, igual ao lembrete; a oferta de pausa é a dona do próximo "sim".

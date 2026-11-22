@@ -378,7 +378,7 @@ def _held_text(held):
 
 def ended_text(minutes_done, today_total, mail, held, suggest_pause):
     """A fala do fim do foco (§6.3), na ordem fixa; cada parte só entra se tiver conteúdo."""
-    parts = [f'Foco de {_duration(minutes_done)} concluído. Hoje são {_total(today_total)} de foco.',
+    parts = [f'Foco de {_duration(minutes_done)} concluído.' + (f' Hoje são {_total(today_total)} de foco.' if today_total is not None else ''),
              _mail_text(mail), _held_text(held),
              f'Que tal {_duration(suggest_pause)} de pausa?' if suggest_pause else None]
     return ' '.join(part for part in parts if part)
@@ -485,7 +485,7 @@ def _ask_duration(state, now):
     return f'Por quantos minutos? Diga, por exemplo, foco de {DEFAULT_FOCUS} minutos.', None
 
 
-def _pause(minutes, state, now):
+def _pause(minutes, state, now, offered=False):
     if _active(state, now):
         who = 'Você está em foco' if state.phase == 'focus' else 'Você já está em pausa'
         return f'{who}; {_faltam(_left(state, now))}.', None
@@ -493,7 +493,8 @@ def _pause(minutes, state, now):
         minutes = pause_minutes()
     if not MIN_PAUSE <= minutes <= MAX_PAUSE:
         return f'Dá para fazer pausas de {MIN_PAUSE} a {MAX_PAUSE} minutos.', None
-    if state.phase == 'off':   # a pausa pedida à mão vem depois de um foco; a oferta do fim usa _accept
+    # A pausa por frase vem depois de um foco: com a oferta de pausa pendente ou com foco já concluído hoje.
+    if state.phase == 'off' and not offered and not store().today(now.date()):
         return 'Você não está em foco.', None
     return _begin('pause', minutes, now)
 
@@ -546,8 +547,8 @@ def _accept(kind, state, now):
 def answer(command, host, now=None):
     """(texto, ui_payload) ou None. Ofertas pendentes valem 2 min e só para a próxima frase."""
     now = (now or datetime.now()).replace(microsecond=0)
-    routed = _route(command, host, now)
     spent = getattr(host, '_focus_offer', None)
+    routed = _route(command, host, now)
     if spent is not None and host._focus_offer is spent:   # uma oferta armada por outro no meio do turno é outro objeto e fica
         host._focus_offer = None
     if routed is None:
@@ -568,7 +569,7 @@ def answer(command, host, now=None):
         if kind == 'left':
             return _how_long(state, now, text)
         if kind == 'pause':
-            return _pause(args[0], state, now)
+            return _pause(args[0], state, now, bool(spent and spent[1] == 'pause' and time.monotonic() < spent[0]))
         if kind == 'stop_pause':
             return _stop_pause(state)
         if kind == 'accept':

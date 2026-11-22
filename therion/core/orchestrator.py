@@ -1022,6 +1022,13 @@ class Orchestrator(WorkflowSupport, MemorySupport, PersonalContextSupport, Catal
             resolved['date'] = draft['_resolved_date']
         return event_datetimes(resolved, self._calendar_now())
 
+    def _focus_now(self):
+        """Relógio injetado como hora local sem fuso (o foco guarda horas ingênuas); None usa o relógio real."""
+        if not self._now_func:
+            return None
+        now = self._now_func()
+        return now.astimezone().replace(tzinfo=None) if now.tzinfo else now
+
     def _calendar_now(self):
         if self._calendar_tz_error:
             raise CalendarError(self._calendar_tz_error)
@@ -2491,7 +2498,7 @@ class Orchestrator(WorkflowSupport, MemorySupport, PersonalContextSupport, Catal
                 self._complete_task()
                 self._finalize_session_result(result)
                 return result
-            focused = focus_answer(command, self, self._now_func().replace(tzinfo=None) if self._now_func else None)
+            focused = focus_answer(command, self, self._focus_now())
             if focused is not None:
                 self._spend_pendings(before)   # só uma oferta pendente é dona do "sim"
                 result = OrchestrationResult(status='success', message=focused[0],

@@ -324,3 +324,23 @@ def test_overlapping_focus_mail_cancels_the_previous_count(app, window, shared, 
     first.join(5)
     settle_mail(app, window)
     assert len(spoken(window)) == 1
+
+
+def test_cancelled_overlap_still_writes_the_first_focus_held_notices(app, window, shared, monkeypatch):
+    release = threading.Event()
+    monkeypatch.setattr(focus, 'focus_mail', lambda host, start, token, timeout=10.: release.wait(5) and None or MAIL)
+    start = datetime(2026, 11, 22, 9)
+    window._focus_finished(30, start, ['aviso do primeiro'])
+    first = window._focus_mail_thread
+    window._focus_finished(30, start, [])
+    assert 'Avisos que segurei durante o foco:\n• aviso do primeiro' in window.said
+    release.set()
+    first.join(5)
+    settle_mail(app, window)
+    assert window.said.count('Avisos que segurei durante o foco:\n• aviso do primeiro') == 1
+
+
+def test_summary_of_a_focus_from_another_day_drops_hoje(app, window, shared):
+    old = datetime.now() - timedelta(days=1)
+    window._focus_summary((30, [], MAIL, old))
+    assert spoken(window) and 'Hoje' not in spoken(window)[0]
