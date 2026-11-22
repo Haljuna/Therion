@@ -119,6 +119,16 @@ def _validate_config(data: dict[str, Any]) -> dict[str, Any]:
     # Mini orbe flutuante sobre as outras janelas; ligada salvo pedido contrário.
     if type(ui.get('mini_orb')) is not bool:
         ui['mini_orb'] = True
+    # Palavra de ativação "Therion"; ligada salvo pedido contrário (sem o modelo baixado, nada muda).
+    if type(ui.get('wake_word')) is not bool:
+        ui['wake_word'] = True
+    # wake.threshold: nota mínima do detector (0,05-0,99, padrão 0,5).
+    wake = validated.get('wake')
+    wake = dict(wake) if isinstance(wake, dict) else {}
+    threshold = wake.get('threshold')
+    if type(threshold) not in (int, float) or not 0.05 <= threshold <= 0.99:
+        wake['threshold'] = 0.5
+    validated['wake'] = wake
 
     # focus.minutes (5-180) e focus.pause (1-60); ausente é aceito, valor inválido volta ao padrão
     focus = validated.get("focus")

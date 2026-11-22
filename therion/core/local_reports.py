@@ -27,6 +27,7 @@ _GAME = r'(?:o |a )?mod[oa]s? (?:de )?(?:jogo|game)'  # o Whisper ouve "moda de 
 _GAME_ON = re.compile(r'(?:(?:ativa|ative|ativar|liga|ligue|ligar|entra n|entre n|entrar n|coloca n|inicia|inicie)(?:o | o | )?)?' + _GAME + '|vou jogar(?: agora)?' + _POLITE)
 _GAME_OFF = re.compile(r'(?:desativa|desative|desativar|desliga|desligue|desligar|sai d|saia d|sair d|encerra|encerre|tira d)(?:o | o | )?' + _GAME
                        + r'|parei de jogar|terminei de jogar|modo normal' + _POLITE)
+_WAKE_OFF = re.compile(r'(?:para|pare|parar) de me (?:ouvir|escutar)' + _POLITE)
 _GB = 1024 ** 3
 
 
@@ -49,6 +50,11 @@ def game_mode_request(command):
     if _GAME_OFF.fullmatch(text):
         return False
     return True if _GAME_ON.fullmatch(text) else None
+
+
+def wake_off_request(command):
+    """'Therion, para de me ouvir': desliga a palavra de ativação até reiniciar."""
+    return bool(_WAKE_OFF.fullmatch(control(command).rstrip('?!. ')))
 
 
 def report_request(command, projects=None):

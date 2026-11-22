@@ -2485,7 +2485,7 @@ class Orchestrator(WorkflowSupport, MemorySupport, PersonalContextSupport, Catal
                 return app_status
 
         if self._personal_flow_is_free():
-            from therion.core.local_reports import answer as local_report, game_mode_request
+            from therion.core.local_reports import answer as local_report, game_mode_request, wake_off_request
             from therion.core.pc_cleanup import answer as pc_cleanup
             from therion.core.voice_reminders import answer as reminder_answer
             from therion.core.focus import answer as focus_answer
@@ -2503,6 +2503,12 @@ class Orchestrator(WorkflowSupport, MemorySupport, PersonalContextSupport, Catal
                 self._spend_pendings(before)   # só uma oferta pendente é dona do "sim"
                 result = OrchestrationResult(status='success', message=focused[0],
                     ui_action='focus' if focused[1] else None, ui_payload=focused[1])
+                self._complete_task()
+                self._finalize_session_result(result)
+                return result
+            if wake_off_request(command):
+                result = OrchestrationResult(status='success', ui_action='wake_off',
+                    message='Tudo bem, parei de ouvir pelo nome até o senhor me abrir de novo.')
                 self._complete_task()
                 self._finalize_session_result(result)
                 return result

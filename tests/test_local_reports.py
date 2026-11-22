@@ -143,3 +143,23 @@ def test_game_mode_command_asks_the_window_to_switch_without_the_model(case, age
     assert provider.mock_calls == [] and calendar.mock_calls == []
     if agent:
         assert not agent.observations
+
+
+@pytest.mark.parametrize('command,off', [
+    ('Therion, para de me ouvir', True), ('Para de me ouvir.', True), ('pare de me escutar', True),
+    ('parar de me ouvir, por favor', True), ('não para de me ouvir', False), ('para de ouvir música', False)])
+def test_stop_listening_phrases(command, off):
+    assert local_reports.wake_off_request(command) is off
+
+
+@pytest.mark.parametrize('agent_enabled', [False, True])
+def test_stop_listening_phrase_mutes_the_wake_word_without_the_model(case, agent_enabled):
+    host, provider, calendar, profile = case
+    agent = enable(host) if agent_enabled else None
+    worker = _CommandWorker(host, 'Therion, para de me ouvir'); worker.run()
+    assert not worker.failed and worker.result.status == 'success'
+    assert worker.result.ui_action == 'wake_off'
+    assert worker.result.message == 'Tudo bem, parei de ouvir pelo nome até o senhor me abrir de novo.'
+    assert provider.mock_calls == [] and calendar.mock_calls == []
+    if agent:
+        assert not agent.observations

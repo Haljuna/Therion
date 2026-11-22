@@ -94,6 +94,13 @@ class ConversationLog:
         lines += f"`rota: {route or 'IA/conversa'} · status: {status} · {timing}`\n"
         self._guard(self._write, lines)
 
+    def event(self, text):
+        """Linha avulsa do registro (ex.: disparo da palavra de ativação), sem áudio."""
+        if not self.enabled:
+            return
+        stamp = self.now().strftime('%H:%M:%S')
+        self._guard(self._write, f"\n`{stamp} · {text}`\n")
+
     def rotate(self):
         """Encerra a nota atual; a próxima mensagem abre outra (ex.: Limpar conversa)."""
         self.path = None

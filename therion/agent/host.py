@@ -399,13 +399,14 @@ class AgentSupport:
             return OrchestrationResult(status='clarification', message='Escopo inválido: ' + syntax.reason)
         from therion.context.conversation_frame import personal_request, capabilities_request, current_date_request, current_time_request, app_status_request,app_close_request,app_result_request,repeat_request
         from therion.core.screenshot import screenshot_request
-        from therion.core.local_reports import report_request
+        from therion.core.local_reports import report_request, wake_off_request
         from therion.core.pc_cleanup import wanted as cleanup_wanted
         from therion.core.voice_reminders import reminder_request
         from therion.core.focus import wanted as focus_wanted
         status_followup=self._catalog_status_followup(syntax.command)
         if (personal_request(syntax.command,voice=self.voice_conversation) is not None or capabilities_request(syntax.command)
                 or current_date_request(syntax.command) or current_time_request(syntax.command) or app_status_request(syntax.command) or report_request(syntax.command)
+                or wake_off_request(syntax.command)
                 or cleanup_wanted(syntax.command,self)
                 or reminder_request(syntax.command,self)
                 or focus_wanted(syntax.command,self)
