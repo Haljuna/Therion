@@ -2247,9 +2247,11 @@ class Orchestrator(WorkflowSupport, MemorySupport, PersonalContextSupport, Catal
             if today:
                 if total==0:return OrchestrationResult(status='success',message='Nenhum e-mail chegou hoje.')
                 more='mais de ' if not complete else ''
-                head=f'Chegou 1 e-mail hoje' if total==1 else f'Chegaram {more}{total} e-mails hoje'
+                head='Chegou 1 e-mail hoje' if total==1 else f'Chegaram {more}{total} e-mails hoje'
+                if unread is None:return OrchestrationResult(status='success',message=head+'.')
                 if unread[0]==0:tail='já foi lido' if total==1 else 'todos já foram lidos'
-                else:tail='ainda não foi lido' if unread[0]==1 else f'{unread[0]} ainda não foram lidos'
+                elif total==1:tail='ainda não foi lido'
+                else:tail=f'{unread[0]} ainda não foi lido' if unread[0]==1 else f'{unread[0]} ainda não foram lidos'
                 return OrchestrationResult(status='success',message=f'{head}; {tail}.')
             if total==0:return OrchestrationResult(status='success',message='Nenhum e-mail não lido na caixa de entrada.')
             noun='e-mail não lido' if total==1 else 'e-mails não lidos'

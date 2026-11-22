@@ -64,3 +64,28 @@ def test_hoje_sem_nada_e_tudo_lido(case):
     assert host.process_command('Quantos e-mails chegaram hoje?').message == 'Nenhum e-mail chegou hoje.'
     client.search = lambda q, page=None, limit=None: dict(messages=[{'id': 'a'}] * (0 if 'unread' in q else 12))
     assert host.process_command('Quantos e-mails recebi hoje?').message == 'Chegaram 12 e-mails hoje; todos já foram lidos.'
+
+
+def _caixa(total, unread):
+    def search(q, page=None, limit=None):
+        return dict(messages=[{'id': str(i)} for i in range(unread if 'unread' in q else total)])
+    return SimpleNamespace(search=search)
+
+
+def test_um_nao_lido_entre_varios_diz_o_numero(case):
+    host, _, _ = _host(case, _caixa(12, 1))
+    assert host.process_command('Quantos e-mails chegaram hoje?').message == 'Chegaram 12 e-mails hoje; 1 ainda não foi lido.'
+
+
+def test_um_unico_email_hoje(case):
+    host, _, _ = _host(case, _caixa(1, 1))
+    assert host.process_command('Quantos e-mails chegaram hoje?').message == 'Chegou 1 e-mail hoje; ainda não foi lido.'
+    host._gmail_adapter_factory = lambda mode: _caixa(1, 0)
+    assert host.process_command('Quantos e-mails chegaram hoje?').message == 'Chegou 1 e-mail hoje; já foi lido.'
+
+
+def test_hoje_acima_do_teto_diz_mais_de(case):
+    client = SimpleNamespace(search=lambda q, page=None, limit=None: dict(
+        messages=[{'id': str(i)} for i in range(500)], next_page=f'p{page}'))
+    host, _, _ = _host(case, client)
+    assert host.process_command('Quantos e-mails chegaram hoje?').message.startswith('Chegaram mais de 2000 e-mails hoje')
