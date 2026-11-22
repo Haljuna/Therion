@@ -127,3 +127,63 @@ def test_stop_is_safe_twice_and_joins_the_thread(tmp_path):
     thread = listener._thread
     listener.stop(); listener.stop()
     assert not thread.is_alive() and streams[0].stopped and streams[0].closed
+
+
+def test_a_silent_microphone_is_reported_as_microphone_and_reopened(tmp_path, monkeypatch):
+    monkeypatch.setattr('therion.voice.wake.SILENCE_LIMIT', 0.3)
+    opened, problems, ok = [], [], threading.Event()
+    def factory(cb):
+        opened.append(1)
+        if len(opened) == 2:
+            ok.set()
+        return FakeStream(cb)
+    listener = WakeListener(_model_file(tmp_path), lambda a, s: None, model_factory=lambda p: FakeModel([]),
+                            stream_factory=factory, on_problem=problems.append, retry_seconds=0)
+    assert listener.start() is True
+    assert ok.wait(3); listener.stop()
+    assert problems == ['microfone']
+
+
+def test_a_detector_error_is_reported_once_and_the_stream_reopened(tmp_path):
+    opened, problems, ok = [], [], threading.Event()
+    class Boom(FakeModel):
+        def predict(self, block):
+            raise RuntimeError('modelo quebrou')
+    def factory(cb):
+        opened.append(1)
+        if len(opened) == 2:
+            ok.set()
+        return FakeStream(cb, _blocks(1))
+    listener = WakeListener(_model_file(tmp_path), lambda a, s: None, model_factory=lambda p: Boom([]),
+                            stream_factory=factory, on_problem=problems.append, retry_seconds=0)
+    assert listener.start() is True
+    assert ok.wait(3); listener.stop()
+    assert problems == ['detector']
+
+
+def test_an_error_in_on_wake_keeps_the_stream_and_is_not_a_problem(tmp_path):
+    opened, problems, called = [], [], threading.Event()
+    def on_wake(audio, score):
+        called.set(); raise ValueError('quem recebe errou')
+    def factory(cb):
+        opened.append(1); return FakeStream(cb, _blocks(5))
+    listener = WakeListener(_model_file(tmp_path), on_wake, model_factory=lambda p: FakeModel([0, 0, .9, 0, 0]),
+                            stream_factory=factory, on_problem=problems.append, retry_seconds=0)
+    assert listener.start() is True
+    assert called.wait(3); threading.Event().wait(0.5); listener.stop()
+    assert len(opened) == 1 and problems == []
+
+
+def test_a_full_queue_drops_blocks_instead_of_growing(tmp_path):
+    listener = WakeListener(_model_file(tmp_path), lambda a, s: None)
+    for _ in range(1000):
+        listener._push(_blocks(1)[0])
+    assert listener._queue.qsize() <= 40
+
+
+def test_start_after_stop_runs_again(tmp_path):
+    listener = WakeListener(_model_file(tmp_path), lambda a, s: None, model_factory=lambda p: FakeModel([]),
+                            stream_factory=lambda cb: FakeStream(cb))
+    assert listener.start() is True; listener.stop()
+    assert listener.start() is True
+    assert listener._thread.is_alive(); listener.stop()

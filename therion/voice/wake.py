@@ -13,6 +13,7 @@ import numpy as np
 RATE = 16000
 BLOCK = 1280           # 80 ms, o que o openWakeWord espera
 AFTER_WAKE_BLOCKS = 4  # ~300 ms de fala depois do nome antes de entregar o áudio
+QUEUE_BLOCKS = 38      # ~3 s de blocos; se o detector atrasar, descarta o excedente
 SILENCE_LIMIT = 5.0    # sem nenhum bloco do microfone por tanto tempo: reabre
 
 
@@ -64,6 +65,10 @@ class RingBuffer:
         return self._data[idx].astype(np.float32) / 32768
 
 
+class _Silence(Exception):
+    pass
+
+
 def _default_model(model_path: str):
     import openwakeword
     # O openWakeWord procura melspectrogram/embedding dentro do pacote (resources/models),
@@ -85,7 +90,9 @@ class WakeListener:
     """Lê o microfone numa thread e chama `on_wake(áudio_depois_do_nome, score)` ao ouvir o nome.
 
     `stream_factory(callback)` devolve um stream com start/stop/close; o callback recebe
-    um bloco int16 mono. `on_wake` roda na thread do detector.
+    um bloco int16 mono. `on_wake` roda na thread do detector; se ela levantar erro, só vai
+    para o log. `on_problem` é chamado uma vez por tipo de falha por sessão do objeto.
+    `start()` depois de `stop()` religa o detector (o `stop` é limpo no `start`).
     """
 
     def __init__(self, model_path: str, on_wake: Callable[[np.ndarray, float], None], *,
@@ -99,7 +106,7 @@ class WakeListener:
         self._retry = retry_seconds
         self.gate = WakeGate(threshold)
         self._ring = RingBuffer(3.0, RATE)
-        self._queue: queue.Queue = queue.Queue()
+        self._queue = queue.Queue(QUEUE_BLOCKS)
         self._stop = threading.Event()
         self._paused = threading.Event()
         self._thread: threading.Thread | None = None
@@ -108,6 +115,7 @@ class WakeListener:
     def start(self) -> bool:
         if self._thread or not os.path.isfile(self._path):
             return False
+        self._stop.clear()
         try:
             self._model = self._model_factory(self._path)
         except Exception:  # sem openwakeword ou modelo ilegível: o Therion segue sem o detector
@@ -129,6 +137,12 @@ class WakeListener:
     def resume(self) -> None:
         self._paused.clear()
 
+    def _push(self, block) -> None:
+        try:
+            self._queue.put_nowait(block)
+        except queue.Full:  # detector atrasado: descarta em vez de crescer sem limite
+            pass
+
     def _problem(self, kind: str) -> None:
         if kind not in self._reported:
             self._reported.add(kind)
@@ -139,7 +153,8 @@ class WakeListener:
         while not self._stop.is_set():
             stream = None
             try:
-                stream = self._stream_factory(self._queue.put)
+                self._queue = queue.Queue(QUEUE_BLOCKS)  # nada de blocos velhos do stream anterior
+                stream = self._stream_factory(self._push)
                 stream.start()
             except Exception:
                 self._problem('microfone')
@@ -149,6 +164,8 @@ class WakeListener:
                 continue
             try:
                 self._loop()
+            except _Silence:
+                self._problem('microfone')
             except Exception:
                 self._problem('detector')
             finally:
@@ -176,7 +193,7 @@ class WakeListener:
                     self._deliver(pending)
                     pending = None
                 if quiet >= SILENCE_LIMIT:
-                    raise OSError('microfone parou de enviar áudio')
+                    raise _Silence()
                 continue
             quiet = 0.0
             if self._paused.is_set():
@@ -193,4 +210,7 @@ class WakeListener:
                 pending = [self._ring.mark(), score, AFTER_WAKE_BLOCKS]
 
     def _deliver(self, pending) -> None:
-        self._on_wake(self._ring.since(pending[0]), pending[1])
+        try:
+            self._on_wake(self._ring.since(pending[0]), pending[1])
+        except Exception as exc:  # erro de quem recebe não é falha do microfone nem do detector
+            print(f'[wake] on_wake falhou: {exc!r}')
