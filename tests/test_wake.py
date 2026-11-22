@@ -174,11 +174,12 @@ def test_an_error_in_on_wake_keeps_the_stream_and_is_not_a_problem(tmp_path):
     assert len(opened) == 1 and problems == []
 
 
-def test_a_full_queue_drops_blocks_instead_of_growing(tmp_path):
-    listener = WakeListener(_model_file(tmp_path), lambda a, s: None)
+def test_a_full_queue_drops_blocks_instead_of_growing():
+    import queue
+    q = queue.Queue(38)
     for _ in range(1000):
-        listener._push(_blocks(1)[0])
-    assert listener._queue.qsize() <= 40
+        WakeListener._push(q, _blocks(1)[0])
+    assert q.qsize() == 38
 
 
 def test_start_after_stop_runs_again(tmp_path):
@@ -187,3 +188,23 @@ def test_start_after_stop_runs_again(tmp_path):
     assert listener.start() is True; listener.stop()
     assert listener.start() is True
     assert listener._thread.is_alive(); listener.stop()
+
+
+def test_a_stopped_thread_still_blocked_is_not_revived_by_a_new_start(tmp_path):
+    release, entered, opened = threading.Event(), threading.Event(), []
+    def on_wake(audio, score):
+        entered.set(); release.wait(5)           # segura a thread antiga dentro do on_wake
+    def factory(cb):
+        opened.append(1); return FakeStream(cb, _blocks(5) if len(opened) == 1 else ())
+    listener = WakeListener(_model_file(tmp_path), on_wake, model_factory=lambda p: FakeModel([0, 0, .9, 0, 0]),
+                            stream_factory=factory, retry_seconds=0)
+    assert listener.start() is True and entered.wait(3)
+    old = listener._thread
+    listener.stop()                              # junta só 2 s: a thread antiga continua presa
+    assert old.is_alive()
+    assert listener.start() is True
+    release.set(); old.join(3)
+    assert not old.is_alive()                    # terminou em vez de voltar ao laço
+    threading.Event().wait(0.3)
+    assert sum(t.name == 'wake-listener' and t.is_alive() for t in threading.enumerate()) == 1
+    listener.stop()

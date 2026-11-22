@@ -5,6 +5,7 @@ O áudio do buffer vive só na memória; nada é gravado nem enviado antes do di
 import os
 import queue
 import threading
+import traceback
 import time
 from typing import Callable
 
@@ -92,7 +93,8 @@ class WakeListener:
     `stream_factory(callback)` devolve um stream com start/stop/close; o callback recebe
     um bloco int16 mono. `on_wake` roda na thread do detector; se ela levantar erro, só vai
     para o log. `on_problem` é chamado uma vez por tipo de falha por sessão do objeto.
-    `start()` depois de `stop()` religa o detector (o `stop` é limpo no `start`).
+    `start()` depois de `stop()` religa o detector com uma thread nova; a antiga, se ainda
+    estiver presa, termina sozinha (cada thread tem o seu próprio sinal de parada).
     """
 
     def __init__(self, model_path: str, on_wake: Callable[[np.ndarray, float], None], *,
@@ -106,8 +108,7 @@ class WakeListener:
         self._retry = retry_seconds
         self.gate = WakeGate(threshold)
         self._ring = RingBuffer(3.0, RATE)
-        self._queue = queue.Queue(QUEUE_BLOCKS)
-        self._stop = threading.Event()
+        self._stop = threading.Event()  # um por thread (criado no start): thread parada nunca revive
         self._paused = threading.Event()
         self._thread: threading.Thread | None = None
         self._reported: set[str] = set()
@@ -115,13 +116,13 @@ class WakeListener:
     def start(self) -> bool:
         if self._thread or not os.path.isfile(self._path):
             return False
-        self._stop.clear()
+        self._stop = stop = threading.Event()
         try:
             self._model = self._model_factory(self._path)
         except Exception:  # sem openwakeword ou modelo ilegível: o Therion segue sem o detector
             return False
         self._name = os.path.splitext(os.path.basename(self._path))[0]
-        self._thread = threading.Thread(target=self._run, name='wake-listener', daemon=True)
+        self._thread = threading.Thread(target=self._run, args=(stop,), name='wake-listener', daemon=True)
         self._thread.start()
         return True
 
@@ -137,9 +138,10 @@ class WakeListener:
     def resume(self) -> None:
         self._paused.clear()
 
-    def _push(self, block) -> None:
+    @staticmethod
+    def _push(q, block) -> None:
         try:
-            self._queue.put_nowait(block)
+            q.put_nowait(block)
         except queue.Full:  # detector atrasado: descarta em vez de crescer sem limite
             pass
 
@@ -149,29 +151,29 @@ class WakeListener:
             if self._on_problem:
                 self._on_problem(kind)
 
-    def _run(self) -> None:
-        while not self._stop.is_set():
+    def _run(self, stop) -> None:
+        while not stop.is_set():
             stream = None
             try:
-                self._queue = queue.Queue(QUEUE_BLOCKS)  # nada de blocos velhos do stream anterior
-                stream = self._stream_factory(self._push)
+                q = queue.Queue(QUEUE_BLOCKS)  # nada de blocos velhos do stream anterior
+                stream = self._stream_factory(lambda block, q=q: self._push(q, block))
                 stream.start()
             except Exception:
                 self._problem('microfone')
                 if stream is not None:
                     self._close(stream)
-                self._stop.wait(self._retry)
+                stop.wait(self._retry)
                 continue
             try:
-                self._loop()
+                self._loop(stop, q)
             except _Silence:
                 self._problem('microfone')
             except Exception:
                 self._problem('detector')
             finally:
                 self._close(stream)
-            if not self._stop.is_set():
-                self._stop.wait(self._retry)
+            if not stop.is_set():
+                stop.wait(self._retry)
 
     @staticmethod
     def _close(stream) -> None:
@@ -181,12 +183,12 @@ class WakeListener:
             except Exception:
                 pass
 
-    def _loop(self) -> None:
+    def _loop(self, stop, q) -> None:
         pending = None  # [mark, score, blocos que faltam]
         quiet = 0.0
-        while not self._stop.is_set():
+        while not stop.is_set():
             try:
-                block = self._queue.get(timeout=0.2)
+                block = q.get(timeout=0.2)
             except queue.Empty:
                 quiet += 0.2
                 if pending:  # a fala parou antes dos 300 ms: entrega o que há
@@ -212,5 +214,5 @@ class WakeListener:
     def _deliver(self, pending) -> None:
         try:
             self._on_wake(self._ring.since(pending[0]), pending[1])
-        except Exception as exc:  # erro de quem recebe não é falha do microfone nem do detector
-            print(f'[wake] on_wake falhou: {exc!r}')
+        except Exception:  # erro de quem recebe não é falha do microfone nem do detector
+            print('[wake] on_wake falhou:', traceback.format_exc())
