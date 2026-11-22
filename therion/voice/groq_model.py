@@ -1,6 +1,8 @@
 """Transcrição na Groq; o faster-whisper local só carrega quando a Groq falha e sai da memória depois."""
 import json
+import re
 import threading
+import unicodedata
 import time
 from types import SimpleNamespace
 
@@ -12,6 +14,23 @@ from therion.voice.http_model import wav_bytes
 LOCAL_IDLE_SECONDS = 300
 # A Groq aceita até 25 MB; 10 min de WAV 16 kHz dão ~19 MB. A conversa contínua pode passar de 30 s.
 GROQ_MAX_SAMPLES = 16000 * 600
+# RMS do trecho inteiro. 0.004 é o piso de "tem voz" do endpointing; abaixo da metade disso é silêncio.
+SILENCE_RMS = 0.002
+# Entre o piso (0.004) e o teto (0.025) do limiar de voz do endpointing; o trecho inteiro inclui pausas.
+WEAK_RMS = 0.01
+HALLUCINATIONS = ('tchau', 'obrigado', 'obrigada', 'inscreva-se', 'e ai')
+HALLUCINATION_PREFIXES = ('legenda',)  # cobre "legendas pela comunidade amara.org" e "legenda por ..."
+
+
+def _normalized(text):
+    text = unicodedata.normalize('NFKD', text.lower())
+    text = ''.join(c for c in text if not unicodedata.combining(c))
+    return re.sub(r'[^a-z0-9\- ]+', '', text).strip()
+
+
+def _hallucination(text):
+    text = _normalized(text)
+    return text in HALLUCINATIONS or text.startswith(HALLUCINATION_PREFIXES)
 
 
 class GroqVoiceModel:
@@ -26,10 +45,16 @@ class GroqVoiceModel:
         data = np.asarray(audio)
         if data.ndim != 1 or not len(data) or not np.isfinite(data).all():
             raise ValueError('Áudio inválido: esperado mono 16 kHz')
+        rms = float(np.sqrt(np.mean(np.square(data, dtype=np.float64))))
+        if rms < SILENCE_RMS:
+            return [], SimpleNamespace(language='pt')  # silêncio: a Groq inventaria fala
         try:
             if len(data) > GROQ_MAX_SAMPLES:
                 raise groq.GroqUnavailable('Áudio longo demais para a Groq.')
             result = self._groq(data, options)
+            # Em áudio fraco a Groq devolve "Tchau." etc. com confiança alta; falado de verdade, com energia normal, passa.
+            if rms < WEAK_RMS and _hallucination(' '.join(seg.text for seg in result[0])):
+                result = ([], result[1])
         except groq.GroqUnavailable as error:
             print(f'[Therion] Groq indisponível ({error}); transcrevendo no PC.')
             with self._lock:

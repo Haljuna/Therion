@@ -58,6 +58,41 @@ def test_provider_uses_groq_then_local_only_on_failure(monkeypatch):
     assert len(local) == 1
 
 
+def _tone(amplitude, seconds=1):
+    return (amplitude * np.sin(np.arange(16000 * seconds) * 0.3)).astype(np.float32)
+
+
+def _voice_with(monkeypatch, text, audio):
+    sent, loads = [], []
+
+    class Local:
+        def transcribe(self, audio, **options):
+            return [SimpleNamespace(text='local')], None
+    monkeypatch.setattr(groq, 'post', lambda *a: sent.append(1) or {'segments': [{'text': text}]})
+    segments, _ = GroqVoiceModel(lambda: loads.append(1) or Local()).transcribe(audio)
+    return segments, sent, loads
+
+
+def test_silence_never_reaches_groq_nor_local_fallback(monkeypatch):
+    segments, sent, loads = _voice_with(monkeypatch, 'Tchau.', np.zeros(16000, dtype=np.float32))
+    assert segments == [] and not sent and not loads
+
+
+def test_classic_hallucination_on_weak_audio_is_dropped_without_local(monkeypatch):
+    segments, sent, loads = _voice_with(monkeypatch, ' Tchau.', _tone(0.01))
+    assert segments == [] and sent == [1] and not loads
+
+
+def test_spoken_goodbye_with_normal_energy_passes(monkeypatch):
+    segments, _, _ = _voice_with(monkeypatch, ' Tchau.', _tone(0.1))
+    assert segments[0].text.strip() == 'Tchau.'
+
+
+def test_normal_phrase_on_weak_audio_passes(monkeypatch):
+    segments, _, _ = _voice_with(monkeypatch, ' Que horas são?', _tone(0.01))
+    assert segments[0].text.strip() == 'Que horas são?'
+
+
 def test_voice_uses_groq_metrics_and_loads_local_only_when_needed(monkeypatch):
     now = [0.0]
     loads = []
@@ -73,7 +108,7 @@ def test_voice_uses_groq_metrics_and_loads_local_only_when_needed(monkeypatch):
         sent['body'] = body
         return {'segments': [{'text': ' Que horas são?', 'avg_logprob': -0.2, 'no_speech_prob': 0.01, 'compression_ratio': 1.1}]}
     monkeypatch.setattr(groq, 'post', ok)
-    audio = np.zeros(16000, dtype=np.float32)
+    audio = _tone(0.1)
     segments, _ = model.transcribe(audio, language='pt', initial_prompt='Conversa', hotwords='Therion')
     assert segments[0].text.strip() == 'Que horas são?' and segments[0].avg_logprob == -0.2
     assert b'Conversa Therion' in sent['body'] and b'whisper-large-v3-turbo' in sent['body'] and not loads
@@ -183,6 +218,6 @@ def test_long_conversation_audio_goes_to_groq_and_huge_audio_to_local(monkeypatc
             return [SimpleNamespace(text='local')], None
     model = GroqVoiceModel(Local)
     # 40 s: a conversa contínua juntou várias falas (falhava com o limite de 30 s do Parakeet).
-    assert model.transcribe(np.zeros(16000 * 40, dtype=np.float32))[0][0].text == 'longo'
-    assert model.transcribe(np.zeros(groq_model.GROQ_MAX_SAMPLES + 1, dtype=np.float32))[0][0].text == 'local'
+    assert model.transcribe(_tone(0.1, 40))[0][0].text == 'longo'
+    assert model.transcribe(_tone(0.1, 601))[0][0].text == 'local'
     assert sent == [1]
