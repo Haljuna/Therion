@@ -40,6 +40,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "timeout_seconds": 90,
         "endpoint": "http://127.0.0.1:11434/api/chat",
         "think": None,
+        "online": None,  # "groq" = IA na nuvem, com o Ollama local de reserva
     },
     "voice": {"model_path": None},
     "tts": {"enabled": False, "provider": "kokoro", "voice": "pm_alex", "model_root": "", "python_path": "", "warm_on_start": False,
@@ -185,6 +186,8 @@ def _validate_config(data: dict[str, Any]) -> dict[str, Any]:
         if ai.get("think") is not None and type(ai["think"]) is not bool:
             ai["think"] = None
         ai.setdefault("think", None)
+        if ai.get("online") != "groq":
+            ai["online"] = None
         validated["ai"] = ai
 
     # voice -> dict com model_path (str | None); preserva chaves extras

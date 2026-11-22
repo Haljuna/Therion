@@ -47,7 +47,8 @@ function Get-TherionSttProfile($Config) {
         $Config.ai.endpoint -ne 'http://127.0.0.1:11435/api/chat') { throw 'A configuracao nao corresponde a um perfil aprovado com Jarvis. Nenhuma opcao foi alterada.' }
     if ($Config.voice.provider -eq 'parakeet_http' -and $Config.voice.endpoint -eq 'http://127.0.0.1:3902/v1/audio/transcriptions' -and
         ($edge -or $Config.tts.voicestudio_endpoint -eq 'http://127.0.0.1:3902/v1/audio/speech')) { return 'parakeet' }
-    if ($Config.voice.provider -eq 'whisper' -and $Config.voice.model_path -and [IO.Directory]::Exists($Config.voice.model_path) -and
+    # groq usa o mesmo faster-whisper local como reserva.
+    if ($Config.voice.provider -in @('whisper','groq') -and $Config.voice.model_path -and [IO.Directory]::Exists($Config.voice.model_path) -and
         ($edge -or $Config.tts.voicestudio_endpoint -eq 'http://127.0.0.1:3901/v1/audio/speech')) { return 'whisper' }
     throw 'A configuracao nao corresponde ao perfil Parakeet nem ao perfil faster-whisper. Nenhuma opcao foi alterada.'
 }

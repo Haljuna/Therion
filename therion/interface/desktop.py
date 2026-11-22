@@ -626,7 +626,12 @@ class MainWindow(QMainWindow):
         agent_config = self._config.get('agent', {})
         if agent_config.get('enabled') is True:
             provider_options['context_tokens'] = agent_config.get('context_tokens', 8192)
-        provider = OllamaProvider(model=model, timeout=timeout_seconds, **provider_options)
+        # Groq na nuvem com o Ollama local de reserva, só quando escolhido na configuração.
+        if ai_config.get('online') == 'groq':
+            from therion.core.ai_provider_groq import GroqProvider as provider_class
+        else:
+            provider_class = OllamaProvider
+        provider = provider_class(model=model, timeout=timeout_seconds, **provider_options)
         available_intents = [
             "abrir aplicativo",
             "listar aliases",

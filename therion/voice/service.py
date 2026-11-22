@@ -71,7 +71,7 @@ class VoiceModelService(QObject):
                 return False
 
             model_path = self._model_path
-            if self._provider not in ('whisper', 'parakeet_http'):
+            if self._provider not in ('whisper', 'parakeet_http', 'groq'):
                 self._state = self.STATE_ERROR
                 self._model = None
                 error_msg = 'Provedor de transcrição desconhecido'
@@ -106,6 +106,9 @@ class VoiceModelService(QObject):
                 if self._provider == 'parakeet_http':
                     from therion.voice.http_model import HttpVoiceModel
                     factory = lambda _: HttpVoiceModel(self._endpoint)
+                elif self._provider == 'groq':
+                    from therion.voice.groq_model import GroqVoiceModel
+                    factory = lambda path: GroqVoiceModel(lambda: self._default_factory(path))
                 else:
                     factory = self._default_factory
             instance = factory(str(self._model_path))
