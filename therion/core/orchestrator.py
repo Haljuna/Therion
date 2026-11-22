@@ -2230,14 +2230,27 @@ class Orchestrator(WorkflowSupport, MemorySupport, PersonalContextSupport, Catal
             chosen=(current or {}).get('message_id') if current and current.get('session')==self.session_id and time.monotonic()<current.get('deadline',0) else None
             return OrchestrationResult(status='success',message='A janela de e-mails está aberta.',
                 ui_action='open_mail',ui_payload={'id':chosen} if chosen else None,confirmation_id=self._confirmation_id)
-        from therion.agent.mailbox import mail_count_request,unread_count
+        from therion.agent.mailbox import mail_count_request,mail_today_request,unread_count
         if mail_count_request(command) and self._confirmation_id is None:
             # 18/11: o modelo buscava sem filtro e respondia "nenhum e-mail encontrado".
-            try:counted=unread_count(self._mailbox,CancellationToken(cancelled))
+            today=mail_today_request(command)
+            # Com "hoje": chegaram desde a meia-noite local e, desses, os ainda não lidos.
+            since=f'in:inbox after:{int(self._calendar_now().replace(hour=0,minute=0,second=0,microsecond=0).timestamp())}' if today else None
+            try:
+                token=CancellationToken(cancelled)
+                counted=unread_count(self._mailbox,token,since) if today else unread_count(self._mailbox,token)
+                unread=unread_count(self._mailbox,token,since+' is:unread') if today and counted else None
             except Cancelled:return OrchestrationResult(status='cancelled',message='Contagem de e-mails cancelada.')
             except Exception:return OrchestrationResult(status='partial',message='Não consegui contar os e-mails agora. Isso não significa caixa vazia.')
             if counted is None:return OrchestrationResult(status='clarification',message='O Gmail não está conectado. Conecte a conta no painel de e-mails.')
             total,complete=counted
+            if today:
+                if total==0:return OrchestrationResult(status='success',message='Nenhum e-mail chegou hoje.')
+                more='mais de ' if not complete else ''
+                head=f'Chegou 1 e-mail hoje' if total==1 else f'Chegaram {more}{total} e-mails hoje'
+                if unread[0]==0:tail='já foi lido' if total==1 else 'todos já foram lidos'
+                else:tail='ainda não foi lido' if unread[0]==1 else f'{unread[0]} ainda não foram lidos'
+                return OrchestrationResult(status='success',message=f'{head}; {tail}.')
             if total==0:return OrchestrationResult(status='success',message='Nenhum e-mail não lido na caixa de entrada.')
             noun='e-mail não lido' if total==1 else 'e-mails não lidos'
             return OrchestrationResult(status='success',message=('Você tem ' if complete else 'Você tem mais de ')+f'{total} {noun} na caixa de entrada.')

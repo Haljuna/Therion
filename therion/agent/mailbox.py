@@ -25,14 +25,19 @@ def mail_count_request(command):
     """"Quantos e-mails eu tenho?": conta os não lidos da caixa de entrada, sem o modelo."""
     from therion.context.language import control
     return bool(re.fullmatch(r'(?:quant[oa]s|qual o total de) (?:e[- ]?mails?|e meios?|mensagens)(?: nao lid[oa]s)?'
-        r'(?: (?:eu )?(?:tenho|tem|ha|chegaram))?(?: (?:na|da) (?:minha )?caixa(?: de entrada)?)?(?: nao lid[oa]s)?',control(command)))
+        r'(?: (?:eu )?(?:tenho|tem|ha|chegaram|recebi))?(?: hoje)?(?: (?:na|da) (?:minha )?caixa(?: de entrada)?)?(?: nao lid[oa]s)?(?: hoje)?',control(command)))
+
+
+def mail_today_request(command):
+    from therion.context.language import control
+    return mail_count_request(command) and bool(re.search(r'\bhoje\b',control(command)))
 
 
 UNREAD_CAP=2000
 
 
-def unread_count(box,token):
-    """(quantidade, completa?) dos não lidos na caixa de entrada; só ids, 500 por página."""
+def unread_count(box,token,query='in:inbox is:unread'):
+    """(quantidade, completa?) das mensagens da busca; só ids, 500 por página."""
     account=box.identity()
     if account is None:return None
     found=0;next_page=None;pages=set()
@@ -40,7 +45,7 @@ def unread_count(box,token):
         with box._adapter(account,token) as adapter:
             while found<UNREAD_CAP:
                 box._check(account,token)
-                row=adapter.search('in:inbox is:unread',next_page,limit=500)
+                row=adapter.search(query,next_page,limit=500)
                 found+=len(row.get('messages',[]));next_page=row.get('next_page')
                 if not next_page:return found,True
                 if next_page in pages:break
