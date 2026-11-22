@@ -190,3 +190,15 @@ def test_invalid_duration_cannot_disable_watchdog(service, tmp_path, duration):
     service.sound.isPlaying.return_value = True
     service._playing_changed()
     assert service.playback_timer.interval() == 130000
+
+
+def test_spoken_text_follows_what_is_being_said(service):
+    service.is_ready = True
+    service.process = MagicMock()
+    service.speak('Bom dia.', _hold=True)
+    assert service.spoken_text == 'Bom dia.'
+    service.commit_prefix('Bom dia. Aqui é o Therion.')
+    assert service.spoken_text == 'Bom dia. Aqui é o Therion.'
+    service.stop()
+    assert service.spoken_text == ''
+    service.release()

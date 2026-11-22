@@ -82,6 +82,9 @@ def _get_config_path() -> Path:
     return _CONFIG_PATH
 
 
+_wake_threshold_noticed = False
+
+
 def _validate_config(data: dict[str, Any]) -> dict[str, Any]:
     """Valida campos conhecidos; aplica defaults se inválidos; preserva desconhecidos."""
     validated = DEFAULT_CONFIG.copy()
@@ -127,6 +130,10 @@ def _validate_config(data: dict[str, Any]) -> dict[str, Any]:
     wake = dict(wake) if isinstance(wake, dict) else {}
     threshold = wake.get('threshold')
     if type(threshold) not in (int, float) or not 0.05 <= threshold <= 0.99:
+        global _wake_threshold_noticed
+        if 'threshold' in wake and not _wake_threshold_noticed:
+            _wake_threshold_noticed = True   # uma vez por execução: o config é relido muitas vezes
+            print(f'[config] wake.threshold {threshold!r} fora de 0,05-0,99; usando 0,5.')
         wake['threshold'] = 0.5
     validated['wake'] = wake
 

@@ -58,6 +58,7 @@ class SpeechOutput(QObject):
         self.idle_timer.timeout.connect(self.release)
         self.keep_warm = False
         self.level = 0.0
+        self.spoken_text = ''   # o que está sendo falado agora (a janela ignora o próprio nome nele)
         self._meter_enabled = False
         self._envelope = ()
         self._envelope_started = None
@@ -230,6 +231,7 @@ class SpeechOutput(QObject):
             return False
         self._held_prefix=None
         self._hold_audio=False
+        self.spoken_text=text
         tail=text[len(prefix):]
         self._tail_text=tail if tail.strip() else None
         if self._pending is None:self._dispatch_tail()
@@ -250,6 +252,7 @@ class SpeechOutput(QObject):
             return
         self._hold_audio=_hold
         self._held_prefix=text if _hold else None
+        self.spoken_text = text
         self.folder = Path(tempfile.mkdtemp(prefix='therion-tts-'))
         self._next_part = 0
         self._pending = {'text': text, 'output': str(self.folder/'speech.wav'), 'id': self.generation, 'stream':True}
@@ -409,6 +412,7 @@ class SpeechOutput(QObject):
 
     def stop(self):
         self.generation += 1
+        self.spoken_text = ''
         self._held_prefix=None
         self._hold_audio=False
         self._tail_text=None

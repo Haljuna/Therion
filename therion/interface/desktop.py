@@ -466,6 +466,7 @@ class MainWindow(QMainWindow):
         self._wake_score = None     # disparo ainda sem desfecho no registro
         self._wake_opened = False   # conversa aberta pelo nome: continuação de 8 s e volta a dormir no silêncio
         self._wake_sound = None
+        self._wake_end_after_reply = False   # "para de me ouvir" dentro da conversa: encerra depois de responder
         self._ai_warm_ready = False
         self._ai_preparing = False
         self._ai_warm_token = 0
@@ -1623,8 +1624,12 @@ class MainWindow(QMainWindow):
                 result=OrchestrationResult(status='cancelled',message='A conta ou a sessão mudou. Solicite um novo panorama.')
         if result.ui_action=='game_mode':
             self._set_game_mode((result.ui_payload or {}).get('on') is True)
-        if result.ui_action=='wake_off' and getattr(self, '_wake', None) is not None:
-            self._wake.gate.muted = True   # até reiniciar o Therion
+        if result.ui_action=='wake_off':
+            if getattr(self, '_wake', None) is None:
+                result=replace(result, message='A escuta pelo nome não está ligada agora.', speech_message=None)
+            else:
+                self._wake.gate.muted = True   # até reiniciar o Therion
+                self._wake_end_after_reply = self._conversation_mode
         if result.ui_action=='reminders':   # o depósito mudou: rearma o disparo na hora
             self._arm_reminder_timer()
         if result.ui_action=='open_mail':
@@ -2312,6 +2317,7 @@ class MainWindow(QMainWindow):
         if not listener.start():
             return
         self._wake = listener
+        self._app.aboutToQuit.connect(self._stop_wake)
         from PySide6.QtMultimedia import QSoundEffect
         from PySide6.QtCore import QUrl
         self._wake_sound = QSoundEffect(self)   # carregado já: o som sai na hora do nome
@@ -2364,8 +2370,10 @@ class MainWindow(QMainWindow):
         if self._wake_turn is not None or (pipeline is not None and pipeline.state != VoicePipeline.STATE_IDLE):
             return 'turno de voz aberto'
         speech = self._speech_output
+        spoken = getattr(speech, 'spoken_text', None)
+        spoken = spoken if isinstance(spoken, str) else self._speech_text
         if (speech is not None and speech.state not in {'idle', 'warming'}
-                and 'therion' in (self._speech_text or '').casefold()):
+                and 'therion' in (spoken or '').casefold()):
             return 'a fala tem o nome'   # o detector ouviu a própria voz do Therion
         return None
 
@@ -2378,10 +2386,13 @@ class MainWindow(QMainWindow):
         if reason is not None:
             self._wake_log(score, 'ignorado: ' + reason)
             return
+        self._wake_turn = audio   # antes de parar a fala: o reaquecimento da voz não pode travar a captura
         speech = self._speech_output
         if speech is not None and speech.state not in {'idle', 'warming'}:
             self._stop_speech()
-        self._wake_turn = audio
+            cycle = getattr(self._voice_pipeline, 'cycle', None)
+            if isinstance(cycle, VoiceCycle):
+                cycle.barge_in()
         if not self._conversation_mode:
             # Grava antes de abrir a conversa: o aquecimento da voz trava novas capturas, e a fala logo
             # depois do nome ("Therion, abre o Discord") se perderia esperando por ele.
@@ -2450,6 +2461,7 @@ class MainWindow(QMainWindow):
                 self._tray_icon.hide()
             if hasattr(self._orchestrator, 'close'):
                 self._orchestrator.close()
+            self._closing = True
             self._stop_wake()
             self._shut_mini_orb()
             super().closeEvent(event)
@@ -2480,7 +2492,9 @@ class MainWindow(QMainWindow):
             self._sync_mini_orb()
         cycle = getattr(getattr(self, '_voice_pipeline', None), 'cycle', None)
         if isinstance(cycle, VoiceCycle):
-            cycle.playback(state in {'warming','synthesizing','playing'})
+            # Com o turno do nome pendente, reaquecer a voz (parada pelo nome) não trava a captura.
+            cycle.playback(state in {'synthesizing','playing'}
+                           or (state == 'warming' and getattr(self, '_wake_turn', None) is None))
         self._stop_speech_button.setEnabled(state != 'idle')
         self._listen_button.setText('Gerando voz…' if state in {'synthesizing', 'warming'} else 'Ouvir')
         self._listen_button.setEnabled(state == 'idle' and bool(self._speech_text) and not self._processing and self._pending_plan is None and not self._conversation_mode)
@@ -2781,6 +2795,9 @@ class MainWindow(QMainWindow):
                     self._speech_output.speak(tail)
                     return
             elif self._processing:return
+        if self._conversation_mode and self._wake_end_after_reply:
+            self._end_conversation()
+            return
         if self._conversation_mode:
             self._conversation_listen_after = time.monotonic() + 0.6
             QTimer.singleShot(600, self._try_conversation_listen)
@@ -2797,6 +2814,7 @@ class MainWindow(QMainWindow):
         self._wake_outcome('ignorado: conversa encerrada')
         self._wake_turn = None
         self._wake_opened = False
+        self._wake_end_after_reply = False
         self._conversation_mode = False
         self._last_conversation_spoken = ''
         self._conversation_listen_after = 0.0

@@ -269,3 +269,124 @@ def test_a_voice_that_cannot_warm_up_logs_the_name_as_ignored(app, tmp_path, mon
     assert not window._conversation_mode and pipeline.state == 'idle'
     assert 'ignorado: conversa por voz indisponível' in log_text(tmp_path)
     close(app, window)
+
+
+class CyclePipeline(FakePipeline):
+    """Pipeline falso com o VoiceCycle de verdade: recusa gravar durante a fala, o aquecimento e o antieco."""
+
+    def __init__(self):
+        super().__init__()
+        from therion.voice.cycle import VoiceCycle
+        self.cycle = VoiceCycle()
+
+    @property
+    def ready_to_capture(self):
+        return self.state == 'idle' and self.cycle.can_capture
+
+    @ready_to_capture.setter
+    def ready_to_capture(self, value):
+        pass
+
+    def start(self, **kwargs):
+        if not self.ready_to_capture:
+            return False
+        return super().start(**kwargs)
+
+
+def speaking_window(tmp_path, monkeypatch):
+    """Resposta longa sendo falada; parar mata o processo de voz e reaquecer volta a 'warming', como a SpeechOutput real."""
+    from therion.interface import desktop
+    window, _ = make_window(tmp_path, monkeypatch)
+    pipeline = CyclePipeline()
+    window._voice_pipeline = pipeline
+    speech = window._speech_output
+
+    def set_state(state):
+        speech.state = state
+        window._on_speech_state(state)
+
+    def stop():
+        speech.is_ready = False
+        set_state('idle')
+
+    def warmup():
+        set_state('warming')
+        return True
+    speech.stop.side_effect = stop
+    speech.warmup.side_effect = warmup
+    speech.spoken_text = 'Primeira parte da resposta. Segunda parte.'
+    window._speech_text = 'Primeira parte da resposta. Segunda parte.'
+    return window, pipeline, set_state
+
+
+def test_the_name_during_a_long_answer_records_at_once(app, tmp_path, monkeypatch):
+    window, pipeline, set_state = speaking_window(tmp_path, monkeypatch)
+    set_state('playing')
+    window._on_wake(np.ones(800, np.float32), .8)
+    assert window._conversation_mode
+    assert pipeline.starts and len(pipeline.starts[-1]['preroll']) == 800
+    close(app, window)
+
+
+def test_the_name_during_a_spoken_reply_in_an_open_conversation_records_at_once(app, tmp_path, monkeypatch):
+    window, pipeline, set_state = speaking_window(tmp_path, monkeypatch)
+    window._on_wake(np.ones(800, np.float32), .8)   # abre a conversa
+    window._on_ai_warmed(window._ai_warm_token, True)
+    window._on_voice_transcribed(pipeline.generation, 'Conta uma história.')
+    window._set_processing(False)
+    pipeline.state = 'idle'
+    set_state('playing')                            # a resposta longa começa a sair
+    before = len(pipeline.starts)
+    window._on_wake(np.ones(600, np.float32), .8)
+    assert len(pipeline.starts) == before + 1 and len(pipeline.starts[-1]['preroll']) == 600
+    close(app, window)
+
+
+def test_the_text_actually_spoken_decides_if_the_name_is_an_echo(app, tmp_path, monkeypatch):
+    window, pipeline = make_window(tmp_path, monkeypatch)
+    window._speech_output.state = 'playing'
+    window._speech_output.spoken_text = 'Bom dia, aqui é o Therion com o panorama.'
+    window._speech_text = 'Resposta anterior.'
+    window._on_wake(np.ones(800, np.float32), .8)
+    assert pipeline.starts == [] and 'ignorado: a fala tem o nome' in log_text(tmp_path)
+    close(app, window)
+
+
+def test_stop_listening_without_the_listener_says_it_is_not_on(app, tmp_path, monkeypatch):
+    window, pipeline = make_window(tmp_path, monkeypatch, wake=False)
+    window._apply_command_result(OrchestrationResult(
+        status='success', message='Tudo bem, parei de ouvir pelo nome até o senhor me abrir de novo.', ui_action='wake_off'))
+    assert window._speech_text == 'A escuta pelo nome não está ligada agora.'
+    close(app, window)
+
+
+def test_stop_listening_ends_the_conversation_after_the_answer(app, tmp_path, monkeypatch):
+    window, pipeline = make_window(tmp_path, monkeypatch)
+    window._on_wake(np.ones(800, np.float32), .8)
+    window._on_voice_transcribed(pipeline.generation, 'Para de me ouvir.')
+    window._apply_command_result(OrchestrationResult(
+        status='success', message='Tudo bem, parei de ouvir pelo nome até o senhor me abrir de novo.', ui_action='wake_off'))
+    window._set_processing(False)
+    assert window._conversation_mode   # a resposta ainda vai ser falada
+    window._conversation_playback_finished()
+    assert not window._conversation_mode
+    close(app, window)
+
+
+def test_the_listener_stops_on_about_to_quit_and_on_a_plain_close(app, tmp_path, monkeypatch):
+    window, pipeline = make_window(tmp_path, monkeypatch)
+    window._app.aboutToQuit.connect.assert_any_call(window._stop_wake)
+    window.close()                      # sem bandeja: fecha de verdade
+    assert window._closing and 'stop' in FakeListener.last.calls
+    close(app, window)
+
+
+def test_an_out_of_range_threshold_is_reported_once(capsys, monkeypatch):
+    from therion.config import local
+    monkeypatch.setattr(local, '_wake_threshold_noticed', False, raising=False)
+    local._validate_config({'wake': {'threshold': 2}})
+    local._validate_config({'wake': {'threshold': 2}})
+    out = capsys.readouterr().out
+    assert out.count('wake.threshold') == 1
+    local._validate_config({})
+    assert 'wake.threshold' not in capsys.readouterr().out

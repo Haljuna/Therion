@@ -20,6 +20,12 @@ class VoiceCycle:
             self.playing=bool(active)
             if was_active and not self.playing:self.rearm_after=self.clock()+.6
 
+    def barge_in(self):
+        """O usuário interrompeu a fala (disse o nome): a voz dele não é eco, não espera o rearme."""
+        with self.lock:
+            self.playing=False
+            self.rearm_after=0.0
+
     def state(self,capture_state):
         with self.lock:
             if capture_state in {'starting','recording','finishing'}:return 'capturing'
