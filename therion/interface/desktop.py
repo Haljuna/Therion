@@ -2388,8 +2388,11 @@ class MainWindow(QMainWindow):
             return
         self._wake_turn = audio   # antes de parar a fala: o reaquecimento da voz não pode travar a captura
         speech = self._speech_output
-        if speech is not None and speech.state not in {'idle', 'warming'}:
+        speaking = speech is not None and speech.state not in {'idle', 'warming'}
+        if speaking:
             self._stop_speech()
+        # Fala parada pelo nome, ou voz reaquecendo de uma parada anterior: nada disso é eco, grava já.
+        if speaking or (speech is not None and speech.state == 'warming'):
             cycle = getattr(self._voice_pipeline, 'cycle', None)
             if isinstance(cycle, VoiceCycle):
                 cycle.barge_in()

@@ -390,3 +390,19 @@ def test_an_out_of_range_threshold_is_reported_once(capsys, monkeypatch):
     assert out.count('wake.threshold') == 1
     local._validate_config({})
     assert 'wake.threshold' not in capsys.readouterr().out
+
+
+def test_the_name_while_the_voice_rewarms_after_a_stop_records_at_once(app, tmp_path, monkeypatch):
+    window, pipeline, set_state = speaking_window(tmp_path, monkeypatch)
+    window._on_wake(np.ones(800, np.float32), .8)   # abre a conversa
+    window._on_ai_warmed(window._ai_warm_token, True)
+    window._on_voice_transcribed(pipeline.generation, 'Conta uma história.')
+    window._set_processing(False)
+    pipeline.state = 'idle'
+    set_state('playing')
+    window._stop_speech()        # botão parar: mata o processo e reaquece, sem nome pendente
+    assert window._speech_output.state == 'warming'
+    before = len(pipeline.starts)
+    window._on_wake(np.ones(600, np.float32), .8)
+    assert len(pipeline.starts) == before + 1 and len(pipeline.starts[-1]['preroll']) == 600
+    close(app, window)
