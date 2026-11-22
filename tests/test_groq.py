@@ -78,8 +78,21 @@ def test_silence_never_reaches_groq_nor_local_fallback(monkeypatch):
     assert segments == [] and not sent and not loads
 
 
+def test_quiet_request_followed_by_trailing_silence_still_reaches_groq(monkeypatch):
+    # 0,3 s de fala baixa (RMS ~0.003) + 0,7 s de silêncio: o RMS do trecho inteiro seria ~0.0017.
+    audio = np.concatenate([_tone(0.0042, 1)[:4800], np.full(11200, 0.001, dtype=np.float32)])
+    segments, sent, _ = _voice_with(monkeypatch, ' Que horas são?', audio)
+    assert sent == [1] and segments[0].text.strip() == 'Que horas são?'
+
+
+def test_silence_line_boundary(monkeypatch):
+    below = _voice_with(monkeypatch, 'oi', _tone(0.0025))  # RMS ~0.0018
+    above = _voice_with(monkeypatch, 'oi', _tone(0.003))   # RMS ~0.0021
+    assert not below[1] and above[1] == [1]
+
+
 def test_classic_hallucination_on_weak_audio_is_dropped_without_local(monkeypatch):
-    segments, sent, loads = _voice_with(monkeypatch, ' Tchau.', _tone(0.01))
+    segments, sent, loads = _voice_with(monkeypatch, ' Tchau.', _tone(0.006))
     assert segments == [] and sent == [1] and not loads
 
 

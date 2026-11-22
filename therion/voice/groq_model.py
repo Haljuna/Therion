@@ -14,12 +14,22 @@ from therion.voice.http_model import wav_bytes
 LOCAL_IDLE_SECONDS = 300
 # A Groq aceita até 25 MB; 10 min de WAV 16 kHz dão ~19 MB. A conversa contínua pode passar de 30 s.
 GROQ_MAX_SAMPLES = 16000 * 600
-# RMS do trecho inteiro. 0.004 é o piso de "tem voz" do endpointing; abaixo da metade disso é silêncio.
+# RMS da janela de 100 ms mais forte (não do trecho): a captura sempre leva >=0,7 s de silêncio no fim,
+# que diluiria uma fala baixa. 0.004 é o piso de "tem voz" do endpointing; abaixo da metade é silêncio.
+WINDOW = 1600
 SILENCE_RMS = 0.002
-# Entre o piso (0.004) e o teto (0.025) do limiar de voz do endpointing; o trecho inteiro inclui pausas.
-WEAK_RMS = 0.01
+# Pouco acima do piso 0.004: ruído que passou pelo VAD fica abaixo; fala real, mesmo baixa, passa disso.
+WEAK_RMS = 0.006
 HALLUCINATIONS = ('tchau', 'obrigado', 'obrigada', 'inscreva-se', 'e ai')
 HALLUCINATION_PREFIXES = ('legenda',)  # cobre "legendas pela comunidade amara.org" e "legenda por ..."
+
+
+def _loudest_rms(data):
+    data = data.astype(np.float64)
+    frames = len(data) // WINDOW
+    if not frames:
+        return float(np.sqrt(np.mean(np.square(data))))
+    return float(np.sqrt(np.mean(np.square(data[:frames * WINDOW].reshape(frames, WINDOW)), axis=1).max()))
 
 
 def _normalized(text):
@@ -45,15 +55,18 @@ class GroqVoiceModel:
         data = np.asarray(audio)
         if data.ndim != 1 or not len(data) or not np.isfinite(data).all():
             raise ValueError('Áudio inválido: esperado mono 16 kHz')
-        rms = float(np.sqrt(np.mean(np.square(data, dtype=np.float64))))
+        rms = _loudest_rms(data)
         if rms < SILENCE_RMS:
+            print('[Therion] Áudio em silêncio; não enviado à Groq.')
             return [], SimpleNamespace(language='pt')  # silêncio: a Groq inventaria fala
         try:
             if len(data) > GROQ_MAX_SAMPLES:
                 raise groq.GroqUnavailable('Áudio longo demais para a Groq.')
             result = self._groq(data, options)
             # Em áudio fraco a Groq devolve "Tchau." etc. com confiança alta; falado de verdade, com energia normal, passa.
-            if rms < WEAK_RMS and _hallucination(' '.join(seg.text for seg in result[0])):
+            heard = ' '.join(seg.text for seg in result[0]).strip()
+            if rms < WEAK_RMS and _hallucination(heard):
+                print(f'[Therion] Groq inventou "{heard}" em áudio fraco; descartado.')
                 result = ([], result[1])
         except groq.GroqUnavailable as error:
             print(f'[Therion] Groq indisponível ({error}); transcrevendo no PC.')
