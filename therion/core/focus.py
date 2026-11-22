@@ -25,9 +25,10 @@ NOT_SAVED = 'Não consegui salvar o foco agora.'
 
 _DUR = (rf'(?:(?P<half>meia\s+hora)|(?P<n>{_COUNT})\s*(?P<unit>horas?|h|minutos?|min)'
         rf'(?:\s+e\s+(?:(?P<more_half>meia)|(?P<more>{_COUNT})(?:\s*(?:minutos?|min))?))?)')
-_START = re.compile(
-    r'^(?:(?:ativa|ative|ativar|liga|ligue|ligar|inicia|inicie|iniciar|comeca|comece|comecar|entra|entre|entrar|coloca|bota)\s+'
-    rf'(?:(?:no|o|um|em)\s+)*)?(?:modo\s+)?foco(?:\s+(?:de|por|em))?(?:\s+{_DUR})?$')
+_START_HEAD = (r'^(?:(?:ativa|ative|ativar|liga|ligue|ligar|inicia|inicie|iniciar|comeca|comece|comecar|entra|entre|entrar|coloca|bota)\s+'
+               r'(?:(?:no|o|um|em)\s+)*)?(?:modo\s+)?foco')
+_START = re.compile(rf'{_START_HEAD}(?:\s+(?:(?:de|por|em)\s+)?{_DUR})?$')
+_START_DANGLING = re.compile(rf'{_START_HEAD}\s+(?:de|por|em)$')   # preposição sem duração: frase cortada
 _WANT = re.compile(rf'^(?:vou|quero|preciso|vamos)\s+(?:focar|entrar\s+em\s+foco)(?:\s+(?:por|durante|de|em))?(?:\s+{_DUR})?$')
 _EXTEND = re.compile(
     r'^(?:(?:estica|estique|esticar|prolonga|prolongue|prolongar|aumenta|aumente|aumentar)\s+(?:o\s+)?(?:foco\s+)?(?:em\s+|por\s+|mais\s+)?|mais\s+)'
@@ -228,7 +229,7 @@ def settle(now):
     if after is before:
         return None
     if before.phase == 'focus':
-        store().add_minutes(end_at(before).date(), before.minutes)
+        store().add_minutes(before.start.date(), before.minutes)
     return before
 
 
@@ -247,7 +248,7 @@ def _text(command):
 
 
 def focus_request(command):
-    """Sem estado e sem efeito: ('start', min|None), ('extend', min), ('stop',), ('left',), ('pause', min|None), ('stop_pause',) ou None."""
+    """Sem estado e sem efeito: ('start', min|None), ('ask_duration',), ('extend', min), ('stop',), ('left',), ('pause', min|None), ('stop_pause',) ou None."""
     text = _text(command)
     if _STOP_PAUSE.match(text):
         return ('stop_pause',)
@@ -261,6 +262,8 @@ def focus_request(command):
         return ('pause', _minutes(found))
     if _PAUSE_BARE.match(text):
         return ('pause', None)
+    if _START_DANGLING.match(text):
+        return ('ask_duration',)
     if found := _START.match(text) or _WANT.match(text):
         return ('start', _minutes(found) if found['n'] or found['half'] else None)
     return None
@@ -476,6 +479,12 @@ def _start(minutes, state, now):
     return _begin('focus', minutes, now)
 
 
+def _ask_duration(state, now):
+    if _active(state, now) and state.phase == 'focus':
+        return _start(None, state, now)
+    return f'Por quantos minutos? Diga, por exemplo, foco de {DEFAULT_FOCUS} minutos.', None
+
+
 def _pause(minutes, state, now):
     if _active(state, now):
         who = 'Você está em foco' if state.phase == 'focus' else 'Você já está em pausa'
@@ -484,6 +493,8 @@ def _pause(minutes, state, now):
         minutes = pause_minutes()
     if not MIN_PAUSE <= minutes <= MAX_PAUSE:
         return f'Dá para fazer pausas de {MIN_PAUSE} a {MAX_PAUSE} minutos.', None
+    if state.phase == 'off':   # a pausa pedida à mão vem depois de um foco; a oferta do fim usa _accept
+        return 'Você não está em foco.', None
     return _begin('pause', minutes, now)
 
 
@@ -508,7 +519,7 @@ def _stop(state, now):
         return 'Você não está em foco.', None
     done = min(state.minutes, max(0, int((now - state.start).total_seconds() // 60)))
     if done:
-        store().add_minutes(now.date(), done)
+        store().add_minutes(state.start.date(), done)
     return 'Foco encerrado.', {'phase': 'off', 'minutes': done, 'start': state.start.isoformat(timespec='seconds'),
                                'ended': True, 'held': list(state.held)}
 
@@ -536,7 +547,8 @@ def answer(command, host, now=None):
     """(texto, ui_payload) ou None. Ofertas pendentes valem 2 min e só para a próxima frase."""
     now = (now or datetime.now()).replace(microsecond=0)
     routed = _route(command, host, now)
-    if getattr(host, '_focus_offer', None) is not None:
+    spent = getattr(host, '_focus_offer', None)
+    if spent is not None and host._focus_offer is spent:   # uma oferta armada por outro no meio do turno é outro objeto e fica
         host._focus_offer = None
     if routed is None:
         return None
@@ -547,6 +559,8 @@ def answer(command, host, now=None):
     try:
         if kind == 'start':
             return _start(args[0], state, now)
+        if kind == 'ask_duration':
+            return _ask_duration(state, now)
         if kind == 'extend':
             return _extend(args[0], state, now)
         if kind == 'stop':

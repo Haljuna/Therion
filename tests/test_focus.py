@@ -43,6 +43,9 @@ def host():
     ('quero focar', ('start', None)),
     ('começa um foco', ('start', None)),
     ('foco 200 minutos', ('start', 200)),
+    ('foco em', ('ask_duration',)),
+    ('foco de', ('ask_duration',)),
+    ('ativa o modo foco por', ('ask_duration',)),
     ('mais 10 minutos', ('extend', 10)),
     ('estica o foco em 15 minutos', ('extend', 15)),
     ('sai do foco', ('stop',)),
@@ -131,6 +134,7 @@ def test_stop_without_focus_or_right_away(box, host):
 
 
 def test_pause_by_phrase_and_end_of_pause(box, host):
+    box.save(FocusState('focus', NOW - timedelta(minutes=50), 50, []))   # o foco acabou de acabar; sem foco não há pausa
     text, payload = answer('pausa de 10 minutos', host, NOW)
     assert text == 'Pausa de 10 minutos, até as 15h.' and payload['phase'] == 'pause' and payload['minutes'] == 10
     assert answer('quanto falta', host, NOW + timedelta(minutes=4))[0] == 'Faltam 6 minutos de pausa.'
@@ -418,3 +422,25 @@ def test_timer_look_warn_last_five_minutes():
     pause = FocusState('pause', START, 10, [])
     look = focus.timer_look(pause, end_at(pause) - timedelta(seconds=120))
     assert look.phase == 'pause' and not look.warn                        # a pausa não fica âmbar
+
+
+def test_pause_without_focus_says_there_is_none(box, host):
+    assert answer('faz uma pausa', host, NOW) == ('Você não está em foco.', None)
+    assert answer('pausa de 10 minutos', host, NOW) == ('Você não está em foco.', None)
+    assert box.state().phase == 'off'
+
+
+def test_dangling_preposition_asks_for_the_duration(box, host):
+    text, payload = answer('foco em', host, NOW)
+    assert text == 'Por quantos minutos? Diga, por exemplo, foco de 50 minutos.' and payload is None
+    assert box.state().phase == 'off'
+
+
+def test_stop_and_natural_end_credit_the_day_the_focus_started(box, host):
+    start = datetime(2026, 11, 18, 23, 40)
+    box.save(FocusState('focus', start, 50, []))
+    assert answer('sai do foco', host, datetime(2026, 11, 19, 0, 10))[1]['minutes'] == 30
+    assert box.today(date(2026, 11, 18)) == 30 and box.today(date(2026, 11, 19)) == 0
+    box.save(FocusState('focus', start, 50, []))
+    focus.settle(datetime(2026, 11, 19, 0, 30))
+    assert box.today(date(2026, 11, 18)) == 80 and box.today(date(2026, 11, 19)) == 0

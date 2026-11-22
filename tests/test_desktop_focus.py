@@ -1,4 +1,5 @@
 """A janela no modo foco: segura avisos, resume no fim com e-mails, oferece pausa e retoma ao reabrir."""
+import threading
 import time
 from datetime import date, datetime, timedelta
 from types import SimpleNamespace
@@ -304,3 +305,22 @@ def test_without_voice_the_offer_starts_when_written(app, window, shared):
     shared.save(FocusState('pause', now - timedelta(minutes=10), 10, []))
     window._focus_due(now)
     assert window.said == ['Pausa acabou. Mais 50 minutos de foco?'] and window._orchestrator._focus_offer[1] == 'again'
+
+
+def test_overlapping_focus_mail_cancels_the_previous_count(app, window, shared, monkeypatch):
+    seen, release = [], threading.Event()
+
+    def slow(host, start, token, timeout=10.):
+        seen.append(token)
+        release.wait(5)
+        return None if token.cancelled else MAIL
+    monkeypatch.setattr(focus, 'focus_mail', slow)
+    start = datetime(2026, 11, 22, 9)
+    window._focus_finished(30, start, [])
+    first, first_token = window._focus_mail_thread, window._focus_mail_token
+    window._focus_finished(30, start, [])
+    assert first_token.cancelled and not window._focus_mail_token.cancelled   # o segundo foco cancela a contagem do primeiro
+    release.set()
+    first.join(5)
+    settle_mail(app, window)
+    assert len(spoken(window)) == 1

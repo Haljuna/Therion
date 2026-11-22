@@ -117,3 +117,38 @@ def test_agent_host_leaves_the_offer_answer_to_the_local_route(agent_orch):
 def test_agent_host_would_take_the_phrase_without_the_focus_check(agent_orch, monkeypatch):
     monkeypatch.setattr(focus, 'wanted', lambda *args, **kwargs: False)
     assert agent_orch._dispatch_agent('vou focar 30 minutos') is not None
+
+
+def test_answer_uses_the_orchestrator_clock(orch):
+    result = orch.process_command('foco 30 minutos')
+    assert result.message == 'Foco de 30 minutos, até as 10h30. Seguro meus avisos até lá; seus lembretes continuam valendo.'
+    assert orch.focus_store.state().start == datetime(2026, 10, 9, 10)
+
+
+def test_offer_armed_mid_turn_survives_the_local_route(orch, monkeypatch):
+    armed = (time.monotonic() + 120, 'pause')
+
+    def reminder(command, host):
+        host._focus_offer = armed   # a janela arma a oferta no meio do turno
+        return 'ok'
+    monkeypatch.setattr(voice_reminders, 'answer', reminder)
+    orch.process_command('qualquer coisa')
+    assert orch._focus_offer is armed
+    cleanup = time.monotonic() + 120
+
+    def focused(command, host, now=None):
+        host._pc_cleanup_offer = cleanup
+        return 'ok', None
+    monkeypatch.setattr(voice_reminders, 'answer', lambda command, host: None)
+    monkeypatch.setattr(focus, 'answer', focused)
+    orch.process_command('outra coisa')
+    assert orch._pc_cleanup_offer == cleanup
+
+
+def test_stale_phrase_spends_the_offers(orch):
+    import threading
+    focus.offer(orch, 'pause')
+    cancelled = threading.Event()
+    cancelled.set()
+    result = orch.process_session_command('foco', orch._session_id, orch._confirmation_id, cancelled=cancelled)
+    assert result.status == 'cancelled' and orch._focus_offer is None

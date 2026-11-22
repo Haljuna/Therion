@@ -909,10 +909,11 @@ class Orchestrator(WorkflowSupport, MemorySupport, PersonalContextSupport, Catal
         """Entrada do worker: valida o contexto capturado antes de processar."""
         with self._operation_lock:
             self._sync_knowledge_access()
+            before = self._pendings()   # antes do retorno obsoleto: a frase descartada também gasta as ofertas
             if ((cancelled is not None and cancelled.is_set())
                     or session_id != self._session_id or confirmation_id != self._confirmation_id):
+                self._spend_pendings(before)
                 return self._stale_confirmation()
-            before = self._pendings()
             try:
                 self._workflow_cancel_event=cancelled if cancelled is not None else threading.Event()
                 navigation=self._mail_navigation(command,cancelled,presentation)
@@ -2481,19 +2482,18 @@ class Orchestrator(WorkflowSupport, MemorySupport, PersonalContextSupport, Catal
             from therion.core.pc_cleanup import answer as pc_cleanup
             from therion.core.voice_reminders import answer as reminder_answer
             from therion.core.focus import answer as focus_answer
+            before = self._pendings()
             reminder = reminder_answer(command, self)
             if reminder is not None:
-                self._pc_cleanup_offer = None   # a oferta de limpeza vale só para a próxima frase
-                self._focus_offer = None
+                self._spend_pendings(before)   # as ofertas valem só para a próxima frase (por identidade: a rearmada fica)
                 result = OrchestrationResult(status='success', message=reminder,
                     ui_action='reminders' if self.__dict__.pop('_reminders_changed', False) else None)
                 self._complete_task()
                 self._finalize_session_result(result)
                 return result
-            focused = focus_answer(command, self)
+            focused = focus_answer(command, self, self._now_func().replace(tzinfo=None) if self._now_func else None)
             if focused is not None:
-                self._pc_cleanup_offer = None   # só uma oferta pendente é dona do "sim"
-                self._reminder_pending = None
+                self._spend_pendings(before)   # só uma oferta pendente é dona do "sim"
                 result = OrchestrationResult(status='success', message=focused[0],
                     ui_action='focus' if focused[1] else None, ui_payload=focused[1])
                 self._complete_task()

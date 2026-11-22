@@ -312,7 +312,7 @@ class _ConfirmationWorker(QThread):
 class MainWindow(QMainWindow):
     """Janela principal mínima do Therion."""
     _warm_finished = Signal(int, bool)
-    _focus_mail_ready = Signal(object)   # (minutos focados, avisos guardados, e-mails) da thread do fim do foco
+    _focus_mail_ready = Signal(object)   # (minutos focados, avisos guardados, e-mails, começo) da thread do fim do foco
     # Reuso curto evita um segundo preload ao clicar depois da abertura. Não é
     # monitoramento da saúde do Ollama; falhas reais invalidam a prontidão.
     _AI_READY_TTL_SECONDS = 60
@@ -1343,6 +1343,8 @@ class MainWindow(QMainWindow):
             return
         from therion.agent.contracts import CancellationToken
         from therion.core import focus
+        if self._focus_mail_token is not None:
+            self._focus_mail_token.cancel()   # dois focos seguidos: a contagem do anterior não fala depois da deste
         token = self._focus_mail_token = CancellationToken()
         host, ready = self._orchestrator, self._focus_mail_ready
         def count():
@@ -1350,8 +1352,10 @@ class MainWindow(QMainWindow):
                 mail = focus.focus_mail(host, start, token)
             except Exception:
                 mail = {'error': True}   # caixa sem conta configurada ou estado inesperado: o resto da fala sai
+            if token.cancelled:
+                return
             try:
-                ready.emit((minutes_done, list(held), mail))
+                ready.emit((minutes_done, list(held), mail, start))
             except RuntimeError:
                 pass   # a janela já foi fechada
         self._focus_mail_thread = threading.Thread(target=count, name='therion-focus-mail', daemon=True)
@@ -1362,9 +1366,9 @@ class MainWindow(QMainWindow):
         if self._closing or self._quit_requested:
             return
         from therion.core import focus
-        minutes_done, held, mail = row
+        minutes_done, held, mail, start = row
         try:
-            today = focus.store().today(datetime.now().date())
+            today = focus.store().today(start.date())   # o foco conta no dia em que começou
         except OSError:
             today = minutes_done
         # Fala em tela cheia e no modo jogo, igual ao lembrete; a oferta de pausa é a dona do próximo "sim".
@@ -1392,7 +1396,7 @@ class MainWindow(QMainWindow):
             if ended is None or ended.phase != 'focus':
                 return
             end = focus.end_at(ended)
-            today = focus.store().today(now.date()) if end.date() == now.date() else None
+            today = focus.store().today(now.date()) if ended.start.date() == now.date() else None
         except OSError:
             return
         self._speak_when_free(focus.closed_text(end, today), may_speak_quiet=True)   # sem e-mails nem oferta
