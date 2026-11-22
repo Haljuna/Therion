@@ -172,13 +172,22 @@ def wanted(command, host):
     """Sem consumir a oferta: a frase é para a limpeza? (o agente deixa a rota local responder)."""
     deadline = getattr(host, '_pc_cleanup_offer', None)
     text = control(command).rstrip('?!. ').replace(',', '')
-    return bool(_ASK.fullmatch(control(command).rstrip('?!. '))) or (
+    return bool(_ASK.fullmatch(control(command).rstrip('?!. ')) or cleanup_then_game(command)) or (
         deadline is not None and time.monotonic() < deadline and text in _YES | _NO)
 
 
 def cleanup_request(command):
     """O pedido "libera espaço", sem oferta pendente."""
     return _ASK.fullmatch(control(command).rstrip('?!. ')) is not None
+
+
+def cleanup_then_game(command):
+    """"Libera espaço e vai para o modo de jogo": devolve a parte da limpeza, ou None."""
+    from therion.core.local_reports import game_mode_request
+    match = re.fullmatch(r'(.+?),? e (?:depois |ja )?(.+)', control(command).rstrip('?!. '))
+    if match and cleanup_request(match[1]) and game_mode_request(match[2]) is True:
+        return match[1]
+    return None
 
 
 def answer(command, host, runner=None):

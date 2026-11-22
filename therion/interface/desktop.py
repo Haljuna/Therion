@@ -236,6 +236,18 @@ STYLESHEET = (
 )
 
 
+def log_autonomy_error(error, path=None):
+    """Traceback só no PC: a tela mostra o tipo; aqui fica a causa (21/11: "TypeError" sem rastro)."""
+    import traceback
+    path = Path(path) if path else Path(os.environ.get('LOCALAPPDATA', str(Path.home() / 'AppData' / 'Local'))) / 'Therion' / 'logs' / 'autonomia-erros.txt'
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        old = path.read_text(encoding='utf-8', errors='replace')[-20000:] if path.exists() else ''
+        path.write_text(old + f'--- {datetime.now():%d/%m/%Y %H:%M:%S}\n' + ''.join(traceback.format_exception(error)), encoding='utf-8')
+    except OSError:
+        pass   # registrar não pode derrubar as rotinas
+
+
 class ConversationInput(QPlainTextEdit):
     """Campo de entrada multilinha: Enter envia, Shift+Enter insere quebra."""
 
@@ -948,6 +960,7 @@ class MainWindow(QMainWindow):
             try:
                 return poll()
             except Exception as error:
+                log_autonomy_error(error)
                 # Só o tipo: a mensagem do erro pode ter caminho ou dado pessoal.
                 raise RuntimeError(type(error).__name__) from error
         def poll():

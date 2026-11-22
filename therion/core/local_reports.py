@@ -24,9 +24,10 @@ _PC = re.compile(
 _PROJECT = re.compile(
     r'(?:como (?:esta|ta|anda|vai)|(?:qual (?:e )?)?(?:o )?(?:status|estado|situacao) d[oe]) (?:o |a )?(projeto )?(.+?)' + _POLITE)
 _GAME = r'(?:o |a )?mod[oa]s? (?:de )?(?:jogo|game)'  # o Whisper ouve "moda de jogo"
-_GAME_ON = re.compile(r'(?:(?:ativa|ative|ativar|liga|ligue|ligar|entra n|entre n|entrar n|coloca n|inicia|inicie)(?:o | o | )?)?' + _GAME + '|vou jogar(?: agora)?' + _POLITE)
+_GAME_ON = re.compile(r'(?:(?:ativa|ative|ativar|liga|ligue|ligar|entra n|entre n|entrar n|coloca n|bota n|inicia|inicie|vai para|vai pra|vai pro|vamos para|vamos pra|vamos pro)(?:o | o | )?)?' + _GAME + '|vou jogar(?: agora)?' + _POLITE)
 _GAME_OFF = re.compile(r'(?:desativa|desative|desativar|desliga|desligue|desligar|sai d|saia d|sair d|encerra|encerre|tira d)(?:o | o | )?' + _GAME
                        + r'|parei de jogar|terminei de jogar|modo normal' + _POLITE)
+_VAULT = re.compile(r'(?:como (?:esta|ta|anda|vai)|(?:qual (?:e )?)?(?:o )?(?:status|estado|situacao) d[oe]) (?:o |meu )?segundo cerebro' + _POLITE)
 _WAKE_OFF = re.compile(r'(?:para|pare|parar) de me (?:ouvir|escutar)' + _POLITE)
 _GB = 1024 ** 3
 
@@ -58,7 +59,7 @@ def wake_off_request(command):
 
 
 def report_request(command, projects=None):
-    """('day',) | ('pc',) | ('game', ligar) | ('project', nome, caminho) | ('unknown_project', nomes) | None."""
+    """('day',) | ('pc',) | ('vault',) | ('game', ligar) | ('project', nome, caminho) | ('unknown_project', nomes) | None."""
     text = control(command).rstrip('?!. ')
     game = game_mode_request(command)
     if game is not None:
@@ -67,6 +68,8 @@ def report_request(command, projects=None):
         return ('day',)
     if _PC.fullmatch(text):
         return ('pc',)
+    if _VAULT.fullmatch(text):
+        return ('vault',)
     match = _PROJECT.fullmatch(text)
     if not match:
         return None
@@ -92,6 +95,24 @@ def _git(path, *args):
 
 def _plural(count, one, many):
     return f'{count} {one if count == 1 else many}'
+
+
+def vault_report(vault):
+    """Só o que se lê na hora: quantos itens esperam na Entrada (contar o cofre todo leva ~20 s)."""
+    entrada = Path(vault) / '00 - Entrada'
+    if not entrada.is_dir():
+        return 'Não encontrei a pasta do Segundo Cérebro.'
+    try:
+        items = [p for p in entrada.iterdir() if p.is_file() and p.name != 'Entrada.md' and not p.name.startswith('.')]
+        attachments = entrada / 'Anexos para organizar'
+        if attachments.is_dir():
+            items += [p for p in attachments.iterdir() if not p.name.startswith('.')]
+    except OSError:
+        return 'Não consegui ler a Entrada do Segundo Cérebro agora.'
+    if not items:
+        return 'No Segundo Cérebro, a Entrada está vazia: nada esperando organização.'
+    noun = 'item esperando' if len(items) == 1 else 'itens esperando'
+    return f'No Segundo Cérebro, a Entrada tem {len(items)} {noun} organização.'
 
 
 def project_note(name, vault=None):
@@ -253,6 +274,9 @@ def answer(command, host):
             return pc_report(_measure())
         except (OSError, AttributeError):
             return 'Não consegui medir a memória e os discos agora.'
+    if request[0] == 'vault':
+        from therion.context.second_brain import SecondBrainReader
+        return vault_report(SecondBrainReader.DEFAULT_VAULT_ROOT)
     if request[0] == 'project':
         return project_status(request[1], request[2], note=project_note(request[1]))
     names = ', '.join(request[1])

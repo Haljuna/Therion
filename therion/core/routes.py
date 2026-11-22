@@ -41,9 +41,9 @@ def fixed_route(phrase, projects=None):
     from therion.core.local_reports import game_mode_request, report_request, wake_off_request
     if wake_off_request(phrase):
         return 'wake_off'
-    if game_mode_request(phrase) is not None:
+    from therion.core.pc_cleanup import cleanup_request, cleanup_then_game
+    if game_mode_request(phrase) is not None or cleanup_then_game(phrase):
         return 'modo jogo'
-    from therion.core.pc_cleanup import cleanup_request
     if cleanup_request(phrase):
         return 'limpar espaço'
     if report_request(phrase, projects) is not None:

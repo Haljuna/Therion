@@ -2512,12 +2512,21 @@ class Orchestrator(WorkflowSupport, MemorySupport, PersonalContextSupport, Catal
                 self._complete_task()
                 self._finalize_session_result(result)
                 return result
+            from therion.core.pc_cleanup import cleanup_then_game
             game = game_mode_request(command)
+            # 20/11: "libera espaço e vai para o modo de jogo" foi à IA, que disse ter limpado sem limpar.
+            both = cleanup_then_game(command)
+            if both:
+                game = True
             # "sim" à oferta de limpeza do vigia do PC, ou "libera espaço"; outra frase cancela a oferta.
-            report = pc_cleanup(command, self)
-            report = report if report is not None else local_report(command, self) if game is None else (
+            report = pc_cleanup(both or command, self)
+            game_text = None if game is None else (
                 'Modo jogo ligado. Libero a placa de vídeo e seguro os avisos até o senhor mandar sair.' if game
                 else 'Modo jogo desligado.')
+            if both:
+                report = f'{report} {game_text}'
+            elif report is None:
+                report = local_report(command, self) if game is None else game_text
             if report is not None:
                 result = OrchestrationResult(status='success', message=report,
                     ui_action='game_mode' if game is not None else None, ui_payload={'on': game} if game is not None else None)
