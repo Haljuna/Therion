@@ -65,6 +65,12 @@ class AudioCaptureService:
             return bool(self._endpoint and self._endpoint.speech_seconds >= 0.2)
 
     @property
+    def speech_started_after(self):
+        """Segundos do início da captura até a primeira voz (vale depois do stop, até a próxima captura)."""
+        with self._lock:
+            return self._endpoint.first_voice if self._endpoint else None
+
+    @property
     def input_stalled(self):
         with self._lock:
             return self._recording and time.monotonic() - self._last_frame_at > 3

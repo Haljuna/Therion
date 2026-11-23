@@ -171,6 +171,10 @@ class VoicePipeline(QObject):
         return self._capture.has_speech
 
     @property
+    def speech_started_after(self):
+        return getattr(self._capture, 'speech_started_after', None)
+
+    @property
     def last_confidence(self):
         return getattr(self._transcription, 'last_confidence', None)
 

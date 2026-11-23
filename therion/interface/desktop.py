@@ -236,6 +236,9 @@ STYLESHEET = (
 )
 
 
+CONVERSATION_WINDOW_SECONDS = 8.0
+
+
 def log_autonomy_error(error, path=None):
     """Traceback só no PC: a tela mostra o tipo; aqui fica a causa (21/11: "TypeError" sem rastro)."""
     import traceback
@@ -2110,8 +2113,14 @@ class MainWindow(QMainWindow):
         ("Libere espaço") e respostas a -0,51 ("Cinco horas"), por isso esses dois casos nunca são ignorados.
         """
         import re
-        confidence = getattr(getattr(self, '_voice_pipeline', None), 'last_confidence', None)
-        if not isinstance(confidence, float) or confidence >= -0.5:
+        pipeline = getattr(self, '_voice_pipeline', None)
+        confidence = getattr(pipeline, 'last_confidence', None)
+        # 22/11, escolha A: na conversa aberta, fala que começou mais de 8 s depois da última resposta
+        # (ou da abertura) e sem o nome é de fundo, mesmo clara. Fora da conversa (tecla) vale só a confiança.
+        started, heard = getattr(pipeline, 'speech_started_after', None), getattr(self, '_conversation_heard_at', None)
+        late = (getattr(self, '_conversation_mode', False) and isinstance(started, (int, float)) and isinstance(heard, float)
+                and getattr(self, '_conversation_capture_started_at', 0.0) + started - heard > CONVERSATION_WINDOW_SECONDS)
+        if not late and (not isinstance(confidence, float) or confidence >= -0.5):
             return False
         if getattr(self, '_wake_score', None) is not None:   # chamou pelo nome (o áudio inicial corta o nome do texto)
             return False
@@ -2127,6 +2136,8 @@ class MainWindow(QMainWindow):
                 or getattr(getattr(orchestrator, '_conversation_frame', None), 'question', None)
                 or '?' in (getattr(self, '_last_conversation_spoken', '') or '')):
             return False
+        if late:
+            return True   # fora da janela, nem regra fixa passa sem o nome
         from therion.core.routes import fixed_route
         return fixed_route(text) is None
 
@@ -2596,6 +2607,7 @@ class MainWindow(QMainWindow):
         if self._processing or self._pending_plan is not None or not self._speech_output:
             return
         self._conversation_mode = True
+        self._conversation_heard_at = time.monotonic()   # abrir a conversa conta como falar com ele
         self._conversation_generation += 1
         self._begin_preparation()
         self._conversation_primed = False
@@ -2842,6 +2854,7 @@ class MainWindow(QMainWindow):
             self._end_conversation()
             return
         if self._conversation_mode:
+            self._conversation_heard_at = time.monotonic()   # a janela de 8 s da resposta começa aqui
             self._conversation_listen_after = time.monotonic() + 0.6
             QTimer.singleShot(600, self._try_conversation_listen)
 

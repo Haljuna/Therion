@@ -79,3 +79,49 @@ def test_oferta_vencida_nao_desliga_o_filtro_da_fala_de_fundo():
     agora = time.monotonic()
     assert MainWindow._background_speech(voz([agora - 1, None, (agora - 1, 'pick', ())]), 'Boa logo!')
     assert not MainWindow._background_speech(voz([None, (agora + 60, 'pick', ())]), 'Boa logo!')
+
+
+def _conversa(texto_ate_a_fala, *, confianca=-0.06, pendentes=(), modo=True, aberta_em=100.0, captura_em=105.0):
+    from types import SimpleNamespace
+    pipeline = SimpleNamespace(last_confidence=confianca, speech_started_after=texto_ate_a_fala)
+    return SimpleNamespace(_voice_pipeline=pipeline, _conversation_awaiting_response=False, _last_conversation_spoken='',
+                           _conversation_mode=modo, _conversation_heard_at=aberta_em, _conversation_capture_started_at=captura_em,
+                           _orchestrator=SimpleNamespace(confirmation_id=None, _conversation_frame=SimpleNamespace(question=None),
+                                                         _pendings=lambda: list(pendentes)))
+
+
+def test_conversa_aberta_so_responde_ao_nome_ou_ate_8_s_depois_da_resposta():
+    # 22/11, escolha A: "amanhã vai chover lá em casa..." veio da sala com confiança -0,06 e foi respondida.
+    import time
+    from therion.interface.desktop import MainWindow
+    fundo = MainWindow._background_speech
+    frase = 'Ah, eu acho que amanhã vai chover lá em casa, sabe?'
+    assert not fundo(_conversa(2.0), frase)                     # começou a falar 7 s depois: ainda é com ele
+    assert fundo(_conversa(4.0), frase)                         # 9 s depois, sem o nome: conversa de fundo
+    assert fundo(_conversa(40.0), 'libera espaço')              # nem regra fixa passa fora da janela
+    assert not fundo(_conversa(40.0), 'Therion, libera espaço')  # com o nome, sempre
+    assert not fundo(_conversa(40.0, pendentes=[time.monotonic() + 60]), 'sim')   # resposta a uma oferta viva
+    assert not fundo(_conversa(40.0, modo=False), frase)        # fora da conversa (tecla): fala clara é pedido
+
+
+def test_sem_medida_do_inicio_da_fala_a_janela_nao_ignora():
+    from therion.interface.desktop import MainWindow
+    assert not MainWindow._background_speech(_conversa(None), 'Ah, eu acho que amanhã vai chover lá em casa, sabe?')
+
+
+def test_captura_diz_quando_a_fala_comecou():
+    import numpy as np
+    from therion.voice.capture import AudioCaptureService
+    from tests.test_voice_capture import FakeInputStream
+    streams = []
+    def factory(**kwargs):
+        streams.append(FakeInputStream(**kwargs)); return streams[-1]
+    voz = iter([False, False, True, True, True])
+    service = AudioCaptureService(stream_factory=factory, activity_factory=lambda: (lambda s: next(voz, False)))
+    service.start(automatic=True)
+    assert service.speech_started_after is None
+    for _ in range(5):
+        streams[0].feed(1280, 0.0)
+    assert abs(service.speech_started_after - 0.16) < 1e-6   # dois blocos de 80 ms antes da voz
+    service.stop()
+    assert abs(service.speech_started_after - 0.16) < 1e-6   # continua valendo para quem trata o texto depois
