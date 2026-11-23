@@ -162,7 +162,7 @@ def test_panorama_lista_e_conta_no_mesmo_worker(mailbox):
 # --- Itens 15 a 17 (respondidos pelo usuário em 20/11) ---
 def _voz(confianca, pergunta=None, falado=''):
     return SimpleNamespace(_voice_pipeline=SimpleNamespace(last_confidence=confianca), _conversation_awaiting_response=False,
-                           _last_conversation_spoken=falado,
+                           _last_conversation_spoken=falado, _last_conversation_spoken_at=time.monotonic(),
                            _orchestrator=SimpleNamespace(confirmation_id=None, _conversation_frame=SimpleNamespace(question=pergunta)))
 
 
