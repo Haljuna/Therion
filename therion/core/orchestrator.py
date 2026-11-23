@@ -2949,7 +2949,12 @@ class Orchestrator(WorkflowSupport, MemorySupport, PersonalContextSupport, Catal
             elif ai_response is not None and ai_response.type in ("chat", "clarification"):
                 from therion.context.response_style import normalize_model_greeting
                 ai_response = replace(ai_response, message=normalize_model_greeting(command, ai_response.message))
-                from therion.agent.claims import unsupported_claim
+                from therion.agent.claims import invented_clock, unsupported_claim
+                if invented_clock(ai_response.message):
+                    self._complete_task()
+                    result=OrchestrationResult(status='clarification',message="Não entendi bem. Se quiser saber as horas, pergunte 'que horas são?'.")
+                    self._finalize_session_result(result)
+                    return result
                 if unsupported_claim(ai_response.message,[]):
                     self._complete_task()
                     result=OrchestrationResult(status='clarification',message='Não há execução verificada para confirmar essa ação. Diga o pedido e o aplicativo; nenhuma ação foi executada por esta resposta.')

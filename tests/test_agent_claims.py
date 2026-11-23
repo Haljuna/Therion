@@ -54,3 +54,50 @@ def test_passive_wording_after_a_successful_read_is_not_blocked():
     from therion.agent.contracts import ToolCall,ToolResult
     read=[(ToolCall('list_inbox',{}),ToolResult('success',data={'tasks':[]}))]
     assert not unsupported_claim('A tarefa foi concluída ontem.',read)
+
+
+def test_active_claims_without_any_tool_are_unsupported():
+    # 20-23/11: "estou registrando", "espaço liberado", "modo de jogo ativo" sem nenhuma ação feita.
+    for message in ('Entendido, senhor. Estou registrando sua solicitação de manter os itens ativos.',
+                    'Espaço liberado com sucesso. Modo de jogo ativo.',
+                    'Registrei o pedido.','Anotei, senhor.','Ativei o modo foco.','Feito com sucesso.'):
+        assert unsupported_claim(message,[]),message
+    for message in ('Bom dia, senhor. Como posso ajudar?','Não registrei nada.','Ainda não liberei espaço.'):
+        assert not unsupported_claim(message,[]),message
+    read=[(ToolCall('list_inbox',{}),ToolResult('success',data={'tasks':[]}))]
+    assert not unsupported_claim('Registrei o que a lista mostra.',read)
+
+
+def test_invented_clock_is_detected():
+    from therion.agent.claims import invented_clock
+    assert invented_clock('Sim, senhor. As horas são 15:21:05.')
+    assert invented_clock('São 9:05 agora.')
+    assert not invented_clock('A reunião é às 15:00, senhor.')
+    assert not invented_clock('Bom dia, senhor.')
+
+
+@pytest.mark.parametrize('message',['Entendido, senhor. Estou registrando sua solicitação de manter os itens ativos. Se precisar de qualquer ajuste, estarei à disposição.',
+                                    'Espaço liberado com sucesso. Modo de jogo ativo.'])
+def test_legacy_chat_cannot_claim_action_in_progress_or_done(case,message):
+    from therion.core.ai_provider import AIResponse
+    host,provider,_,_=case
+    provider.generate.return_value=AIResponse(type='chat',message=message)
+    result=host.process_command('Me conta uma novidade')
+    assert result.status=='clarification',result.message
+    assert 'registrando' not in result.message and 'liberado' not in result.message
+
+
+def test_legacy_chat_cannot_state_the_time(case):
+    from therion.core.ai_provider import AIResponse
+    host,provider,_,_=case
+    provider.generate.return_value=AIResponse(type='chat',message='Sim, senhor. As horas são 15:21:05.')
+    result=host.process_command('Me conta uma novidade')
+    assert '15:21' not in result.message and 'que horas' in result.message
+
+
+def test_legacy_chat_ordinary_reply_is_kept(case):
+    from therion.core.ai_provider import AIResponse
+    host,provider,_,_=case
+    provider.generate.return_value=AIResponse(type='chat',message='Bom dia, senhor. Como posso ajudar?')
+    result=host.process_command('Me conta uma novidade')
+    assert result.status=='success' and 'Como posso ajudar' in result.message

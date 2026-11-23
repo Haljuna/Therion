@@ -8,10 +8,21 @@ CLAIMS=re.compile(r'\b(?:enviei|enviamos|mandei|foi enviad[oa]|salvei|salvamos|f
 # Com leitura bem-sucedida a frase pode relatar o que a fonte mostra, então não entra aqui.
 PASSIVE=re.compile(r'\b(?:foi|foram)\s+(?:registrad|aplicad|encerrad|conclu[ií]d|cancelad|agendad|marcad|adicionad|removid|apagad|exclu[ií]d|atualizad)[oa]s?\b',re.I)
 
+# 23/11: "Estou registrando sua solicitação..." e "Espaço liberado. Modo de jogo ativo." sem ferramenta nenhuma.
+ACTIVE=re.compile(r'\b(?:estou|estamos|vou)\s+(?:registrando|anotando|salvando|liberando|ativando|enviando|agendando|criando|abrindo|apagando)\b'
+    r'|\b(?:registrei|anotei|salvei|liberei|ativei|enviei|agendei|criei|abri|apaguei)\b'
+    r'|\bespa[çc]o liberado\b|\bmodo de jogo ativo\b|\b(?:conclu[ií]d[oa]|feito|liberado|ativado)\s+com sucesso\b',re.I)
+CLOCK=re.compile(r'\b(?:s[ãa]o\s+\d{1,2}:\d{2}|as horas s[ãa]o)',re.I)
+
+
+def invented_clock(message):
+    """A hora quem responde é o próprio app; o modelo só a inventaria (23/11: "15:21:05" falso)."""
+    return CLOCK.search(message) is not None
+
 
 def unsupported_claim(message,results):
     if not any(row.status=='success' for _,row in results):
-        for claim in PASSIVE.finditer(message):
+        for claim in list(PASSIVE.finditer(message))+list(ACTIVE.finditer(message)):
             clause=re.split(r'[.!?;,\n]|\bmas\b|\be\b',message[:claim.start()],flags=re.I)[-1][-40:]
             if not re.search(r'\b(?:não|nao|nunca|nada|nenhum\w*)\b',clause,re.I):return True
     # Uma citação literal de e-mail lido não anuncia uma ação do assistente.
