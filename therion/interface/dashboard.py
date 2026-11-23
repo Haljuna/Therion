@@ -37,7 +37,9 @@ QFrame#card { background:transparent; border:0; }
 QLabel#heading { font-size:22px; font-weight:600; }
 QToolButton#activityLauncher { padding:6px; }
 QFrame#statusPill { background:rgba(20,19,30,184); border:1px solid rgba(255,255,255,23); border-radius:14px; }
-QLabel#healthDot { color:#B5B1C5; font-size:12px; }
+QLabel#healthDot { color:#B5B1C5; font-size:12px; border:1px solid transparent; border-radius:8px; padding:0 3px; }
+QLabel#healthDot[clickable="true"]:hover { color:#F1F0F7; }
+QLabel#healthDot[clickable="true"]:focus { border-color:#C4B5FD; }
 QLabel#navBadge { background:#282036; color:#C4B5FD; border-radius:9px; font-size:11px; font-weight:600; }
 QLabel#greetingKicker { color:#C4B5FD; font-size:11px; letter-spacing:3px; }
 QLabel#greetingTitle { color:#F1F0F7; font-size:22px; font-weight:600; }
@@ -180,6 +182,23 @@ class _ElidedLabel(QLabel):
         super().resizeEvent(event);self.elide()
 
 
+class ClickableDot(QLabel):
+    """Ponto de saúde que também é botão (Nome): clique, Enter e Espaço."""
+    clicked=Signal()
+
+    def __init__(self,text=''):
+        super().__init__(text);self.setProperty('clickable',True)
+        self.setCursor(Qt.PointingHandCursor);self.setFocusPolicy(Qt.StrongFocus)
+
+    def mouseReleaseEvent(self,event):
+        if event.button()==Qt.LeftButton and self.rect().contains(event.position().toPoint()):self.clicked.emit()
+        super().mouseReleaseEvent(event)
+
+    def keyPressEvent(self,event):
+        if event.key() in (Qt.Key_Return,Qt.Key_Enter,Qt.Key_Space):self.clicked.emit()
+        else:super().keyPressEvent(event)
+
+
 class HomeGlance(QFrame):
     """Agenda, tarefas e e-mails já lidos pelo painel; não dispara consultas novas."""
     STYLE = """
@@ -308,8 +327,10 @@ class Dashboard(QWidget):
         self.status = label('Pronto para conversar','state'); self.status.setMaximumWidth(290); self.status.setWordWrap(False); pill.addWidget(self.status)
         divider=QFrame();divider.setFixedSize(1,16);divider.setStyleSheet('background:#373244;');pill.addWidget(divider)
         self.health_dots={}
-        for key,title in [('ai','IA'),('voice','Voz'),('stt','Parakeet'),('mail','Gmail')]:
-            dot=QLabel(title);dot.setObjectName('healthDot');dot.setTextFormat(Qt.RichText);dot.setWordWrap(False)
+        for key,title in [('ai','IA'),('voice','Voz'),('stt','Parakeet'),('mail','Gmail'),('wake','Nome')]:
+            dot=ClickableDot(title) if key=='wake' else QLabel(title)
+            dot.setObjectName('healthDot');dot.setTextFormat(Qt.RichText);dot.setWordWrap(False)
+            if key=='wake':dot.clicked.connect(lambda:w._toggle_wake())
             pill.addWidget(dot);self.health_dots[key]=(dot,title)
         top.addWidget(self.status_pill)
         self.clock=label(datetime.now().astimezone().strftime('%d/%m/%Y   ·   %H:%M'),'clock');self.clock.setWordWrap(False);top.addWidget(self.clock)
@@ -1351,7 +1372,11 @@ class Dashboard(QWidget):
         levels=dict(ai='ok' if ai else 'off',voice='ok' if tts else 'off',
             stt=('hidden' if not stt_expected else 'ok' if stt_status=='ready' else 'error' if stt_status in {'error','offline'} else 'warn'),
             mail=('ok' if mail_state=='ready' else 'error' if mail_state=='error' else 'warn' if mail_state in {'stale','loading','partial'} else 'off'))
-        words=dict(ai=lines[0],voice=lines[1],stt=lines[2],mail=lines[4])
+        wake=(getattr(self.window,'_wake_state',None) or (lambda:None))()   # só nesta sessão: não lê nem grava a config
+        levels['wake']={'on':'ok','off':'off','problem':'warn'}.get(wake,'hidden')
+        words=dict(ai=lines[0],voice=lines[1],stt=lines[2],mail=lines[4],
+            wake={'on':'Ouvindo o nome · clique para pausar','off':'Escuta do nome pausada · clique para religar',
+                  'problem':'Microfone com problema · clique para tentar de novo'}.get(wake,''))
         return dict(ai=ai,tts=tts,summary='\n'.join(lines),levels=levels,words=words)
 
     HEALTH_COLORS={'ok':'#86EFAC','warn':'#FCD34D','error':'#FCA5A5','off':'#6E6A80'}

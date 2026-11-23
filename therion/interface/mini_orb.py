@@ -183,11 +183,12 @@ class MiniOrb(QWidget):
     reading_ready = Signal(dict)
 
     def __init__(self, *, path, renderer_factory=OrbGL, reader=full_reading, on_open_main=None,
-                 key_state=_key_down, cursor_pos=QCursor.pos):
+                 on_toggle_wake=None, key_state=_key_down, cursor_pos=QCursor.pos):
         super().__init__()
         _floating(self)
         self.setFixedSize(ORB_PX, ORB_PX)
         self._path, self._reader, self._on_open_main = path, reader, on_open_main
+        self._on_toggle_wake, self._wake_state = on_toggle_wake, None   # None: escuta pelo nome indisponível, sem ação
         self._key_state, self._cursor_pos, self._last_full = key_state, cursor_pos, None
         self._visual, self._busy, self._pending = 'idle', False, False
         self._thread, self._press, self._dragged = None, None, False
@@ -263,6 +264,10 @@ class MiniOrb(QWidget):
             self._renderer.reduced = quiet
         self._sync_renderer()
 
+    def set_wake(self, state):
+        """'on' | 'off' | 'problem' | None, o mesmo estado do ponto "Nome" da janela."""
+        self._wake_state = state
+
     def set_game(self, on):
         """Modo de jogo ligado pelo usuário: arcos e núcleo vermelhos."""
         if not self._shut and self._renderer is not None:
@@ -333,6 +338,11 @@ class MiniOrb(QWidget):
     def contextMenuEvent(self, event):
         menu = QMenu(self)
         menu.addAction('Abrir o Therion', lambda: self._on_open_main and self._on_open_main())
+        if self._wake_state is not None:
+            wake = menu.addAction('Ouvir meu nome')
+            wake.setCheckable(True)
+            wake.setChecked(self._wake_state in ('on', 'problem'))
+            wake.triggered.connect(lambda checked: self._on_toggle_wake and self._on_toggle_wake(checked))
         menu.addAction('Esconder até reiniciar', self._dismiss)
         menu.exec(event.globalPos())
 

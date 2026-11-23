@@ -379,7 +379,7 @@ class MainWindow(QMainWindow):
         self._mini_orb = None
         if (self._config.get('ui') or {}).get('mini_orb') is True:
             self._mini_orb = MiniOrb(path=os.path.join(os.environ.get('LOCALAPPDATA', ''), 'Therion', 'mini_orb.json'),
-                                     on_open_main=self._show_window)
+                                     on_open_main=self._show_window, on_toggle_wake=self._on_wake_menu)
             self._mini_orb.show()
         # Lembretes por voz e foco não têm chave de config: o tique de 30 s roda sempre (reserva do disparo na hora).
         self._reminder_timer.start()
@@ -477,6 +477,10 @@ class MainWindow(QMainWindow):
         self._last_conversation_spoken = ''
         self._conversation_capture_started_at = 0.0
         self._wake = None
+        self._wake_wired = False    # sinais e som ligados uma vez só (religar pelo controle não duplica)
+        self._wake_offered = False  # o ouvinte já subiu ao menos uma vez: só então o controle aparece
+        self._wake_trouble = False  # microfone ou detector com problema (âmbar até o próximo disparo)
+        self._wake_action = None    # ação "Ouvir meu nome" da bandeja
         self._wake_turn = None      # áudio depois do nome, à espera da primeira captura
         self._wake_mark = None      # ponto do disparo no buffer do detector
         self._wake_score = None     # disparo ainda sem desfecho no registro
@@ -886,6 +890,11 @@ class MainWindow(QMainWindow):
         tray_menu.addAction(action_show)
 
         action_quit = QAction("Encerrar Therion", self)
+        self._wake_action = QAction('Ouvir meu nome', self)
+        self._wake_action.setCheckable(True)
+        self._wake_action.triggered.connect(self._on_wake_menu)
+        tray_menu.addAction(self._wake_action)
+        self._wake_state_changed()
         if self._autonomy_runtime is not None:
             action_autonomy = QAction('Autonomia', self)
             action_autonomy.triggered.connect(self._show_autonomy)
@@ -1645,7 +1654,7 @@ class MainWindow(QMainWindow):
             if getattr(self, '_wake', None) is None:
                 result=replace(result, message='A escuta pelo nome não está ligada agora.', speech_message=None)
             else:
-                self._stop_wake()   # fecha o microfone do detector até reiniciar o Therion
+                self._stop_wake()   # fecha o microfone do detector até o clique no ponto "Nome" ou reiniciar
                 self._wake_end_after_reply = self._conversation_mode
         if result.ui_action=='reminders':   # o depósito mudou: rearma o disparo na hora
             self._arm_reminder_timer()
@@ -2339,24 +2348,75 @@ class MainWindow(QMainWindow):
         self._shut_mini_orb()
         self._app.quit()
 
-    def _start_wake(self):
-        """Palavra de ativação (ui.wake_word): só com o modelo baixado; sem ele o Therion segue como antes."""
+    def _wake_path(self):
         path = os.path.join(os.environ.get('LOCALAPPDATA', ''), 'Therion', 'wake', 'therion.onnx')
-        if (self._config.get('ui') or {}).get('wake_word') is not True or not os.path.isfile(path):
-            return
-        self._wake_heard.connect(self._on_wake)
-        self._wake_problem.connect(self._on_wake_problem)
+        return path if (self._config.get('ui') or {}).get('wake_word') is True and os.path.isfile(path) else None
+
+    def _start_wake(self):
+        """Palavra de ativação (ui.wake_word): só com o modelo baixado; sem ele o Therion segue como antes.
+        Também religa a escuta pelo controle "Nome" (23/11): a ligação dos sinais e o som são feitos uma vez só."""
+        path = self._wake_path()
+        if path is None:
+            return False
+        if not self._wake_wired:
+            self._wake_wired = True
+            self._wake_heard.connect(self._on_wake)
+            self._wake_problem.connect(self._on_wake_problem)
         threshold = (self._config.get('wake') or {}).get('threshold', 0.7)
         listener = WakeListener(path, self._emit_wake, threshold=threshold, on_problem=self._emit_wake_problem)
         if not listener.start():
-            return
+            return False
         self._wake = listener
-        self._app.aboutToQuit.connect(self._stop_wake)
-        from PySide6.QtMultimedia import QSoundEffect
-        from PySide6.QtCore import QUrl
-        self._wake_sound = QSoundEffect(self)   # carregado já: o som sai na hora do nome
-        self._wake_sound.setSource(QUrl.fromLocalFile(str(_WAKE_SOUND_PATH)))
-        self._wake_sound.setVolume(0.35)
+        self._wake_trouble = False
+        self._wake_offered = True
+        if self._wake_sound is None:
+            self._app.aboutToQuit.connect(self._stop_wake)
+            from PySide6.QtMultimedia import QSoundEffect
+            from PySide6.QtCore import QUrl
+            self._wake_sound = QSoundEffect(self)   # carregado já: o som sai na hora do nome
+            self._wake_sound.setSource(QUrl.fromLocalFile(str(_WAKE_SOUND_PATH)))
+            self._wake_sound.setVolume(0.35)
+        self._wake_state_changed()
+        return True
+
+    def _wake_state(self):
+        """'on' | 'off' | 'problem' | None (sem escuta pelo nome disponível: o controle some)."""
+        if self._wake is not None:
+            return 'problem' if self._wake_trouble else 'on'
+        return 'off' if self._wake_offered and self._wake_path() is not None else None
+
+    def _wake_state_changed(self):
+        """Um só lugar que atualiza o ponto "Nome", a mini orbe e a bandeja."""
+        state = self._wake_state()
+        dashboard = getattr(self, '_dashboard', None)
+        if dashboard is not None:
+            dashboard._render_health(dashboard.service_health())
+        if getattr(self, '_mini_orb', None) is not None:
+            self._mini_orb.set_wake(state)
+        action = getattr(self, '_wake_action', None)
+        if action is not None:
+            action.setVisible(state is not None)
+            action.setChecked(state in ('on', 'problem'))
+
+    def _wake_enable(self):
+        if self._wake is not None:   # com problema: recomeça do zero
+            self._stop_wake()
+        if not self._start_wake():
+            self._append('Therion', 'Não consegui religar a escuta pelo nome.')
+        self._wake_state_changed()
+
+    def _toggle_wake(self):
+        """Clique no ponto "Nome": liga e desliga só nesta sessão (não grava ui.wake_word)."""
+        if self._wake_state() == 'on':
+            self._stop_wake()
+        else:
+            self._wake_enable()
+
+    def _on_wake_menu(self, checked=True):
+        if checked:
+            self._wake_enable()
+        else:
+            self._stop_wake()
 
     def _emit_wake(self, audio, score):
         # Roda na entrega do disparo (thread do detector): a marca lida aqui é a deste disparo.
@@ -2377,9 +2437,14 @@ class MainWindow(QMainWindow):
         wake, self._wake = getattr(self, '_wake', None), None
         if wake is not None:
             wake.stop()
+        self._wake_trouble = False
+        if not (self._closing or self._quit_requested):
+            self._wake_state_changed()
 
     @Slot(str)
     def _on_wake_problem(self, kind):
+        self._wake_trouble = True
+        self._wake_state_changed()
         self._append('Therion', 'Não consegui abrir o microfone para ouvir meu nome; tento de novo sozinho.'
                      if kind == 'microfone' else 'O detector do meu nome falhou; tento de novo sozinho.')
 
@@ -2429,6 +2494,9 @@ class MainWindow(QMainWindow):
     @Slot(object, float, object)
     def _on_wake(self, audio, score, mark=None):
         """O detector ouviu o nome: abre um turno de voz que começa pelo áudio dito logo depois dele."""
+        if self._wake_trouble:   # um disparo real prova que o microfone voltou
+            self._wake_trouble = False
+            self._wake_state_changed()
         reason = self._wake_ignored()
         if reason is None and not self._conversation_mode and (self._pending_plan is not None or self._speech_output is None):
             reason = 'conversa por voz indisponível'

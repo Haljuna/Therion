@@ -354,3 +354,39 @@ def test_a_screen_going_away_pulls_the_orb_back_inside(app, tmp_path, monkeypatc
     window._reclamp()
     assert window.pos() == QPoint(1920 - mini_orb.ORB_PX, 300)
     window.shut()
+
+
+def test_the_listen_for_my_name_action_shows_only_when_available_and_toggles(app, tmp_path, monkeypatch):
+    from PySide6.QtGui import QAction, QContextMenuEvent
+    from therion.interface import mini_orb
+    seen = []
+
+    class FakeMenu:
+        def __init__(self, _parent):
+            self.items = []
+
+        def addAction(self, text, callback=None):
+            action = QAction(text)
+            if callback:
+                action.triggered.connect(callback)
+            self.items.append(action)
+            return action
+
+        def exec(self, _pos):
+            seen.append([(a.text(), a.isCheckable(), a.isChecked()) for a in self.items])
+            wake = [a for a in self.items if a.text() == 'Ouvir meu nome']
+            if wake:
+                wake[0].trigger()
+    toggled = []
+    window, _ = make(tmp_path, on_toggle_wake=lambda checked: toggled.append(checked))
+    monkeypatch.setattr(mini_orb, 'QMenu', FakeMenu)
+    event = QContextMenuEvent(QContextMenuEvent.Mouse, QPoint(1, 1))
+    window.contextMenuEvent(event)
+    assert [t for t, *_ in seen[-1]] == ['Abrir o Therion', 'Esconder até reiniciar']   # indisponível: escondida
+    window.set_wake('on')
+    window.contextMenuEvent(event)
+    assert ('Ouvir meu nome', True, True) in seen[-1] and len(toggled) == 1
+    window.set_wake('off')
+    window.contextMenuEvent(event)
+    assert ('Ouvir meu nome', True, False) in seen[-1]
+    window.shut()

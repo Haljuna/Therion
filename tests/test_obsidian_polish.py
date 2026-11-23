@@ -125,3 +125,22 @@ def test_right_column_and_badges_on_wide_home(window):
     d.set_badge('tasks',3);assert d.nav_badges['tasks'].text()=='3' and not d.nav_badges['tasks'].isHidden()
     d.set_badge('tasks',0);assert d.nav_badges['tasks'].isHidden()
     assert not d.greeting_title.isHidden() and d.greeting_title.text()=='Como posso ajudar?'
+
+
+def test_name_dot_follows_the_listening_state_and_click_toggles(window):
+    d=scene(window)
+    state={'v':None}
+    window._wake_state=lambda:state['v']
+    window._toggle_wake=lambda:state.update(v='off' if state['v']=='on' else 'on')
+    dot=d.health_dots['wake'][0]
+    d._render_health(d.service_health())
+    assert dot.isHidden()   # sem modelo ou com a escuta desligada na configuração
+    for value,color,word in [('on','#86EFAC','pausar'),('off','#6E6A80','religar'),('problem','#FCD34D','tentar de novo')]:
+        state['v']=value;d._render_health(d.service_health())
+        assert not dot.isHidden() and color in dot.text() and word in dot.toolTip() and dot.accessibleName()==dot.toolTip()
+    state['v']='on';d._render_health(d.service_health())
+    dot.clicked.emit();assert state['v']=='off'
+    from PySide6.QtTest import QTest
+    from PySide6.QtCore import Qt
+    QTest.keyClick(dot,Qt.Key_Space);assert state['v']=='on'
+    assert dot.cursor().shape()==Qt.PointingHandCursor and dot.focusPolicy()==Qt.StrongFocus

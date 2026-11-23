@@ -591,3 +591,94 @@ def test_stop_listening_ends_the_conversation_even_when_the_answer_is_cut(app, t
     assert not window._conversation_mode and len(pipeline.starts) == before
     assert window._speech_text == 'Tudo bem, parei de ouvir pelo nome até o senhor me abrir de novo.'
     close(app, window)
+
+
+def test_clicking_the_name_control_turns_listening_off_and_on_without_doubling_triggers(app, tmp_path, monkeypatch):
+    window, pipeline = make_window(tmp_path, monkeypatch)
+    assert window._wake_state() == 'on'
+    window._toggle_wake()
+    assert window._wake is None and window._wake_state() == 'off'
+    window._toggle_wake()
+    assert window._wake_state() == 'on' and FakeListener.last.calls == ['start']   # ouvinte novo
+    close(app, window)
+
+
+def test_re_enabling_connects_the_signals_and_the_sound_only_once(app, tmp_path, monkeypatch):
+    window, pipeline = make_window(tmp_path, monkeypatch)
+    sound = window._wake_sound
+    window._toggle_wake()
+    window._toggle_wake()
+    assert window._wake_sound is sound
+    calls = []
+    monkeypatch.setattr(type(window), '_wake_ignored', lambda self: calls.append(1) or 'teste')
+    FakeListener.last.on_wake(np.ones(800, np.float32), .9)
+    assert calls == [1]   # o _on_wake real foi ligado uma vez só
+    close(app, window)
+
+
+def test_stop_listening_by_voice_turns_the_control_off_and_the_click_brings_it_back(app, tmp_path, monkeypatch):
+    window, pipeline = make_window(tmp_path, monkeypatch)
+    window._apply_command_result(OrchestrationResult(status='success', message='Tudo bem.', ui_action='wake_off'))
+    assert window._wake_state() == 'off'
+    window._toggle_wake()
+    assert window._wake_state() == 'on'
+    window._apply_command_result(OrchestrationResult(status='success', message='Tudo bem.', ui_action='wake_off'))
+    assert window._wake_state() == 'off'   # o comando de voz continua valendo depois de religar
+    close(app, window)
+
+
+def test_a_microphone_problem_turns_the_control_amber_and_a_click_retries(app, tmp_path, monkeypatch):
+    window, pipeline = make_window(tmp_path, monkeypatch)
+    first = FakeListener.last
+    first.kwargs['on_problem']('microfone')
+    assert window._wake_state() == 'problem'
+    window._toggle_wake()
+    assert window._wake_state() == 'on' and FakeListener.last is not first and 'stop' in first.calls
+    first_again = FakeListener.last
+    first_again.kwargs['on_problem']('microfone')
+    assert window._wake_state() == 'problem'
+    window._on_wake(np.ones(800, np.float32), .9)   # um disparo real prova que o microfone voltou
+    assert window._wake_state() == 'on'
+    close(app, window)
+
+
+def test_the_name_control_is_hidden_without_the_model_or_with_wake_word_off(app, tmp_path, monkeypatch):
+    window, pipeline = make_window(tmp_path, monkeypatch, wake=False)
+    assert window._wake_state() is None
+    close(app, window)
+    window, pipeline = make_window(tmp_path / 'sem-modelo', monkeypatch, model=False)
+    assert window._wake_state() is None
+    close(app, window)
+
+
+def test_the_name_control_is_never_written_to_the_config(app, tmp_path, monkeypatch):
+    window, pipeline = make_window(tmp_path, monkeypatch)
+    window._toggle_wake()
+    window._toggle_wake()
+    assert window._config['ui']['wake_word'] is True
+    close(app, window)
+
+
+def test_a_failed_re_enable_says_so_and_stays_off(app, tmp_path, monkeypatch):
+    window, pipeline = make_window(tmp_path, monkeypatch)
+    window._toggle_wake()
+    monkeypatch.setattr(FakeListener, 'start', lambda self: False)
+    window._toggle_wake()
+    assert window._wake_state() == 'off'
+    assert 'Não consegui religar a escuta pelo nome.' in window._history.toPlainText()
+    close(app, window)
+
+
+def test_the_tray_action_follows_the_state(app, tmp_path, monkeypatch):
+    from PySide6.QtGui import QAction
+    window, pipeline = make_window(tmp_path, monkeypatch)
+    window._wake_action = QAction('Ouvir meu nome', window)
+    window._wake_action.setCheckable(True)
+    window._wake_action.triggered.connect(window._on_wake_menu)   # como em _setup_tray
+    window._wake_state_changed()
+    assert window._wake_action.isChecked()
+    window._wake_action.trigger()   # desmarcar desliga
+    assert window._wake_state() == 'off' and not window._wake_action.isChecked()
+    window._wake_action.trigger()
+    assert window._wake_state() == 'on' and window._wake_action.isChecked()
+    close(app, window)
