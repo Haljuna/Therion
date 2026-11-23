@@ -2957,7 +2957,7 @@ class Orchestrator(WorkflowSupport, MemorySupport, PersonalContextSupport, Catal
                     return result
                 if unsupported_claim(ai_response.message,[]):
                     self._complete_task()
-                    result=OrchestrationResult(status='clarification',message='Não há execução verificada para confirmar essa ação. Diga o pedido e o aplicativo; nenhuma ação foi executada por esta resposta.')
+                    result=OrchestrationResult(status='clarification',message='Não fiz nada ainda: não entendi bem o pedido. Pode repetir?')
                     self._finalize_session_result(result)
                     return result
                 # Uma pergunta escrita pelo modelo não é uma proposta executável.

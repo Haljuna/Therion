@@ -36,7 +36,7 @@ def test_legacy_chat_cannot_publish_passive_effect_without_receipt(case,message)
     provider.generate.return_value=AIResponse(type='chat',message=message)
     result=host.process_command('Me conta uma novidade')
     assert result.status=='clarification',result.message
-    assert 'Não há execução verificada' in result.message
+    assert result.message=='Não fiz nada ainda: não entendi bem o pedido. Pode repetir?'
     assert 'foi aberto' not in result.message and 'foi fechado' not in result.message
 
 
