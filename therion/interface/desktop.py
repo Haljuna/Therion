@@ -936,7 +936,7 @@ class MainWindow(QMainWindow):
         dashboard=getattr(self,'_dashboard',None)
         if dashboard is not None and dashboard.active:
             return dashboard.open_autonomy()
-        self._end_conversation()
+        self._end_conversation('autonomia')
         if self._autonomy_panel is None or getattr(self._autonomy_panel,'_surface_dashboard',None) is not None:
             from therion.interface.autonomy_panel import AutonomyPanel
             self._autonomy_panel = AutonomyPanel(self, self._autonomy_runtime,
@@ -1468,7 +1468,7 @@ class MainWindow(QMainWindow):
                 or self._closing or not isinstance(self._orchestrator, Orchestrator)
                 or worker.knowledge_policy_epoch == self._orchestrator._knowledge_policy_epoch):
             return
-        self._end_conversation()
+        self._end_conversation('política mudou')
         self._stop_speech()
         self._speech_text = ''
         self._pending_plan = None
@@ -1617,12 +1617,12 @@ class MainWindow(QMainWindow):
         dashboard = getattr(self, '_dashboard', None)
         if dashboard is not None and dashboard.action_worker is not None:
             dashboard.action_worker.token.cancel()
-            self._end_conversation()
+            self._end_conversation('tarefa cancelada')
             self._stop_speech()
             self._poll_workflow_progress()
             return
         self._orchestrator.cancel_workflow()
-        self._end_conversation()
+        self._end_conversation('tarefa cancelada')
         self._stop_speech()
         if self._processing:
             self._workflow_label.setText('Cancelando etapas restantes…')
@@ -1673,7 +1673,7 @@ class MainWindow(QMainWindow):
             (result.confirmation_id is not None and result.status in {'success', 'clarification'}))
         if result.status in {'ai_unavailable', 'ai_timeout', 'ai_invalid_response'}:
             self._invalidate_ai_readiness()
-            self._end_conversation()
+            self._end_conversation('IA indisponível')
 
         if result.registered_plan_id is not None:
             self._orchestrator.ack_registered_plan_displayed(
@@ -1773,7 +1773,7 @@ class MainWindow(QMainWindow):
                 self._quit_application()
 
     def _show_confirmation_error(self) -> None:
-        self._end_conversation()
+        self._end_conversation('erro na confirmação')
         self._pending_plan = None
         self._update_orbe("error")
         self._append("Therion", "Ocorreu um erro inesperado ao processar a confirmação.")
@@ -1917,13 +1917,13 @@ class MainWindow(QMainWindow):
                 if self._command_worker is not None:
                     self._command_worker.cancelled.set()
                 self._invalidate_ai_readiness()
-                self._end_conversation()
+                self._end_conversation('limpar')
                 self._stop_speech()
                 self._history.clear()
                 self._poll_workflow_progress()
             return
         self._invalidate_ai_readiness()
-        self._end_conversation()
+        self._end_conversation('limpar')
         self._cancel_voice_if_active()
         self._stop_speech()
         self._speech_text = ''
@@ -2014,7 +2014,7 @@ class MainWindow(QMainWindow):
     def _on_voice_model_failed(self, error: str) -> None:
         """Falha no carregamento: visível e permite nova tentativa."""
         self._preparation.finish('transcription', 'failed')
-        self._end_conversation()
+        self._end_conversation('modelo de voz falhou')
         if hasattr(self, "_voice_button"):
             self._voice_button.setText("Tentar carregar voz")
             self._voice_button.setEnabled(not self._processing)
@@ -2031,7 +2031,7 @@ class MainWindow(QMainWindow):
 
         Gates: não inicia se `_processing` ou `_pending_plan` ativo.
         """
-        self._end_conversation()
+        self._end_conversation('botão de voz')
         self._stop_speech()
         if self._voice_pipeline is None:
             return
@@ -2069,7 +2069,7 @@ class MainWindow(QMainWindow):
                 return
             if text.strip().casefold().rstrip('.!?') in {'encerrar conversa', 'parar conversa', 'sair do modo voz'}:
                 self._wake_outcome('virou pedido')
-                self._end_conversation()
+                self._end_conversation('pediu para encerrar')
                 return
             if self._pending_plan is not None:
                 if self._pending_plan is not getattr(self, '_conversation_confirmation_plan', None):
@@ -2100,7 +2100,7 @@ class MainWindow(QMainWindow):
             try:
                 self._start_command_worker(text)
             except Exception:
-                self._end_conversation()
+                self._end_conversation('erro ao processar a fala')
                 self._set_processing(False)
                 self._append('Therion', 'Não foi possível processar a fala.')
             return
@@ -2151,10 +2151,12 @@ class MainWindow(QMainWindow):
         if error == 'voice_unclear_audio':
             self._append('Therion', 'Não entendi o áudio com segurança. Repita a frase ou digite o pedido.')
             if getattr(self, '_conversation_mode', False):
+                self._wake_outcome('áudio confuso')   # 23/11: não volta como "turno descartado" na escuta seguinte
+                self._conversation_heard_at = time.monotonic()   # o "Não entendi" pede para repetir: a janela começa aqui
                 self._conversation_capture_generation = None
                 self._try_conversation_listen()
             return
-        self._end_conversation()
+        self._end_conversation('falha da transcrição')
         if error == 'voice_memory_exhausted':
             self._append("Therion", 'A transcrição falhou ao alocar memória. '
                          'Encerrei a conversa por voz; o histórico e a confirmação pendente foram preservados. '
@@ -2303,7 +2305,7 @@ class MainWindow(QMainWindow):
             for worker in (self._command_worker,self._confirmation_worker):
                 token=getattr(worker,'cancelled',None)
                 if token is not None:token.set()
-        self._end_conversation()
+        self._end_conversation('saindo')
         self._stop_speech()
         self._shutdown_voice()
         if dashboard is not None and dashboard.busy:
@@ -2439,6 +2441,11 @@ class MainWindow(QMainWindow):
         speaking = speech is not None and speech.state not in {'idle', 'warming'}
         if speaking:
             self._stop_speech()
+            # 23/11 ao vivo: no barge-in o áudio inicial começa onde a fala parou. Do fim do nome até aqui
+            # o microfone ouviu a cauda da voz do Therion, e a pausa do usuário fechava a captura antes do pedido.
+            self._wake_turn = audio = audio[:0]
+            now = getattr(self._wake, 'mark', None)
+            self._wake_mark = now() if callable(now) else None
         # Fala parada pelo nome, ou voz reaquecendo de uma parada anterior: nada disso é eco, grava já.
         if speaking or (speech is not None and speech.state == 'warming'):
             cycle = getattr(self._voice_pipeline, 'cycle', None)
@@ -2462,6 +2469,7 @@ class MainWindow(QMainWindow):
                 self._wake_turn = None
                 self._own_conversation_capture(pipeline)
         self._wake_score = score   # o desfecho (virou pedido, sem fala) chega com o fim do turno
+        self._conversation_heard_at = time.monotonic()   # chamar pelo nome conta como falar com ele (o stop não emite completed)
         self._update_orbe('listening')
         self._play_wake_sound()
         self._try_conversation_listen()
@@ -2472,7 +2480,7 @@ class MainWindow(QMainWindow):
 
     def hideEvent(self, event) -> None:
         if not self.isMinimized() and not self._changing_window_mode:
-            self._end_conversation()
+            self._end_conversation('janela escondida')
             if hasattr(self, '_voice_pipeline'):
                 self._cancel_voice_if_active()
             self._stop_speech()
@@ -2480,7 +2488,7 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:
         """Oculta na bandeja ou adia o fechamento até a operação terminar."""
-        self._end_conversation()
+        self._end_conversation('janela fechada')
         self._stop_speech()
         dashboard = getattr(self, '_dashboard', None)
         if dashboard is not None and dashboard.busy:
@@ -2566,7 +2574,7 @@ class MainWindow(QMainWindow):
 
     def _on_speech_failed(self, message):
         self._preparation.finish('speech', 'failed')
-        self._end_conversation()
+        self._end_conversation('voz falhou')
         self._append('Therion', message)
         self._update_orbe('error')
 
@@ -2602,7 +2610,7 @@ class MainWindow(QMainWindow):
 
     def _toggle_conversation(self):
         if self._conversation_mode:
-            self._end_conversation()
+            self._end_conversation('botão')
             return
         if self._processing or self._pending_plan is not None or not self._speech_output:
             return
@@ -2618,7 +2626,7 @@ class MainWindow(QMainWindow):
         self._speech_output.keep_warm = True
         self._speech_output.stop()
         if not self._speech_output.warmup():
-            self._end_conversation()
+            self._end_conversation('voz não aqueceu')
             return
         self._on_voice_clicked()
         if not self._conversation_mode:
@@ -2710,7 +2718,7 @@ class MainWindow(QMainWindow):
         if not self._conversation_mode:
             return
         if not success:
-            self._end_conversation()
+            self._end_conversation('IA não preparou')
             self._append('Therion', 'Não foi possível preparar a IA local para conversar.')
             return
         self._try_conversation_listen()
@@ -2742,13 +2750,17 @@ class MainWindow(QMainWindow):
         pipeline = self._voice_pipeline
         if pipeline is None or pipeline.state != VoicePipeline.STATE_IDLE:
             return
+        if wake_turn is None and getattr(self, '_wake_end_after_reply', False) and self._speech_output.state == 'idle':
+            # 23/11 ao vivo: "para de me ouvir" e a resposta parou sem "completed" (botão parar): não abre outra escuta.
+            self._end_conversation('para de me ouvir')
+            return
         pipeline.set_fast_mode(False)
         if wake_turn is None:   # turno novo sem o nome: um disparo ainda sem desfecho não vale mais para ele
             self._wake_outcome('ignorado: turno descartado')
         listen = ({'preroll': self._wake_preroll(wake_turn), 'no_speech_seconds': 5.0} if wake_turn is not None
                   else {'no_speech_seconds': 8.0} if getattr(self, '_wake_opened', False) else {})
         if not pipeline.start(automatic=True, **listen):
-            self._end_conversation()
+            self._end_conversation('microfone não abriu')
             self._append('Therion', 'Não foi possível abrir o microfone. Verifique o dispositivo.')
             return
         self._wake_turn = None
@@ -2772,7 +2784,7 @@ class MainWindow(QMainWindow):
         if expired is not None:
             self._invalidate_ai_readiness()
             name = {'ai': 'IA local', 'transcription': 'transcrição', 'speech': 'voz'}[expired]
-            self._end_conversation()
+            self._end_conversation('preparação vencida')
             self._append('Therion', f'A preparação de {name} excedeu o tempo limite. '
                          'Você pode continuar digitando ou tentar conversar por voz novamente.')
             return
@@ -2786,18 +2798,18 @@ class MainWindow(QMainWindow):
             self._try_conversation_listen()
             return
         if pipeline.state == VoicePipeline.STATE_RECORDING and pipeline.input_stalled:
-            self._end_conversation()
+            self._end_conversation('microfone parado')
             self._append('Therion', 'O microfone parou de enviar áudio. Verifique a conexão e abra a conversa novamente.')
             return
         if pipeline.state == VoicePipeline.STATE_RECORDING and pipeline.utterance_complete:
             if getattr(pipeline, 'endpoint_reason', None) == 'detector_error':
-                self._end_conversation()
+                self._end_conversation('detector de fim de fala')
                 self._append('Therion', 'A detecção de fim de fala falhou. Encerrei a escuta; '
                              'você pode continuar digitando ou iniciar a conversa novamente.')
                 return
             if getattr(pipeline, 'endpoint_reason', None) == 'no_speech' and getattr(self, '_wake_opened', False):
                 self._wake_outcome('sem fala')
-                self._end_conversation()   # ninguém falou depois do nome (ou na continuação): volta a dormir
+                self._end_conversation('sem fala')   # ninguém falou depois do nome (ou na continuação): volta a dormir
                 return
             if not pipeline.has_speech:
                 self._wake_outcome('sem fala')
@@ -2812,7 +2824,7 @@ class MainWindow(QMainWindow):
         if not self._conversation_mode:
             return
         if not self._speech_text:
-            self._end_conversation()
+            self._end_conversation('resposta vazia')
             return
         self._last_conversation_spoken = self._speech_text
         intro=getattr(self,'_briefing_intro',None)
@@ -2851,14 +2863,14 @@ class MainWindow(QMainWindow):
                     return
             elif self._processing:return
         if self._conversation_mode and self._wake_end_after_reply:
-            self._end_conversation()
+            self._end_conversation('para de me ouvir')
             return
         if self._conversation_mode:
             self._conversation_heard_at = time.monotonic()   # a janela de 8 s da resposta começa aqui
             self._conversation_listen_after = time.monotonic() + 0.6
             QTimer.singleShot(600, self._try_conversation_listen)
 
-    def _end_conversation(self):
+    def _end_conversation(self, reason=''):
         narration=getattr(self,'_progress_narration',None)
         if narration is not None:narration.cancel()
         self._briefing_intro=None
@@ -2867,7 +2879,7 @@ class MainWindow(QMainWindow):
         for worker in (self._command_worker, self._confirmation_worker):
             if isinstance(worker, (_CommandWorker, _ConfirmationWorker)) and worker.conversation_generation is not None:
                 worker.cancelled.set()
-        self._wake_outcome('ignorado: conversa encerrada')
+        self._wake_outcome('ignorado: conversa encerrada' + (f' ({reason})' if reason else ''))   # 23/11: o motivo mostra o caminho
         self._wake_turn = None
         self._wake_opened = False
         self._wake_end_after_reply = False

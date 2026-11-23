@@ -224,7 +224,7 @@ class TestSessionClearInterface(unittest.TestCase):
         MainWindow._clear_conversation(window)
         self.assertEqual(
             [str(call) for call in window.mock_calls[:7]],
-            ["call._invalidate_ai_readiness()", "call._end_conversation()", "call._cancel_voice_if_active()",
+            ["call._invalidate_ai_readiness()", "call._end_conversation('limpar')", "call._cancel_voice_if_active()",
              "call._stop_speech()", "call._listen_button.setEnabled(False)", "call._history.clear()",
              "call._orchestrator.clear_session()"],
         )

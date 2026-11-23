@@ -221,3 +221,15 @@ def test_the_audio_after_the_name_keeps_growing_for_a_late_reader(tmp_path):
     later = listener.since(listener.wake_mark)   # o que a captura lê depois de abrir o microfone
     assert len(got[0]) == 4 * 1280 and len(later) == 6 * 1280
     assert np.allclose(later[-1280:], 9 / 32768)
+
+
+def test_a_mark_taken_later_hands_over_only_the_audio_from_there(tmp_path):
+    got, done = [], threading.Event()
+    def on_wake(audio, score): got.append(audio); done.set()
+    listener = WakeListener(_model_file(tmp_path), on_wake, model_factory=lambda p: FakeModel([0, 0, .9]),
+                            stream_factory=lambda cb: FakeStream(cb, _blocks(9)))
+    assert listener.start() is True
+    assert done.wait(3)
+    threading.Event().wait(0.3); listener.stop()
+    mark = listener.mark()   # 23/11: no barge-in a captura começa quando a fala parou, não no disparo
+    assert listener.since(mark).size == 0 and mark - listener.wake_mark == 6 * 1280

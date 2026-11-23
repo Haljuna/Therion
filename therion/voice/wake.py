@@ -139,6 +139,11 @@ class WakeListener:
         with self._ring_lock:
             return self._ring.since(mark)
 
+    def mark(self) -> int:
+        """Ponto atual do buffer, para ler depois com `since`; seguro de qualquer thread."""
+        with self._ring_lock:
+            return self._ring.mark()
+
     def pause(self) -> None:
         self._paused.set()
 

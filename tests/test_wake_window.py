@@ -328,7 +328,7 @@ def test_the_name_during_a_long_answer_records_at_once(app, tmp_path, monkeypatc
     set_state('playing')
     window._on_wake(np.ones(800, np.float32), .8)
     assert window._conversation_mode
-    assert pipeline.starts and len(pipeline.starts[-1]['preroll']) == 800
+    assert pipeline.starts and len(pipeline.starts[-1]['preroll']) == 0   # 23/11: nada da voz do Therion antes da parada
     close(app, window)
 
 
@@ -342,7 +342,7 @@ def test_the_name_during_a_spoken_reply_in_an_open_conversation_records_at_once(
     set_state('playing')                            # a resposta longa começa a sair
     before = len(pipeline.starts)
     window._on_wake(np.ones(600, np.float32), .8)
-    assert len(pipeline.starts) == before + 1 and len(pipeline.starts[-1]['preroll']) == 600
+    assert len(pipeline.starts) == before + 1 and len(pipeline.starts[-1]['preroll']) == 0   # 23/11: começa na parada
     close(app, window)
 
 
@@ -454,6 +454,7 @@ def test_a_name_inside_an_open_conversation_also_reads_the_audio_once_the_microp
     pipeline.state = 'idle'
     set_state('playing')
     listener.wake_mark = 7                          # o detector marca o disparo e segue enchendo o buffer
+    listener.mark = lambda: 7                       # 23/11: no barge-in a marca é a da parada da fala
     listener.since = lambda mark: np.full(2400, .1, np.float32) if mark == 7 else np.zeros(0, np.float32)
     listener.on_wake(np.ones(600, np.float32), .8)  # nome no meio da resposta, pela thread do detector
     listener.wake_mark = 99                         # um disparo seguinte não pode trocar a marca deste
@@ -474,4 +475,119 @@ def test_a_discarded_name_turn_does_not_exempt_the_next_turn_from_the_background
     pipeline.last_confidence = -0.7
     window._on_voice_transcribed(pipeline.generation, 'Conversa de fundo qualquer.')
     window._start_command_worker.assert_not_called()
+    close(app, window)
+
+
+def barge_in_window(tmp_path, monkeypatch):
+    """Conversa aberta pelo nome, primeira resposta já dada e a segunda tocando; o detector marca até onde ouviu."""
+    window, pipeline, set_state = speaking_window(tmp_path, monkeypatch)
+    listener = FakeListener.last
+    window._on_wake(np.ones(800, np.float32), .8)   # abre a conversa
+    window._on_ai_warmed(window._ai_warm_token, True)
+    window._on_voice_transcribed(pipeline.generation, 'Conta uma história.')
+    window._set_processing(False)
+    pipeline.state = 'idle'
+    set_state('playing')
+    listener.wake_mark = 7                          # fim do nome
+    listener.mark = lambda: 50                      # onde o buffer estava quando a fala parou
+    listener.since = lambda mark: (np.full(4000, .1, np.float32) if mark == 7
+                                   else np.full(1600, .2, np.float32) if mark == 50 else np.zeros(0, np.float32))
+    return window, pipeline, listener
+
+
+def test_a_barge_in_takes_the_audio_from_when_the_speech_stopped(app, tmp_path, monkeypatch):
+    # 23/11 ao vivo: a cauda da voz do Therion entrava no turno e a pausa depois do nome fechava a captura.
+    window, pipeline, listener = barge_in_window(tmp_path, monkeypatch)
+    listener.on_wake(np.ones(600, np.float32), .8)
+    start = pipeline.starts[-1]
+    assert len(start['preroll']) == 1600 and start['no_speech_seconds'] == 5.0
+    close(app, window)
+
+
+def test_a_barge_in_outside_the_conversation_also_starts_where_the_speech_stopped(app, tmp_path, monkeypatch):
+    window, pipeline, set_state = speaking_window(tmp_path, monkeypatch)
+    listener = FakeListener.last
+    set_state('playing')
+    listener.wake_mark = 7
+    listener.mark = lambda: 50
+    listener.since = lambda mark: (np.full(4000, .1, np.float32) if mark == 7
+                                   else np.full(1600, .2, np.float32) if mark == 50 else np.zeros(0, np.float32))
+    listener.on_wake(np.ones(800, np.float32), .8)
+    assert window._conversation_mode
+    assert len(pipeline.starts[-1]['preroll']) == 1600 and pipeline.starts[-1]['no_speech_seconds'] == 5.0
+    close(app, window)
+
+
+def test_unclear_audio_after_the_name_is_logged_once_and_keeps_the_window_open(app, tmp_path, monkeypatch):
+    import time
+    window, pipeline = make_window(tmp_path, monkeypatch)
+    window._on_wake(np.ones(800, np.float32), .91)
+    window._on_ai_warmed(window._ai_warm_token, True)
+    window._conversation_heard_at = time.monotonic() - 30   # a conversa abriu há tempo
+    before = len(pipeline.starts)
+    pipeline.state = 'transcribing'
+    window._on_voice_transcription_failed(pipeline.generation, 'voice_unclear_audio')
+    assert len(pipeline.starts) == before   # a transcrição ainda não liberou o microfone
+    pipeline.state = 'idle'
+    window._try_conversation_listen()
+    assert len(pipeline.starts) == before + 1
+    text = log_text(tmp_path)
+    assert '0.91 · áudio confuso' in text and 'turno descartado' not in text
+    pipeline.speech_started_after, pipeline.last_confidence = 1.0, -0.2   # repete logo depois do "Não entendi"
+    window._on_voice_transcribed(pipeline.generation, 'Que horas são?')
+    window._start_command_worker.assert_called_once_with('Que horas são?')
+    close(app, window)
+
+
+def test_a_barge_in_counts_as_talking_to_him_for_the_eight_second_window(app, tmp_path, monkeypatch):
+    import time
+    window, pipeline = make_window(tmp_path, monkeypatch)
+    speech = window._speech_output
+    window._on_wake(np.ones(800, np.float32), .8)   # abre a conversa
+    window._on_ai_warmed(window._ai_warm_token, True)
+    window._on_voice_transcribed(pipeline.generation, 'Conta uma história.')
+    window._set_processing(False)
+    pipeline.state = 'idle'
+    speech.state, speech.spoken_text = 'playing', 'Era uma vez.'
+    speech.stop.side_effect = lambda: setattr(speech, 'state', 'idle')   # parar não emite "completed"
+    window._conversation_heard_at = time.monotonic() - 30
+    window._start_command_worker.reset_mock()
+    window._on_wake(np.ones(600, np.float32), .8)   # nome no meio da resposta longa
+    pipeline.utterance_complete, pipeline.endpoint_reason, pipeline.has_speech = True, 'silence', False
+    window._poll_conversation()                     # o turno do nome não teve fala: abre a continuação
+    pipeline.utterance_complete = False
+    pipeline.speech_started_after, pipeline.last_confidence = 1.0, -0.2
+    window._on_voice_transcribed(pipeline.generation, 'Que horas são?')
+    window._start_command_worker.assert_called_once_with('Que horas são?')
+    close(app, window)
+
+
+def test_ending_the_conversation_logs_why(app, tmp_path, monkeypatch):
+    window, pipeline = make_window(tmp_path, monkeypatch)
+    window._on_wake(np.ones(800, np.float32), .94)
+    window._end_conversation('janela escondida')
+    assert '0.94 · ignorado: conversa encerrada (janela escondida)' in log_text(tmp_path)
+    window._on_wake(np.ones(800, np.float32), .62)
+    window._toggle_conversation()                   # botão Encerrar
+    assert '0.62 · ignorado: conversa encerrada (botão)' in log_text(tmp_path)
+    window._on_wake(np.ones(800, np.float32), .85)
+    window.show()
+    window.hide()
+    assert '0.85 · ignorado: conversa encerrada (janela escondida)' in log_text(tmp_path)
+    close(app, window)
+
+
+def test_stop_listening_ends_the_conversation_even_when_the_answer_is_cut(app, tmp_path, monkeypatch):
+    window, pipeline = make_window(tmp_path, monkeypatch)
+    window._on_wake(np.ones(800, np.float32), .8)
+    window._on_ai_warmed(window._ai_warm_token, True)
+    window._on_voice_transcribed(pipeline.generation, 'Para de me ouvir.')
+    window._apply_command_result(OrchestrationResult(
+        status='success', message='Tudo bem, parei de ouvir pelo nome até o senhor me abrir de novo.', ui_action='wake_off'))
+    window._set_processing(False)
+    pipeline.state = 'idle'
+    before = len(pipeline.starts)
+    window._try_conversation_listen()   # a fala parou sem "completed" (botão parar): não abre outra escuta
+    assert not window._conversation_mode and len(pipeline.starts) == before
+    assert window._speech_text == 'Tudo bem, parei de ouvir pelo nome até o senhor me abrir de novo.'
     close(app, window)
