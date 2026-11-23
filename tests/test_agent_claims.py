@@ -74,6 +74,8 @@ def test_invented_clock_is_detected():
     assert invented_clock('São 9:05 agora.')
     assert not invented_clock('A reunião é às 15:00, senhor.')
     assert not invented_clock('Bom dia, senhor.')
+    assert invented_clock('São 15h21, senhor.') and invented_clock('Agora são 15h.')
+    assert not invented_clock('O vídeo tem 15 horas de duração.') and not invented_clock('Faltam 2h para a reunião.')
 
 
 @pytest.mark.parametrize('message',['Entendido, senhor. Estou registrando sua solicitação de manter os itens ativos. Se precisar de qualquer ajuste, estarei à disposição.',

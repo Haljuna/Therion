@@ -682,3 +682,91 @@ def test_the_tray_action_follows_the_state(app, tmp_path, monkeypatch):
     window._wake_action.trigger()
     assert window._wake_state() == 'on' and window._wake_action.isChecked()
     close(app, window)
+
+
+def open_by_button(window, pipeline):
+    window._toggle_conversation()
+    window._on_ai_warmed(window._ai_warm_token, True)
+    window._try_conversation_listen()
+
+
+def test_unclear_background_audio_late_in_the_conversation_stays_silent(app, tmp_path, monkeypatch):
+    import time
+    window, pipeline = make_window(tmp_path, monkeypatch)
+    open_by_button(window, pipeline)
+    window._conversation_heard_at = time.monotonic() - 30   # vídeo em inglês ao fundo, bem depois da resposta
+    pipeline.speech_started_after, pipeline.state = 1.0, 'idle'
+    before = len(pipeline.starts)
+    window._on_voice_transcription_failed(pipeline.generation, 'voice_unclear_audio')
+    assert 'Não entendi o áudio' not in window._history.toPlainText()
+    assert len(pipeline.starts) == before + 1   # volta a ouvir em silêncio
+    pipeline.last_confidence = -0.2
+    window._on_voice_transcribed(pipeline.generation, 'Abre o Discord.')
+    window._start_command_worker.assert_not_called()   # a janela não reabriu
+    close(app, window)
+
+
+def test_unclear_audio_inside_the_window_still_asks_to_repeat(app, tmp_path, monkeypatch):
+    window, pipeline = make_window(tmp_path, monkeypatch)
+    open_by_button(window, pipeline)
+    pipeline.speech_started_after = 1.0
+    window._on_voice_transcription_failed(pipeline.generation, 'voice_unclear_audio')
+    assert 'Não entendi o áudio' in window._history.toPlainText()
+    close(app, window)
+
+
+def test_a_slow_preparation_does_not_drop_the_first_request(app, tmp_path, monkeypatch):
+    import time
+    window, pipeline = make_window(tmp_path, monkeypatch)
+    window._toggle_conversation()
+    window._conversation_heard_at = time.monotonic() - 12   # IA fria: 12 s até "Ouvindo…"
+    window._on_ai_warmed(window._ai_warm_token, True)
+    window._try_conversation_listen()
+    pipeline.speech_started_after, pipeline.last_confidence = 1.0, -0.2
+    window._on_voice_transcribed(pipeline.generation, 'Abre o Discord.')
+    window._start_command_worker.assert_called_once_with('Abre o Discord.')
+    close(app, window)
+
+
+def test_the_stop_button_counts_as_talking_to_him_for_the_window(app, tmp_path, monkeypatch):
+    import time
+    window, pipeline = make_window(tmp_path, monkeypatch)
+    open_by_button(window, pipeline)
+    window._on_voice_transcribed(pipeline.generation, 'Conta uma história.')
+    window._set_processing(False)
+    pipeline.state = 'idle'
+    window._conversation_heard_at = time.monotonic() - 30
+    window._start_command_worker.reset_mock()
+    window._stop_speech()   # botão Parar no meio da resposta
+    window._try_conversation_listen()
+    pipeline.speech_started_after, pipeline.last_confidence = 1.0, -0.2
+    window._on_voice_transcribed(pipeline.generation, 'Abre o Discord.')
+    window._start_command_worker.assert_called_once_with('Abre o Discord.')
+    close(app, window)
+
+
+def test_a_question_in_the_reply_exempts_only_for_thirty_seconds(app, tmp_path, monkeypatch):
+    import time
+    window, pipeline = make_window(tmp_path, monkeypatch)
+    open_by_button(window, pipeline)
+    window._last_conversation_spoken = 'Não entendi bem. Pode repetir?'
+    window._conversation_heard_at = window._last_conversation_spoken_at = time.monotonic() - 40
+    pipeline.state = 'idle'
+    pipeline.speech_started_after, pipeline.last_confidence = 1.0, -0.2
+    window._on_voice_transcribed(pipeline.generation, 'Abre o Discord.')
+    window._start_command_worker.assert_not_called()
+    pipeline.state = 'idle'
+    window._try_conversation_listen()
+    window._conversation_heard_at, window._last_conversation_spoken_at = time.monotonic() - 30, time.monotonic() - 10
+    window._on_voice_transcribed(pipeline.generation, 'Abre o Discord.')
+    window._start_command_worker.assert_called_once_with('Abre o Discord.')
+    close(app, window)
+
+
+def test_a_microphone_problem_after_turning_listening_off_is_not_shown(app, tmp_path, monkeypatch):
+    window, pipeline = make_window(tmp_path, monkeypatch)
+    listener = FakeListener.last
+    window._toggle_wake()
+    listener.kwargs['on_problem']('microfone')   # já estava na fila
+    assert 'tento de novo sozinho' not in window._history.toPlainText() and window._wake_state() == 'off'
+    close(app, window)

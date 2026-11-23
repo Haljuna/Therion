@@ -144,3 +144,14 @@ def test_name_dot_follows_the_listening_state_and_click_toggles(window):
     from PySide6.QtCore import Qt
     QTest.keyClick(dot,Qt.Key_Space);assert state['v']=='on'
     assert dot.cursor().shape()==Qt.PointingHandCursor and dot.focusPolicy()==Qt.StrongFocus
+
+
+def test_name_dot_ignores_key_auto_repeat(window):
+    from PySide6.QtCore import Qt,QEvent
+    from PySide6.QtGui import QKeyEvent
+    dot=scene(window).health_dots['wake'][0]
+    hits=[];dot.clicked.connect(lambda:hits.append(1))
+    dot.keyPressEvent(QKeyEvent(QEvent.KeyPress,Qt.Key_Space,Qt.NoModifier,' ',True))   # Espaço segurado
+    assert hits==[]
+    dot.keyPressEvent(QKeyEvent(QEvent.KeyPress,Qt.Key_Space,Qt.NoModifier,' ',False))
+    assert hits==[1]

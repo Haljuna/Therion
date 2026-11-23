@@ -2115,6 +2115,14 @@ class MainWindow(QMainWindow):
             return
         self._insert_transcribed_text(text)
 
+    def _speech_late(self):
+        # 22/11, escolha A: na conversa aberta, fala que começou mais de 8 s depois da última resposta
+        # (ou da abertura) e sem o nome é de fundo, mesmo clara. Fora da conversa (tecla) vale só a confiança.
+        started = getattr(getattr(self, '_voice_pipeline', None), 'speech_started_after', None)
+        heard = getattr(self, '_conversation_heard_at', None)
+        return bool(getattr(self, '_conversation_mode', False) and isinstance(started, (int, float)) and isinstance(heard, float)
+                    and getattr(self, '_conversation_capture_started_at', 0.0) + started - heard > CONVERSATION_WINDOW_SECONDS)
+
     def _background_speech(self, text):
         """Conversa de fundo: confiança baixa, sem o nome, sem regra fixa e sem pergunta aberta. Ignora em silêncio.
 
@@ -2124,11 +2132,7 @@ class MainWindow(QMainWindow):
         import re
         pipeline = getattr(self, '_voice_pipeline', None)
         confidence = getattr(pipeline, 'last_confidence', None)
-        # 22/11, escolha A: na conversa aberta, fala que começou mais de 8 s depois da última resposta
-        # (ou da abertura) e sem o nome é de fundo, mesmo clara. Fora da conversa (tecla) vale só a confiança.
-        started, heard = getattr(pipeline, 'speech_started_after', None), getattr(self, '_conversation_heard_at', None)
-        late = (getattr(self, '_conversation_mode', False) and isinstance(started, (int, float)) and isinstance(heard, float)
-                and getattr(self, '_conversation_capture_started_at', 0.0) + started - heard > CONVERSATION_WINDOW_SECONDS)
+        late = MainWindow._speech_late(self)   # os testes chamam com um SimpleNamespace
         if not late and (not isinstance(confidence, float) or confidence >= -0.5):
             return False
         if getattr(self, '_wake_score', None) is not None:   # chamou pelo nome (o áudio inicial corta o nome do texto)
@@ -2143,7 +2147,8 @@ class MainWindow(QMainWindow):
         orchestrator = self._orchestrator
         if (getattr(self, '_conversation_awaiting_response', False) or getattr(orchestrator, 'confirmation_id', None)
                 or getattr(getattr(orchestrator, '_conversation_frame', None), 'question', None)
-                or '?' in (getattr(self, '_last_conversation_spoken', '') or '')):
+                or ('?' in (getattr(self, '_last_conversation_spoken', '') or '')   # 23/11: a pergunta vale 30 s
+                    and now - getattr(self, '_last_conversation_spoken_at', 0.0) <= 30)):
             return False
         if late:
             return True   # fora da janela, nem regra fixa passa sem o nome
@@ -2158,10 +2163,15 @@ class MainWindow(QMainWindow):
         if getattr(self, '_conversation_mode', False) and generation != self._conversation_capture_generation:
             return
         if error == 'voice_unclear_audio':
-            self._append('Therion', 'Não entendi o áudio com segurança. Repita a frase ou digite o pedido.')
-            if getattr(self, '_conversation_mode', False):
-                self._wake_outcome('áudio confuso')   # 23/11: não volta como "turno descartado" na escuta seguinte
-                self._conversation_heard_at = time.monotonic()   # o "Não entendi" pede para repetir: a janela começa aqui
+            conversation = getattr(self, '_conversation_mode', False)
+            # 23/11: na conversa, áudio confuso sem o nome e fora da janela é fundo (TV, vídeo): silêncio, sem reabrir a janela.
+            to_him = not conversation or getattr(self, '_wake_score', None) is not None or not self._speech_late()
+            if to_him:
+                self._append('Therion', 'Não entendi o áudio com segurança. Repita a frase ou digite o pedido.')
+            if conversation:
+                self._wake_outcome('áudio confuso' if to_him else 'sem fala')   # 23/11: não volta como "turno descartado" na escuta seguinte
+                if to_him:
+                    self._conversation_heard_at = time.monotonic()   # o "Não entendi" pede para repetir: a janela começa aqui
                 self._conversation_capture_generation = None
                 self._try_conversation_listen()
             return
@@ -2443,6 +2453,8 @@ class MainWindow(QMainWindow):
 
     @Slot(str)
     def _on_wake_problem(self, kind):
+        if self._wake is None:   # 23/11: aviso que já estava na fila quando a escuta foi desligada
+            return
         self._wake_trouble = True
         self._wake_state_changed()
         self._append('Therion', 'Não consegui abrir o microfone para ouvir meu nome; tento de novo sozinho.'
@@ -2609,6 +2621,7 @@ class MainWindow(QMainWindow):
         if getattr(self, '_speech_output', None) is not None:
             self._speech_output.stop()
         if getattr(self, '_conversation_mode', False) and not self._processing:
+            self._conversation_heard_at = time.monotonic()   # 23/11: Parar conta como falar com ele (o stop não emite completed)
             if not self._speech_output.is_ready:
                 self._speech_output.warmup()
             QTimer.singleShot(200, self._try_conversation_listen)
@@ -2837,6 +2850,8 @@ class MainWindow(QMainWindow):
     def _own_conversation_capture(self, pipeline):
         """A captura que acabou de abrir é o turno atual da conversa."""
         self._conversation_capture_started_at = time.monotonic()
+        if not self._conversation_primed:   # 23/11: a preparação pode passar de 8 s; a janela começa no "Ouvindo…"
+            self._conversation_heard_at = self._conversation_capture_started_at
         self._conversation_capture_generation = pipeline.generation
         self._conversation_confirmation_plan = self._pending_plan
         self._conversation_confirmation_token = self._orchestrator.confirmation_id
@@ -2934,7 +2949,7 @@ class MainWindow(QMainWindow):
             self._end_conversation('para de me ouvir')
             return
         if self._conversation_mode:
-            self._conversation_heard_at = time.monotonic()   # a janela de 8 s da resposta começa aqui
+            self._conversation_heard_at = self._last_conversation_spoken_at = time.monotonic()   # a janela de 8 s da resposta começa aqui
             self._conversation_listen_after = time.monotonic() + 0.6
             QTimer.singleShot(600, self._try_conversation_listen)
 

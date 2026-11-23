@@ -247,3 +247,9 @@ def test_english_sentence_is_unclear_audio_and_not_sent_on(monkeypatch):
 def test_portuguese_with_loanwords_and_short_phrases_pass(monkeypatch, text):
     segments, _, _ = _voice_with(monkeypatch, text, _tone(0.1))
     assert segments[0].text == text
+
+
+@pytest.mark.parametrize('text', ['Me mostra a agenda', 'Me leva no site', 'Ok, me lembra depois', 'So me diz'])
+def test_portuguese_words_spelled_like_english_ones_pass(monkeypatch, text):
+    segments, _, _ = _voice_with(monkeypatch, text, _tone(0.1))   # "a", "me", "no", "so" também são português
+    assert segments[0].text == text

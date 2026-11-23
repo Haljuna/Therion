@@ -159,7 +159,9 @@ class AgentRuntime:
                     if cited-set(sources):
                         return finish('partial','A resposta citou uma fonte que não foi confirmada. Consulte os resultados das etapas antes de concluir.')
                     from .claims import invented_clock,unsupported_claim
-                    if unsupported_claim(decision.message,results) or (invented_clock(decision.message) and not results):
+                    if invented_clock(decision.message) and not results:   # 23/11: a mesma linha curta do orquestrador
+                        return finish('partial',"Não entendi bem. Se quiser saber as horas, pergunte 'que horas são?'.")
+                    if unsupported_claim(decision.message,results):
                         return finish('partial','Não há recibo verificado para confirmar a ação anunciada. Nenhum novo efeito foi executado por essa resposta.')
                     from .reading import missing_reading
                     if missing_reading(message,decision.message,results,cited,

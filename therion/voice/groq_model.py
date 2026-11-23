@@ -44,11 +44,12 @@ def _hallucination(text):
 
 
 # Áudio embolado (voz misturada com a fala do assistente) volta como frase em inglês, apesar de language='pt'.
+# 23/11: "a", "me", "no", "so", "come" também são português ("Me leva no site"); ficam fora da conta.
 _EN_WORDS = frozenset(
-    'the to my on but hold and of you is it i a an what this that with for are be me your so do not just fine ok '
+    'the to my on but hold and of you is it i an what this that with for are be your do not just fine ok '
     'okay in at we they he she was were have has had will would can could should from by or if then than there '
-    'here how why when who yes no yeah well oh hey hello please thanks thank know like get got going go want '
-    'need let see look come back right now up out about really think'.split())
+    'here how why when who yes yeah well oh hey hello please thanks thank know like get got going go want '
+    'need let see look back right now up out about really think'.split())
 _PT_WORDS = frozenset(
     'o os as de do da dos das que e um uma uns umas eu você voce não nao para pra na nos nas com em por '
     'se é ao aos mais mas ou meu minha seu sua isso isto esse essa este esta ele ela abre abrir fecha fechar '

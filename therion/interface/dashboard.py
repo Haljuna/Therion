@@ -195,7 +195,8 @@ class ClickableDot(QLabel):
         super().mouseReleaseEvent(event)
 
     def keyPressEvent(self,event):
-        if event.key() in (Qt.Key_Return,Qt.Key_Enter,Qt.Key_Space):self.clicked.emit()
+        if event.key() in (Qt.Key_Return,Qt.Key_Enter,Qt.Key_Space):
+            if not event.isAutoRepeat():self.clicked.emit()   # tecla segurada não liga e desliga em sequência
         else:super().keyPressEvent(event)
 
 

@@ -139,3 +139,10 @@ def test_followup_repeating_previous_answer_keeps_one_sources_footer(tmp_path):
         assert result.message.count('Fontes consultadas:') == 1, result.message
     finally:
         host.close()
+
+
+def test_an_invented_clock_time_gets_the_short_line():
+    runtime = AgentRuntime(ScriptedProvider(AgentDecision('final', 'As horas são 15:21, senhor.')), ToolRegistry())
+    result = asyncio.run(runtime.run('Me conta uma novidade.', session_id='s'))
+    assert result.status == 'partial' and '15:21' not in result.message
+    assert result.message == "Não entendi bem. Se quiser saber as horas, pergunte 'que horas são?'."
