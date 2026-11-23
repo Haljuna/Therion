@@ -21,7 +21,7 @@ SILENCE_LIMIT = 5.0    # sem nenhum bloco do microfone por tanto tempo: reabre
 class WakeGate:
     """Dispara quando a nota passa do limiar, no máximo uma vez por `refractory` segundos."""
 
-    def __init__(self, threshold=0.5, refractory=2.0, clock=time.monotonic):
+    def __init__(self, threshold=0.7, refractory=2.0, clock=time.monotonic):
         self.threshold = threshold
         self.refractory = refractory
         self.muted = False
@@ -98,7 +98,7 @@ class WakeListener:
     """
 
     def __init__(self, model_path: str, on_wake: Callable[[np.ndarray, float], None], *,
-                 threshold=0.5, model_factory=None, stream_factory=None,
+                 threshold=0.7, model_factory=None, stream_factory=None,
                  on_problem: Callable[[str], None] | None = None, retry_seconds=10.0):
         self._path = model_path
         self._on_wake = on_wake

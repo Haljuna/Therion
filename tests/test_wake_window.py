@@ -222,9 +222,10 @@ def test_a_microphone_problem_is_written_once_on_the_window(app, tmp_path, monke
 def test_wake_word_is_on_by_default_and_off_means_no_microphone(app, tmp_path, monkeypatch):
     assert _validate_config({})['ui']['wake_word'] is True
     assert _validate_config({'ui': {'wake_word': 'sim'}})['ui']['wake_word'] is True
-    assert _validate_config({'wake': {'threshold': 0.7}})['wake']['threshold'] == 0.7
+    assert _validate_config({})['wake']['threshold'] == 0.7
+    assert _validate_config({'wake': {'threshold': 0.6}})['wake']['threshold'] == 0.6
     for wrong in (2, 0.01, 'alto', True):
-        assert _validate_config({'wake': {'threshold': wrong}})['wake']['threshold'] == 0.5
+        assert _validate_config({'wake': {'threshold': wrong}})['wake']['threshold'] == 0.7
     window, pipeline = make_window(tmp_path, monkeypatch, wake=False)
     assert window._wake is None and FakeListener.last is None
     close(app, window)

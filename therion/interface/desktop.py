@@ -2344,7 +2344,7 @@ class MainWindow(QMainWindow):
             return
         self._wake_heard.connect(self._on_wake)
         self._wake_problem.connect(self._on_wake_problem)
-        threshold = (self._config.get('wake') or {}).get('threshold', 0.5)
+        threshold = (self._config.get('wake') or {}).get('threshold', 0.7)
         listener = WakeListener(path, self._emit_wake, threshold=threshold, on_problem=self._emit_wake_problem)
         if not listener.start():
             return

@@ -234,3 +234,16 @@ def test_long_conversation_audio_goes_to_groq_and_huge_audio_to_local(monkeypatc
     assert model.transcribe(_tone(0.1, 40))[0][0].text == 'longo'
     assert model.transcribe(_tone(0.1, 601))[0][0].text == 'local'
     assert sent == [1]
+
+
+def test_english_sentence_is_unclear_audio_and_not_sent_on(monkeypatch):
+    from therion.voice.transcription import UnclearAudio
+    with pytest.raises(UnclearAudio):
+        _voice_with(monkeypatch, ' Ok, fine, but hold on to my handlebars.', _tone(0.1))
+
+
+@pytest.mark.parametrize('text', ['abre o Discord', 'abre o Chrome', 'liga o modo game', 'Therion, play na música',
+                                  'manda um ok', 'ok', 'sim', 'stop', 'stop it', 'Que horas são?'])
+def test_portuguese_with_loanwords_and_short_phrases_pass(monkeypatch, text):
+    segments, _, _ = _voice_with(monkeypatch, text, _tone(0.1))
+    assert segments[0].text == text

@@ -43,6 +43,27 @@ def _hallucination(text):
     return text in HALLUCINATIONS or text.startswith(HALLUCINATION_PREFIXES)
 
 
+# Áudio embolado (voz misturada com a fala do assistente) volta como frase em inglês, apesar de language='pt'.
+_EN_WORDS = frozenset(
+    'the to my on but hold and of you is it i a an what this that with for are be me your so do not just fine ok '
+    'okay in at we they he she was were have has had will would can could should from by or if then than there '
+    'here how why when who yes no yeah well oh hey hello please thanks thank know like get got going go want '
+    'need let see look come back right now up out about really think'.split())
+_PT_WORDS = frozenset(
+    'o os as de do da dos das que e um uma uns umas eu você voce não nao para pra na nos nas com em por '
+    'se é ao aos mais mas ou meu minha seu sua isso isto esse essa este esta ele ela abre abrir fecha fechar '
+    'liga ligar desliga quantos quantas qual quais quando como onde toca tocar manda mandar sim'.split())
+
+
+def _not_portuguese(text):
+    words = re.findall(r"[^\W\d_]+(?:'[^\W\d_]+)?", text.lower())
+    if len(words) < 3 or any(ord(c) > 127 for c in text):
+        return False
+    if any(w in _PT_WORDS for w in words):
+        return False
+    return sum(w in _EN_WORDS for w in words) * 2 >= len(words)
+
+
 class GroqVoiceModel:
     def __init__(self, local_factory, *, clock=time.monotonic):
         self._local_factory = local_factory
@@ -68,6 +89,10 @@ class GroqVoiceModel:
             if rms < WEAK_RMS and _hallucination(heard):
                 print(f'[Therion] Groq inventou "{heard}" em áudio fraco; descartado.')
                 result = ([], result[1])
+            elif _not_portuguese(heard):
+                from therion.voice.transcription import UnclearAudio
+                print('[Therion] Groq devolveu texto que não parece português; tratado como áudio confuso.')
+                raise UnclearAudio()
         except groq.GroqUnavailable as error:
             print(f'[Therion] Groq indisponível ({error}); transcrevendo no PC.')
             with self._lock:

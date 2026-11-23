@@ -125,7 +125,7 @@ def _validate_config(data: dict[str, Any]) -> dict[str, Any]:
     # Palavra de ativação "Therion"; ligada salvo pedido contrário (sem o modelo baixado, nada muda).
     if type(ui.get('wake_word')) is not bool:
         ui['wake_word'] = True
-    # wake.threshold: nota mínima do detector (0,05-0,99, padrão 0,5).
+    # wake.threshold: nota mínima do detector (0,05-0,99, padrão 0,7: medição ao vivo 22-23/11, chamadas reais 0,76-1,00 e falsos disparos 0,54-0,62).
     wake = validated.get('wake')
     wake = dict(wake) if isinstance(wake, dict) else {}
     threshold = wake.get('threshold')
@@ -133,8 +133,8 @@ def _validate_config(data: dict[str, Any]) -> dict[str, Any]:
         global _wake_threshold_noticed
         if 'threshold' in wake and not _wake_threshold_noticed:
             _wake_threshold_noticed = True   # uma vez por execução: o config é relido muitas vezes
-            print(f'[config] wake.threshold {threshold!r} fora de 0,05-0,99; usando 0,5.')
-        wake['threshold'] = 0.5
+            print(f'[config] wake.threshold {threshold!r} fora de 0,05-0,99; usando 0,7.')
+        wake['threshold'] = 0.7
     validated['wake'] = wake
 
     # focus.minutes (5-180) e focus.pause (1-60); ausente é aceito, valor inválido volta ao padrão
