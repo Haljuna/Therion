@@ -15,7 +15,7 @@ from pathlib import Path
 from therion.context.language import control
 from therion.core.voice_reminders import PENDING_SECONDS, TERMINAL_MESSAGE, _COUNT, _clock, _count, _duration, _hm
 
-MIN_FOCUS, MAX_FOCUS = 5, 180
+MIN_FOCUS, MAX_FOCUS = 1, 180   # 24/11: qualquer tempo pedido, até "3 minutos de foco"
 MIN_PAUSE, MAX_PAUSE = 1, 60
 DEFAULT_FOCUS, DEFAULT_PAUSE = 50, 10
 HISTORY_DAYS = 30
@@ -28,7 +28,9 @@ _DUR = (rf'(?:(?P<half>meia\s+hora)|(?P<n>{_COUNT})\s*(?P<unit>horas?|h|minutos?
 _START_HEAD = (r'^(?:(?:ativa|ative|ativar|liga|ligue|ligar|inicia|inicie|iniciar|comeca|comece|comecar|entra|entre|entrar|coloca|bota|abre|abra|abrir)\s+'
                r'(?:(?:no|o|um|em)\s+)*)?(?:modo\s+)?foco')
 _START = re.compile(rf'{_START_HEAD}(?:\s+(?:(?:de|por|em)\s+)?{_DUR})?$')
-_DUR_FIRST = re.compile(rf'^{_DUR}\s+de\s+foco$')   # 24/11: "30 minutos de foco" foi para a IA
+_DUR_FIRST = re.compile(   # 24/11: "30 minutos de foco" foi para a IA; também "quero / coloca 10 minutos de foco"
+    r'^(?:(?:quero|me\s+da|me\s+de|faz|faca|fazer|coloca|bota|poe|liga|ativa|inicia|comeca|vou\s+fazer|vamos|bora)\s+)?'
+    rf'{_DUR}\s+de\s+foco$')
 _START_DANGLING = re.compile(rf'{_START_HEAD}\s+(?:de|por|em)$')   # preposição sem duração: frase cortada
 _WANT = re.compile(rf'^(?:vou|quero|preciso|vamos)\s+(?:focar|entrar\s+em\s+foco)(?:\s+(?:por|durante|de|em))?(?:\s+{_DUR})?$')
 _EXTEND = re.compile(

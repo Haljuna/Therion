@@ -81,8 +81,8 @@ def test_start_spoken_duration(box, host):
 
 
 def test_start_limits(box, host):
-    for phrase in ('foco 200 minutos', 'foco 3 minutos'):
-        assert answer(phrase, host, NOW) == ('Dá para focar de 5 a 180 minutos.', None)
+    for phrase in ('foco 200 minutos', 'foco 0 minutos'):
+        assert answer(phrase, host, NOW) == ('Dá para focar de 1 a 180 minutos.', None)
     assert box.state().phase == 'off'
 
 

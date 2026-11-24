@@ -97,3 +97,20 @@ def test_foco_abre_fecha_e_duracao_antes(command, expected):
 def test_ia_nao_finge_ligar_o_foco():
     from therion.agent.claims import unsupported_claim
     assert unsupported_claim('Foco de 30 minutos, até as 17h00. Seguro meus avisos até lá.', [])
+
+
+@pytest.mark.parametrize('command,minutes', [
+    ('3 minutos de foco', 3), ('um minuto de foco', 1), ('quero 20 minutos de foco', 20), ('me dá 10 minutos de foco', 10),
+    ('coloca 10 minutos de foco', 10), ('faz 25 minutos de foco', 25), ('liga 5 minutos de foco', 5)])
+def test_qualquer_tempo_de_foco(command, minutes):
+    # 24/11: ele quer o tempo que pedir, inclusive menos de 5 minutos.
+    assert focus_request(command) == ('start', minutes)
+
+
+def test_foco_de_3_minutos_liga(tmp_path, monkeypatch):
+    from datetime import datetime
+    from types import SimpleNamespace
+    import therion.core.focus as focus
+    monkeypatch.setattr(focus, '_shared', focus.FocusStore(tmp_path / 'foco.json'))
+    text, payload = focus.answer('3 minutos de foco', SimpleNamespace(desktop_timers=True), datetime(2026, 11, 24, 17, 0))
+    assert payload['minutes'] == 3 and text.startswith('Foco de 3 minutos'), text
