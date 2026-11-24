@@ -24,8 +24,12 @@ _PC = re.compile(
 _PROJECT = re.compile(
     r'(?:como (?:esta|ta|anda|vai)|(?:qual (?:e )?)?(?:o )?(?:status|estado|situacao) d[oe]) (?:o |a )?(projeto )?(.+?)' + _POLITE)
 _GAME = r'(?:o |a )?mod[oa]s? (?:de )?(?:jogo|game)'  # o Whisper ouve "moda de jogo"
-_GAME_ON = re.compile(r'(?:(?:ativa|ative|ativar|liga|ligue|ligar|entra n|entre n|entrar n|coloca n|bota n|inicia|inicie|vai para|vai pra|vai pro|vamos para|vamos pra|vamos pro)(?:o | o | )?)?' + _GAME + '|vou jogar(?: agora)?' + _POLITE)
-_GAME_OFF = re.compile(r'(?:desativa|desative|desativar|desliga|desligue|desligar|sai d|saia d|sair d|encerra|encerre|tira d)(?:o | o | )?' + _GAME
+# 24/11: "abre o modo de jogo" foi para o catálogo de apps. Qualquer verbo antes liga ("abre", "pode ligar", "deixa no"),
+# menos pergunta, negação ou frase dupla com "e" (essa é da cleanup_then_game ou da IA).
+_GAME_ON = re.compile(r'(?:(?!(?:o que|como|qual|quando|onde|por ?que|porque|pra que|para que|sobre)\b)(?:(?!(?:e|nao|nunca|sem) )[a-z]+ ){0,6}'
+                      + _GAME + r'(?: (?:pra|para) mim| agora| ai| ja)*|vou jogar(?: agora)?)' + _POLITE)
+_GAME_OFF = re.compile(r'(?:desativa|desative|desativar|desliga|desligue|desligar|sai d|saia d|sair d|encerra|encerre|tira d'
+                       r'|fecha|feche|fechar|para|pare|parar|termina|termine|terminar|acaba|acabe|cancela|cancele)(?:o | o | )?' + _GAME
                        + r'|parei de jogar|terminei de jogar|modo normal' + _POLITE)
 _VAULT = re.compile(r'(?:como (?:esta|ta|anda|vai)|(?:qual (?:e )?)?(?:o )?(?:status|estado|situacao) d[oe]) (?:o |meu )?segundo cerebro' + _POLITE)
 _WAKE_OFF = re.compile(r'(?:para|pare|parar) de me (?:ouvir|escutar)' + _POLITE)
@@ -47,7 +51,7 @@ def configured_projects(config=None):
 def game_mode_request(command):
     """True liga, False desliga, None não é sobre o modo jogo."""
     # "Aham, desliga o modo de jogo": a interjeição da fala não muda o pedido.
-    text = re.sub(r'^(?:aham|ah|ok|ta|beleza|mano|entao|agora|isso)[, ]+', '', control(command).rstrip('?!. '))
+    text = re.sub(r'^(?:aham|ah|ok|ta|beleza|mano|entao|agora|isso|e)[, ]+', '', control(command).rstrip('?!. '))
     if _GAME_OFF.fullmatch(text):
         return False
     return True if _GAME_ON.fullmatch(text) else None

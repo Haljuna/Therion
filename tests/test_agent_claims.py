@@ -94,7 +94,7 @@ def test_legacy_chat_cannot_state_the_time(case):
     host,provider,_,_=case
     provider.generate.return_value=AIResponse(type='chat',message='Sim, senhor. As horas são 15:21:05.')
     result=host.process_command('Me conta uma novidade')
-    assert '15:21' not in result.message and 'que horas' in result.message
+    assert '15:21' not in result.message and 'horas' in result.message
 
 
 def test_legacy_chat_ordinary_reply_is_kept(case):

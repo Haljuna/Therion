@@ -12,13 +12,15 @@ PASSIVE=re.compile(r'\b(?:foi|foram)\s+(?:registrad|aplicad|encerrad|conclu[ií]
 ACTIVE=re.compile(r'\b(?:estou|estamos|vou)\s+(?:registrando|anotando|salvando|liberando|ativando|enviando|agendando|criando|abrindo|apagando)\b'
     r'|\b(?:registrei|anotei|salvei|liberei|ativei|enviei|agendei|criei|abri|apaguei)\b'
     r'|\bespa[çc]o liberado\b|\bmodo de jogo ativo\b|\b(?:conclu[ií]d[oa]|feito|liberado|ativado)\s+com sucesso\b',re.I)
+# 24/11: "Hoje é 05 de abril de 2025" (a data também é do app).
+DATE=re.compile(r'\bhoje (?:é|e)\s+(?:(?:segunda|ter[çc]a|quarta|quinta|sexta)(?:-feira)?|s[áa]bado|domingo)?,?\s*(?:dia\s+)?\d{1,2}(?:\s+de\s+[a-zç]+|/\d)',re.I)
 # 23/11: também "São 15h21" / "Agora são 15h" no começo da frase ou depois de "agora" (não "15 horas de vídeo").
 CLOCK=re.compile(r'\b(?:s[ãa]o\s+\d{1,2}:\d{2}|as horas s[ãa]o)|(?:^|[.!?]\s*|\bagora\s+)s[ãa]o\s+\d{1,2}h\d{0,2}\b',re.I)
 
 
 def invented_clock(message):
     """A hora quem responde é o próprio app; o modelo só a inventaria (23/11: "15:21:05" falso)."""
-    return CLOCK.search(message) is not None
+    return CLOCK.search(message) is not None or DATE.search(message) is not None
 
 
 def unsupported_claim(message,results):

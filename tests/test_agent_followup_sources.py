@@ -145,4 +145,4 @@ def test_an_invented_clock_time_gets_the_short_line():
     runtime = AgentRuntime(ScriptedProvider(AgentDecision('final', 'As horas são 15:21, senhor.')), ToolRegistry())
     result = asyncio.run(runtime.run('Me conta uma novidade.', session_id='s'))
     assert result.status == 'partial' and '15:21' not in result.message
-    assert result.message == "Não entendi bem. Se quiser saber as horas, pergunte 'que horas são?'."
+    assert result.message == "Não entendi bem. Se quiser saber as horas ou o dia, é só perguntar."

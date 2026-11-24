@@ -250,6 +250,10 @@ def _text(command):
 def focus_request(command):
     """Sem estado e sem efeito: ('start', min|None), ('ask_duration',), ('extend', min), ('stop',), ('left',), ('pause', min|None), ('stop_pause',) ou None."""
     text = _text(command)
+    # 24/11: "foco em estudos" foi para a IA. O assunto não muda o foco; duração ("foco em 30 minutos") continua valendo.
+    topic = re.fullmatch(r'(.*\bfoco)\s+(?:em|nos?|nas?|para|pra|com)\s+(.+)', text)
+    if topic and not re.search(rf'\d|\b(?:minutos?|min|horas?|h|meia)\b', topic[2]):
+        text = topic[1]
     if _STOP_PAUSE.match(text):
         return ('stop_pause',)
     if _STOP.match(text):

@@ -28,9 +28,12 @@ def email_capability_request(command):
     ) is not None
 
 
+_LEAD = r'(?:(?:e|e ai|ok|ta|entao|agora)[, ]+)?'   # 24/11: "E que dia é hoje?" caiu na IA, que inventou a data
+
+
 def current_date_request(command):
-    return re.fullmatch(r'(?:que dia (?:e|que e) hoje|qual (?:e )?(?:o )?dia(?: de hoje)?|'
-        r'qual (?:e )?a data(?: de hoje)?|que data e hoje)',control(command)) is not None
+    return re.fullmatch(_LEAD + r'(?:que dia (?:e|que e) hoje|hoje e que dia|(?:em )?que dia (?:a gente esta|estamos|nos estamos)|'
+        r'qual (?:e )?(?:o )?dia(?: de hoje)?|qual (?:e )?a data(?: de hoje)?|que data e hoje)',control(command)) is not None
 
 
 def app_status_request(command):
@@ -61,7 +64,7 @@ def repeat_request(command):
 
 
 def current_time_request(command):
-    return re.fullmatch(
+    return re.fullmatch(_LEAD +
         r'(?:(?:me (?:diga|fale)|(?:voce )?pode me dizer) )?'
         r'(?:que horas?(?: sao| e)?|quantas horas(?: sao)?|qual (?:e )?(?:o )?horario|qual (?:e )?a hora)'
         r'(?: (?:agora|atual|nesse (?:exato )?momento|neste (?:exato )?momento|no momento))?'

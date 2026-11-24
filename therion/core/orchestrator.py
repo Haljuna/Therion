@@ -2952,7 +2952,7 @@ class Orchestrator(WorkflowSupport, MemorySupport, PersonalContextSupport, Catal
                 from therion.agent.claims import invented_clock, unsupported_claim
                 if invented_clock(ai_response.message):
                     self._complete_task()
-                    result=OrchestrationResult(status='clarification',message="Não entendi bem. Se quiser saber as horas, pergunte 'que horas são?'.")
+                    result=OrchestrationResult(status='clarification',message="Não entendi bem. Se quiser saber as horas ou o dia, é só perguntar.")
                     self._finalize_session_result(result)
                     return result
                 if unsupported_claim(ai_response.message,[]):
