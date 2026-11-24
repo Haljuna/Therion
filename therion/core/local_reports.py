@@ -23,14 +23,18 @@ _PC = re.compile(
     r'|como (?:esta|ta) (?:a memoria|a saude) do (?:pc|computador)|(?:saude|estado) do (?:pc|computador)' + _POLITE)
 _PROJECT = re.compile(
     r'(?:como (?:esta|ta|anda|vai)|(?:qual (?:e )?)?(?:o )?(?:status|estado|situacao) d[oe]) (?:o |a )?(projeto )?(.+?)' + _POLITE)
-_GAME = r'(?:o |a )?mod[oa]s? (?:de )?(?:jogo|game)'  # o Whisper ouve "moda de jogo"
+_GAME = r'(?:o |a )?mod[oa]s? (?:de )?(?:jogo|julgo|game)'  # o Whisper ouve "moda de jogo", "modo de julgo"
 # 24/11: "abre o modo de jogo" foi para o catálogo de apps. Qualquer verbo antes liga ("abre", "pode ligar", "deixa no"),
-# menos pergunta, negação ou frase dupla com "e" (essa é da cleanup_then_game ou da IA).
-_GAME_ON = re.compile(r'(?:(?!(?:o que|como|qual|quando|onde|por ?que|porque|pra que|para que|sobre)\b)(?:(?!(?:e|nao|nunca|sem) )[a-z]+ ){0,6}'
+# menos pergunta, negação, frase dupla com "e" (essa é da cleanup_then_game ou da IA) e verbo de desligar
+# que a _GAME_OFF não conheça ("encerro" nunca pode ligar).
+_OFF_STEM = r'(?:desl|desat|encerr|fech|paro |pare |termin|acab|cancel|apag|sai |saia |saio |sair |tir|chega)'   # "vai para" liga
+_GAME_ON = re.compile(r'(?:(?!(?:o que|como|qual|quando|onde|por ?que|porque|pra que|para que|sobre)\b)'
+                      r'(?:(?!(?:e|nao|nunca|sem) |' + _OFF_STEM + r')[a-z]+ ){0,6}'
                       + _GAME + r'(?: (?:pra|para) mim| agora| ai| ja)*|vou jogar(?: agora)?)' + _POLITE)
 _GAME_OFF = re.compile(r'(?:(?:(?:pode|quero|vamos|vou|voce pode|da pra|consegue) )?'
-                       r'(?:desativa|desative|desativar|desliga|desligue|desligar|sai d|saia d|sair d|encerra|encerre|encerrar|tira d|tirar d'
-                       r'|fecha|feche|fechar|para|pare|parar|termina|termine|terminar|acaba|acabe|acabar|cancela|cancele|cancelar|apaga|apague|apagar)'
+                       r'(?:desativa|desative|desativar|desativo|desliga|desligue|desligar|desligo|sai d|saia d|sair d|saio d|encerra|encerre|encerrar|encerro|tira d|tirar d|tiro d'
+                       r'|fecha|feche|fechar|fecho|para|pare|parar|paro|termina|termine|terminar|termino|acaba|acabe|acabar|acabo'
+                       r'|cancela|cancele|cancelar|cancelo|apaga|apague|apagar|apago)'
                        r'(?:o | o | )?' + _GAME + r'(?: (?:pra|para) mim| agora| ai| ja)*'
                        r'|parei de jogar|terminei de jogar|modo normal)' + _POLITE)
 _VAULT = re.compile(r'(?:como (?:esta|ta|anda|vai)|(?:qual (?:e )?)?(?:o )?(?:status|estado|situacao) d[oe]) (?:o |meu )?segundo cerebro' + _POLITE)

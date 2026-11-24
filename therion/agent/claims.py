@@ -11,7 +11,7 @@ PASSIVE=re.compile(r'\b(?:foi|foram)\s+(?:registrad|aplicad|encerrad|conclu[ií]
 # 23/11: "Estou registrando sua solicitação..." e "Espaço liberado. Modo de jogo ativo." sem ferramenta nenhuma.
 ACTIVE=re.compile(r'\b(?:estou|estamos|vou)\s+(?:registrando|anotando|salvando|liberando|ativando|enviando|agendando|criando|abrindo|apagando)\b'
     r'|\b(?:registrei|anotei|salvei|liberei|ativei|enviei|agendei|criei|abri|apaguei)\b'
-    r'|\bespa[çc]o liberado\b|\bmodo de jogo ativo\b|\bseguro (?:meus|os) avisos\b|\b(?:conclu[ií]d[oa]|feito|liberado|ativado)\s+com sucesso\b',re.I)
+    r'|\bespa[çc]o liberado\b|\bmodo de jogo ativo\b|\bmodo (?:de )?jogo (?:ligado|desligado|ativado|desativado)\b|\bseguro (?:meus|os) avisos\b|\b(?:conclu[ií]d[oa]|feito|liberado|ativado)\s+com sucesso\b',re.I)
 # 24/11: "Hoje é 05 de abril de 2025" (a data também é do app).
 DATE=re.compile(r'\bhoje (?:é|e)\s+(?:(?:segunda|ter[çc]a|quarta|quinta|sexta)(?:-feira)?|s[áa]bado|domingo)?,?\s*(?:dia\s+)?\d{1,2}(?:\s+de\s+[a-zç]+|/\d)',re.I)
 # 23/11: também "São 15h21" / "Agora são 15h" no começo da frase ou depois de "agora" (não "15 horas de vídeo").

@@ -114,3 +114,20 @@ def test_foco_de_3_minutos_liga(tmp_path, monkeypatch):
     monkeypatch.setattr(focus, '_shared', focus.FocusStore(tmp_path / 'foco.json'))
     text, payload = focus.answer('3 minutos de foco', SimpleNamespace(desktop_timers=True), datetime(2026, 11, 24, 17, 0))
     assert payload['minutes'] == 3 and text.startswith('Foco de 3 minutos'), text
+
+
+@pytest.mark.parametrize('command', ['Encerro o modo de julgo', 'desligo o modo de jogo', 'saio do modo de jogo'])
+def test_encerrar_ouvido_torto_desliga(command):
+    # 17:21: Whisper ouviu "Encerro o modo de julgo"; foi para a IA, que disse "Modo de jogo desligado" sem desligar.
+    assert game_mode_request(command) is False
+
+
+def test_ia_nao_finge_mudar_o_modo_de_jogo():
+    from therion.agent.claims import unsupported_claim
+    assert unsupported_claim('Modo de jogo desligado. A placa de vídeo foi desligada.', [])
+    assert unsupported_claim('Modo jogo ligado.', [])
+
+
+@pytest.mark.parametrize('command', ['encerro o modo de jogo', 'desligo o modo de julgo', 'cancelo o modo de jogo', 'apago o modo de jogo'])
+def test_verbo_de_desligar_nunca_liga(command):
+    assert game_mode_request(command) is not True
