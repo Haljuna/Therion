@@ -770,3 +770,16 @@ def test_a_microphone_problem_after_turning_listening_off_is_not_shown(app, tmp_
     listener.kwargs['on_problem']('microfone')   # já estava na fila
     assert 'tento de novo sozinho' not in window._history.toPlainText() and window._wake_state() == 'off'
     close(app, window)
+
+
+def test_game_mode_ends_the_conversation_after_the_answer_but_keeps_the_name(app, tmp_path, monkeypatch):
+    # 24/11: ao entrar no modo jogo o microfone da conversa fecha; o nome e o clique continuam chamando.
+    window, pipeline = make_window(tmp_path, monkeypatch)
+    window._on_wake(np.ones(800, np.float32), .8)
+    window._on_voice_transcribed(pipeline.generation, 'Abre o modo de jogo.')
+    window._apply_command_result(OrchestrationResult(status='success', message='Modo jogo ligado.', ui_action='game_mode', ui_payload={'on': True}))
+    window._set_processing(False)
+    assert window._conversation_mode   # a resposta ainda vai ser falada
+    window._conversation_playback_finished()
+    assert not window._conversation_mode and window._wake_state() == 'on'
+    close(app, window)

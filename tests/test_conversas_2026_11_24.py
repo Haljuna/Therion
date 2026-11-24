@@ -70,3 +70,30 @@ def test_foco_em_um_assunto_liga_o_foco(command):
 def test_foco_com_duracao_continua_igual():
     assert focus_request('foco em 30 minutos') == ('start', 30)
     assert focus_request('foco em') == ('ask_duration',)
+
+
+@pytest.mark.parametrize('command', ['Fecha o modo de jogo', 'fechar modo de jogo', 'pode desligar o modo de jogo', 'apaga o modo de jogo'])
+def test_fechar_o_modo_de_jogo_desliga(command):
+    # 16:36: "Fecha o modo de jogo" virou "fechar aplicativo".
+    from therion.context.conversation_frame import app_close_request
+    assert game_mode_request(command) is False and app_close_request(command) is None
+
+
+def test_fecha_o_modo_de_jogo_desliga_de_verdade(case):
+    host, provider, _, _ = case
+    enable(host)
+    result = host.process_command('Fecha o modo de jogo')
+    assert result.ui_action == 'game_mode' and result.ui_payload == {'on': False}, result.message
+
+
+@pytest.mark.parametrize('command,expected', [
+    ('30 minutos de foco', ('start', 30)), ('meia hora de foco', ('start', 30)), ('abre o modo foco', ('start', None)),
+    ('fecha o foco', ('stop',)), ('fecha o modo foco', ('stop',))])
+def test_foco_abre_fecha_e_duracao_antes(command, expected):
+    # 16:40: "30 minutos de foco" foi para a IA, que fingiu ligar o foco.
+    assert focus_request(command) == expected
+
+
+def test_ia_nao_finge_ligar_o_foco():
+    from therion.agent.claims import unsupported_claim
+    assert unsupported_claim('Foco de 30 minutos, até as 17h00. Seguro meus avisos até lá.', [])

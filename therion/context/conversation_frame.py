@@ -53,6 +53,7 @@ def app_close_request(command):
     match=re.fullmatch(r'(?:(?:therion|terion|terio|theo)[, ]+)?(?:(?:agora|entao)[, ]+)?'
                        r'(?:fecha|feche|fechar|fecho)[, ]+(?:o |a |no |na )?(.+?)(?: (?:pra|para) mim| por favor)?',application_control(command))
     if not match or re.search(r'\b(?:nao|nunca|nem|talvez|se|e|ou)\b',match[1]):return None
+    if re.match(r'(?:mod[oa]s?|foco)\b',match[1]):return None   # 24/11: "fecha o modo de jogo" desliga o modo, não é app
     return match[1]
 
 

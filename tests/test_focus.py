@@ -62,7 +62,7 @@ def test_focus_request(phrase, expected):
     assert focus_request(phrase) == expected
 
 
-@pytest.mark.parametrize('phrase', ['pausa', 'o foco da câmera está errado', 'me lembra de focar', 'mais café', 'quanto custa', 'abre o foco'])
+@pytest.mark.parametrize('phrase', ['pausa', 'o foco da câmera está errado', 'me lembra de focar', 'mais café', 'quanto custa'])
 def test_not_focus_phrases(phrase):
     assert focus_request(phrase) is None
 

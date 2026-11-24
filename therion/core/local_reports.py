@@ -28,9 +28,11 @@ _GAME = r'(?:o |a )?mod[oa]s? (?:de )?(?:jogo|game)'  # o Whisper ouve "moda de 
 # menos pergunta, negação ou frase dupla com "e" (essa é da cleanup_then_game ou da IA).
 _GAME_ON = re.compile(r'(?:(?!(?:o que|como|qual|quando|onde|por ?que|porque|pra que|para que|sobre)\b)(?:(?!(?:e|nao|nunca|sem) )[a-z]+ ){0,6}'
                       + _GAME + r'(?: (?:pra|para) mim| agora| ai| ja)*|vou jogar(?: agora)?)' + _POLITE)
-_GAME_OFF = re.compile(r'(?:desativa|desative|desativar|desliga|desligue|desligar|sai d|saia d|sair d|encerra|encerre|tira d'
-                       r'|fecha|feche|fechar|para|pare|parar|termina|termine|terminar|acaba|acabe|cancela|cancele)(?:o | o | )?' + _GAME
-                       + r'|parei de jogar|terminei de jogar|modo normal' + _POLITE)
+_GAME_OFF = re.compile(r'(?:(?:(?:pode|quero|vamos|vou|voce pode|da pra|consegue) )?'
+                       r'(?:desativa|desative|desativar|desliga|desligue|desligar|sai d|saia d|sair d|encerra|encerre|encerrar|tira d|tirar d'
+                       r'|fecha|feche|fechar|para|pare|parar|termina|termine|terminar|acaba|acabe|acabar|cancela|cancele|cancelar|apaga|apague|apagar)'
+                       r'(?:o | o | )?' + _GAME + r'(?: (?:pra|para) mim| agora| ai| ja)*'
+                       r'|parei de jogar|terminei de jogar|modo normal)' + _POLITE)
 _VAULT = re.compile(r'(?:como (?:esta|ta|anda|vai)|(?:qual (?:e )?)?(?:o )?(?:status|estado|situacao) d[oe]) (?:o |meu )?segundo cerebro' + _POLITE)
 _WAKE_OFF = re.compile(r'(?:para|pare|parar) de me (?:ouvir|escutar)' + _POLITE)
 _GB = 1024 ** 3

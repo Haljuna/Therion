@@ -25,16 +25,17 @@ NOT_SAVED = 'Não consegui salvar o foco agora.'
 
 _DUR = (rf'(?:(?P<half>meia\s+hora)|(?P<n>{_COUNT})\s*(?P<unit>horas?|h|minutos?|min)'
         rf'(?:\s+e\s+(?:(?P<more_half>meia)|(?P<more>{_COUNT})(?:\s*(?:minutos?|min))?))?)')
-_START_HEAD = (r'^(?:(?:ativa|ative|ativar|liga|ligue|ligar|inicia|inicie|iniciar|comeca|comece|comecar|entra|entre|entrar|coloca|bota)\s+'
+_START_HEAD = (r'^(?:(?:ativa|ative|ativar|liga|ligue|ligar|inicia|inicie|iniciar|comeca|comece|comecar|entra|entre|entrar|coloca|bota|abre|abra|abrir)\s+'
                r'(?:(?:no|o|um|em)\s+)*)?(?:modo\s+)?foco')
 _START = re.compile(rf'{_START_HEAD}(?:\s+(?:(?:de|por|em)\s+)?{_DUR})?$')
+_DUR_FIRST = re.compile(rf'^{_DUR}\s+de\s+foco$')   # 24/11: "30 minutos de foco" foi para a IA
 _START_DANGLING = re.compile(rf'{_START_HEAD}\s+(?:de|por|em)$')   # preposição sem duração: frase cortada
 _WANT = re.compile(rf'^(?:vou|quero|preciso|vamos)\s+(?:focar|entrar\s+em\s+foco)(?:\s+(?:por|durante|de|em))?(?:\s+{_DUR})?$')
 _EXTEND = re.compile(
     r'^(?:(?:estica|estique|esticar|prolonga|prolongue|prolongar|aumenta|aumente|aumentar)\s+(?:o\s+)?(?:foco\s+)?(?:em\s+|por\s+|mais\s+)?|mais\s+)'
     rf'{_DUR}(?:\s+de\s+foco)?$')
 _STOP = re.compile(
-    r'^(?:(?:sai|saia|sair)\s+do|(?:para|pare|parar|cancela|cancele|cancelar|encerra|encerre|encerrar|acaba|acabe|termina|termine|desativa|desative|desliga|desligue)\s+(?:com\s+)?(?:o\s+)?'
+    r'^(?:(?:sai|saia|sair)\s+do|(?:para|pare|parar|cancela|cancele|cancelar|encerra|encerre|encerrar|acaba|acabe|termina|termine|desativa|desative|desativar|desliga|desligue|desligar|fecha|feche|fechar)\s+(?:com\s+)?(?:o\s+)?'
     r'|chega\s+de|fim\s+do)\s*(?:modo\s+)?foco$')
 _LEFT = re.compile(r'^quanto\s+(?:tempo\s+)?(?:falta|resta)(?:\s+(?:do|da|pro|pra|para)\s+(?:o\s+|a\s+)?(?:fim\s+d[oa]\s+)?(?:foco|pausa))?$')
 _PAUSE = re.compile(
@@ -268,7 +269,7 @@ def focus_request(command):
         return ('pause', None)
     if _START_DANGLING.match(text):
         return ('ask_duration',)
-    if found := _START.match(text) or _WANT.match(text):
+    if found := _START.match(text) or _WANT.match(text) or _DUR_FIRST.match(text):
         return ('start', _minutes(found) if found['n'] or found['half'] else None)
     return None
 

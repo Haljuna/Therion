@@ -1649,13 +1649,16 @@ class MainWindow(QMainWindow):
             if payload.get('session')!=self._orchestrator.session_id or payload.get('account')!=self._orchestrator._mailbox.identity() or payload.get('calendar_account')!=account_key(self._orchestrator):
                 result=OrchestrationResult(status='cancelled',message='A conta ou a sessão mudou. Solicite um novo panorama.')
         if result.ui_action=='game_mode':
-            self._set_game_mode((result.ui_payload or {}).get('on') is True)
+            on = (result.ui_payload or {}).get('on') is True
+            self._set_game_mode(on)
+            if on and self._conversation_mode:
+                self._wake_end_after_reply = 'modo jogo'   # 24/11: no jogo o microfone fecha; o nome e o clique ainda chamam
         if result.ui_action=='wake_off':
             if getattr(self, '_wake', None) is None:
                 result=replace(result, message='A escuta pelo nome não está ligada agora.', speech_message=None)
             else:
                 self._stop_wake()   # fecha o microfone do detector até o clique no ponto "Nome" ou reiniciar
-                self._wake_end_after_reply = self._conversation_mode
+                self._wake_end_after_reply = self._conversation_mode and 'para de me ouvir'
         if result.ui_action=='reminders':   # o depósito mudou: rearma o disparo na hora
             self._arm_reminder_timer()
         if result.ui_action=='open_mail':
@@ -2833,7 +2836,7 @@ class MainWindow(QMainWindow):
             return
         if wake_turn is None and getattr(self, '_wake_end_after_reply', False) and self._speech_output.state == 'idle':
             # 23/11 ao vivo: "para de me ouvir" e a resposta parou sem "completed" (botão parar): não abre outra escuta.
-            self._end_conversation('para de me ouvir')
+            self._end_conversation(self._wake_end_after_reply)
             return
         pipeline.set_fast_mode(False)
         if wake_turn is None:   # turno novo sem o nome: um disparo ainda sem desfecho não vale mais para ele
@@ -2946,7 +2949,7 @@ class MainWindow(QMainWindow):
                     return
             elif self._processing:return
         if self._conversation_mode and self._wake_end_after_reply:
-            self._end_conversation('para de me ouvir')
+            self._end_conversation(self._wake_end_after_reply)
             return
         if self._conversation_mode:
             self._conversation_heard_at = self._last_conversation_spoken_at = time.monotonic()   # a janela de 8 s da resposta começa aqui
